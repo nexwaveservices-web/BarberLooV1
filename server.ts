@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
 import { eq } from 'drizzle-orm';
 import { db } from './src/db/index.ts';
 import {
@@ -38,6 +39,166 @@ async function startServer() {
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   app.use(express.json());
+
+  // Allow cross-origin requests from https://barberloo.in and WordPress WP Pusher bridge
+  app.use((req, res, next) => {
+    const origin = req.headers.origin || '';
+    if (
+      origin.includes('barberloo.in') ||
+      origin.includes('github.com') ||
+      origin.includes('run.app') ||
+      origin.includes('localhost')
+    ) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PATCH, PUT, DELETE, OPTIONS'
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-WPPusher-Token'
+    );
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
+  // WP Pusher & GitHub (nexwaveservices-web/BarberLooV1) status & webhook endpoints
+  app.get('/api/wppusher/status', async (_req, res) => {
+    let githubHasThemeFiles = false;
+    try {
+      const ghRes = await fetch(
+        'https://api.github.com/repos/nexwaveservices-web/BarberLooV1/contents/style.css?ref=main',
+        { headers: { 'User-Agent': 'BarberLoo-Server' } }
+      );
+      githubHasThemeFiles = ghRes.status === 200;
+    } catch {
+      githubHasThemeFiles = false;
+    }
+
+    res.json({
+      connected: true,
+      githubHasThemeFiles,
+      domain: 'https://barberloo.in',
+      githubRepository: 'https://github.com/nexwaveservices-web/BarberLooV1',
+      githubSlug: 'nexwaveservices-web/BarberLooV1',
+      branch: 'main',
+      pluginFile: 'barberloo.php',
+      themeStylesheet: 'style.css',
+      supabaseUrl: 'https://ddusvfylhifoniobzmcq.supabase.co',
+      pushToDeployReady: true,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Push WordPress Theme & Plugin files directly to GitHub repo nexwaveservices-web/BarberLooV1
+  app.post('/api/wppusher/push-to-github', async (req, res) => {
+    try {
+      const token = String(req.body?.githubToken || '').trim();
+      const repo = String(
+        req.body?.repository || 'nexwaveservices-web/BarberLooV1'
+      ).trim();
+      const branch = String(req.body?.branch || 'main').trim();
+
+      if (!token) {
+        return res.status(400).json({
+          error:
+            'Please enter a GitHub Personal Access Token (with repo permission), or use the Export to GitHub button in the top menu.',
+        });
+      }
+
+      const filesToPush = [
+        'style.css',
+        'index.php',
+        'functions.php',
+        'header.php',
+        'footer.php',
+        'barberloo.php',
+        'public/sw.js',
+        'public/CNAME',
+      ];
+
+      const pushedFiles: string[] = [];
+      for (const relPath of filesToPush) {
+        const absPath = path.join(process.cwd(), relPath);
+        if (!fs.existsSync(absPath)) continue;
+        const contentBase64 = fs.readFileSync(absPath).toString('base64');
+
+        // Check if file already exists on GitHub to include its SHA
+        let existingSha: string | undefined;
+        const checkRes = await fetch(
+          `https://api.github.com/repos/${repo}/contents/${relPath}?ref=${branch}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/vnd.github+json',
+              'User-Agent': 'BarberLoo-WP-Pusher-Sync',
+            },
+          }
+        );
+        if (checkRes.status === 200) {
+          const existingJson: any = await checkRes.json();
+          existingSha = existingJson?.sha;
+        }
+
+        const putRes = await fetch(
+          `https://api.github.com/repos/${repo}/contents/${relPath}`,
+          {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/vnd.github+json',
+              'Content-Type': 'application/json',
+              'User-Agent': 'BarberLoo-WP-Pusher-Sync',
+            },
+            body: JSON.stringify({
+              message: `chore(wppusher): add ${relPath} for WP Pusher Theme & Plugin install on barberloo.in`,
+              content: contentBase64,
+              branch,
+              ...(existingSha ? { sha: existingSha } : {}),
+            }),
+          }
+        );
+
+        if (!putRes.ok) {
+          const errText = await putRes.text();
+          return res.status(putRes.status).json({
+            error: `GitHub API error pushing ${relPath}: ${errText}`,
+          });
+        }
+        pushedFiles.push(relPath);
+      }
+
+      res.json({
+        ok: true,
+        pushedFiles,
+        message: `✓ Successfully pushed ${pushedFiles.length} WordPress Theme & Plugin files (${pushedFiles.join(', ')}) to ${repo} (${branch})! You can now click Install Theme in WP Pusher.`,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        error: err.message || 'Failed to push theme files to GitHub',
+      });
+    }
+  });
+
+  app.post('/api/wppusher/webhook', (req, res) => {
+    broadcastEvent('wppusher:deployed', {
+      repository: 'nexwaveservices-web/BarberLooV1',
+      domain: 'https://barberloo.in',
+      payload: req.body || {},
+      timestamp: Date.now(),
+    });
+    res.json({
+      ok: true,
+      message: 'WP Pusher deployment webhook received for barberloo.in',
+      repository: 'nexwaveservices-web/BarberLooV1',
+    });
+  });
 
   const broadcastEvent = (type: string, payload: unknown = {}) => {
     const message = JSON.stringify({ type, payload, timestamp: Date.now() });

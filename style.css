@@ -1,0 +1,23 @@
+/*
+Theme Name: BarberLoo
+Theme URI: https://barberloo.in
+Author: NexWave Services
+Author URI: https://barberloo.in
+Description: Official BarberLoo Luxury Barber Booking & Real-Time Live Queue WordPress Theme for barberloo.in connected to https://github.com/nexwaveservices-web/BarberLooV1 and Supabase.
+Version: 1.0.0
+Requires at least: 5.0
+Tested up to: 6.7
+Requires PHP: 7.4
+License: GPL v2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: barberloo
+GitHub Theme URI: nexwaveservices-web/BarberLooV1
+GitHub Branch: main
+*/
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: #111113;
+  color: #FFF9E8;
+}

@@ -1,0 +1,37 @@
+name: Build & Sync BarberLoo for WP Pusher (barberloo.in)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-for-wppusher:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout nexwaveservices-web/BarberLooV1
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Production Bundle for barberloo.in
+        run: npm run build
+
+      - name: Commit Built Assets for WP Pusher Push-to-Deploy
+        run: |
+          git config user.name "BarberLoo Deploy Bot"
+          git config user.email "nexwaveservices@gmail.com"
+          git add -f dist
+          git diff --staged --quiet || git commit -m "chore(release): build production bundle for WP Pusher on barberloo.in [skip ci]"
+          git push
