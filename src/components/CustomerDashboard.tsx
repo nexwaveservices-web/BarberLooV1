@@ -533,6 +533,29 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     </div>
                   </div>
 
+                  {/* Customer 4-Digit Service Completion OTP Box */}
+                  {nextAppointment.completionOtp && (
+                    <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#F1E194]">
+                          {tr(
+                            `🔐 SERVICE COMPLETION OTP • SENT TO ${nextAppointment.clientPhone || currentUserProfile?.phone || '+91'}`,
+                            `🔐 सेवा पूर्णता OTP • ${nextAppointment.clientPhone || currentUserProfile?.phone || '+91'} पर भेजा गया`
+                          )}
+                        </span>
+                        <p className="text-xs text-[#FFF9E8]/80 mt-0.5">
+                          {tr(
+                            'Share this 4-digit OTP with your barber only when your haircut/service is completed ✅',
+                            'जब आपका काम पूरा हो जाए ✅ केवल तभी यह 4-अंकीय OTP अपने बार्बर को बताएं'
+                          )}
+                        </p>
+                      </div>
+                      <div className="px-4 py-2 rounded-[12px] bg-[#241719] border border-[#F1E194] font-mono-num text-xl font-bold tracking-[0.25em] text-[#F1E194] text-center shrink-0">
+                        {nextAppointment.completionOtp}
+                      </div>
+                    </div>
+                  )}
+
                   {reschedulingId === nextAppointment.id && (
                     <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/30 flex flex-wrap items-end gap-3">
                       <div>
@@ -718,6 +741,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                 ({String(matchedPayment.status).toUpperCase()})
                               </p>
                             )}
+                            {!isCompleted &&
+                              String(apt.status).toLowerCase() !== 'cancelled' &&
+                              apt.completionOtp && (
+                                <p className="text-[11px] font-mono-num font-bold text-[#5B0E14] mt-1">
+                                  🔐 {tr('Completion OTP (Share with barber when work is ✅):', 'सेवा पूर्ण OTP (काम पूरा होने पर बार्बर को दें ✅):')}{' '}
+                                  <span className="px-2 py-0.5 rounded bg-[#241719] text-[#F1E194] tracking-widest">
+                                    {apt.completionOtp}
+                                  </span>
+                                </p>
+                              )}
                           </div>
                           <div className="flex flex-wrap items-center gap-2.5">
                             <span className="font-mono-num text-sm font-bold text-[#5B0E14]">

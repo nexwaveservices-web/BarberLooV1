@@ -137,6 +137,7 @@ export interface AppointmentItem {
   paymentMethod?: string;
   paymentStatus?: string;
   couponCode?: string;
+  completionOtp?: string;
 }
 
 export interface ReviewItem {

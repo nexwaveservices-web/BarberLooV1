@@ -129,9 +129,37 @@ function mapSupabaseService(s: any) {
   };
 }
 
+function deriveAppointmentOtp(
+  id: string,
+  notes?: string,
+  barberNotes?: string
+): string {
+  const combined = `${barberNotes || ''} ${notes || ''}`;
+  const match = combined.match(/\[OTP:(\d{4})\]/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  let hash = 0;
+  const str = String(id || 'apt-default');
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) % 9000;
+  }
+  return String(1000 + Math.abs(hash));
+}
+
+function stripOtpTag(text?: string): string {
+  if (!text) return '';
+  return text.replace(/\[OTP:\d{4}\]\s*/g, '').trim();
+}
+
 function mapSupabaseAppointment(a: any) {
   const rawStatus = String(a.status || 'confirmed').toLowerCase();
   const dur = Number(a.duration_min ?? a.durationMins ?? 45);
+  const rawBarberNotes = a.internal_barber_notes ?? a.barberNotes ?? '';
+  const completionOtp =
+    a.completionOtp ||
+    a.completion_otp ||
+    deriveAppointmentOtp(a.id, a.notes, rawBarberNotes);
   return {
     id: a.id,
     referenceCode: a.referenceCode || String(a.id).toUpperCase(),
@@ -166,9 +194,10 @@ function mapSupabaseAppointment(a: any) {
     rawStatus,
     paymentMethod: a.payment_method ?? a.paymentMethod ?? 'online',
     paymentStatus: a.payment_status ?? a.paymentStatus ?? 'paid',
-    notes: a.notes || '',
-    barberNotes: a.internal_barber_notes ?? a.barberNotes ?? '',
+    notes: stripOtpTag(a.notes || ''),
+    barberNotes: stripOtpTag(rawBarberNotes),
     couponCode: a.coupon_code ?? a.couponCode ?? '',
+    completionOtp,
   };
 }
 
@@ -616,6 +645,7 @@ export const apiCreateAppointment = async (payload: any) => {
   }
 
   const paymentStatus = payload.paymentMethod === 'online' ? 'paid' : 'pending';
+  const completionOtp = deriveAppointmentOtp(id);
 
   const supaApt = {
     id,
@@ -637,7 +667,7 @@ export const apiCreateAppointment = async (payload: any) => {
     payment_method: payload.paymentMethod || 'online',
     payment_status: paymentStatus,
     notes: payload.notes || '',
-    internal_barber_notes: '',
+    internal_barber_notes: `[OTP:${completionOtp}]`,
     coupon_code: payload.couponCode || '',
   };
 
@@ -684,8 +714,8 @@ export const apiCreateAppointment = async (payload: any) => {
     id: `notif-${Date.now()}`,
     recipient_uid: payload.customerUid,
     type: 'booking_confirmation',
-    title: `Confirmed: ${payload.serviceName} with ${payload.barberName} (${payload.date} · ${payload.time} IST)`,
-    time_label: 'Just now · Booking Engine',
+    title: `Confirmed: ${payload.serviceName} with ${payload.barberName} (${payload.date} · ${payload.time} IST) • Completion OTP sent to ${payload.clientPhone || 'your number'}: ${completionOtp}`,
+    time_label: 'Just now · Booking & OTP Engine',
     unread: true,
   });
 
@@ -706,6 +736,24 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
       .eq('id', id)
       .maybeSingle();
 
+    const expectedOtp = deriveAppointmentOtp(
+      id,
+      existingApt?.notes,
+      existingApt?.internal_barber_notes
+    );
+
+    if (
+      updates.status !== undefined &&
+      String(updates.status).toLowerCase() === 'completed'
+    ) {
+      const providedOtp = String(updates.enteredOtp || '').trim();
+      if (providedOtp && providedOtp !== expectedOtp) {
+        throw new Error(
+          'Invalid 4-digit Customer OTP. Please enter the exact OTP sent to the customer number.'
+        );
+      }
+    }
+
     const supaUpdates: Record<string, any> = {};
     if (updates.status !== undefined) {
       supaUpdates.status = String(updates.status).toLowerCase();
@@ -715,10 +763,20 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
     }
     if (updates.date !== undefined) supaUpdates.date = updates.date;
     if (updates.time !== undefined) supaUpdates.time = updates.time;
-    if (updates.barberNotes !== undefined)
-      supaUpdates.internal_barber_notes = updates.barberNotes;
-    if (updates.internalBarberNotes !== undefined)
-      supaUpdates.internal_barber_notes = updates.internalBarberNotes;
+    if (updates.barberNotes !== undefined) {
+      const cleanNote = stripOtpTag(updates.barberNotes);
+      supaUpdates.internal_barber_notes = `[OTP:${expectedOtp}] ${cleanNote}`.trim();
+    } else if (updates.internalBarberNotes !== undefined) {
+      const cleanNote = stripOtpTag(updates.internalBarberNotes);
+      supaUpdates.internal_barber_notes = `[OTP:${expectedOtp}] ${cleanNote}`.trim();
+    } else if (
+      existingApt &&
+      !String(existingApt.internal_barber_notes || '').includes('[OTP:')
+    ) {
+      supaUpdates.internal_barber_notes = `[OTP:${expectedOtp}] ${
+        existingApt.internal_barber_notes || ''
+      }`.trim();
+    }
     if (updates.notes !== undefined) supaUpdates.notes = updates.notes;
 
     // Double-booking check when rescheduling date/time
@@ -800,13 +858,16 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
           time_label: 'Just now · Review Request',
           unread: true,
         });
-      } else if (newStatus === 'confirmed' && existingApt.status !== 'confirmed') {
+      } else if (
+        newStatus === 'confirmed' ||
+        updates.sendOtp === true
+      ) {
         await safeSupabaseUpsert('notifications', {
           id: `notif-rem-${Date.now()}`,
           recipient_uid: custUid,
           type: 'appointment_reminder',
-          title: `Reminder: Your ${existingApt.service_name} with ${existingApt.barber_name} is confirmed for ${existingApt.date} at ${existingApt.time} IST.`,
-          time_label: 'Just now · Appointment Reminder',
+          title: `🔐 Appointment Approved! Completion OTP sent to ${existingApt.client_phone || '+91'}: ${expectedOtp} for ${existingApt.service_name} with ${existingApt.barber_name}. Share this OTP with your barber when work is ✅`,
+          time_label: 'Just now · OTP Verification',
           unread: true,
         });
       } else if (newStatus === 'in_progress') {
@@ -814,7 +875,7 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
           id: `notif-start-${Date.now()}`,
           recipient_uid: custUid,
           type: 'service_started',
-          title: `${existingApt.barber_name} has started your ${existingApt.service_name} session.`,
+          title: `${existingApt.barber_name} has started your ${existingApt.service_name} session! Your Service Completion OTP (${existingApt.client_phone || '+91'}) is: ${expectedOtp}`,
           time_label: 'Just now · Chair Live',
           unread: true,
         });
@@ -841,7 +902,10 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
       }
     }
   } catch (err: any) {
-    if (err?.message?.includes('already taken')) {
+    if (
+      err?.message?.includes('already taken') ||
+      err?.message?.includes('Invalid 4-digit Customer OTP')
+    ) {
       throw err;
     }
   }

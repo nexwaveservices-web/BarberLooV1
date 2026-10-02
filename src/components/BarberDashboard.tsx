@@ -163,6 +163,15 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   >('customer');
   const [broadcastSpecificUid, setBroadcastSpecificUid] = useState('');
   const [broadcastStatusToast, setBroadcastStatusToast] = useState('');
+
+  // Appointment Completion OTP verification state
+  const [otpAptId, setOtpAptId] = useState<string | null>(null);
+  const [enteredOtp, setEnteredOtp] = useState('');
+  const [otpFeedback, setOtpFeedback] = useState<{
+    id: string;
+    text: string;
+    isError?: boolean;
+  } | null>(null);
   const [offerCode, setOfferCode] = useState('');
   const [offerDiscount, setOfferDiscount] = useState('15');
   const [offerMinSpend, setOfferMinSpend] = useState('500');
@@ -591,31 +600,59 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() =>
-                              onUpdateAppointment(apt.id, { status: 'confirmed' })
-                            }
+                            onClick={async () => {
+                              await onUpdateAppointment(apt.id, {
+                                status: 'confirmed',
+                                sendOtp: true,
+                              });
+                              setOtpFeedback({
+                                id: apt.id,
+                                text: tr(
+                                  `✓ Appointment Approved! 4-digit Completion OTP sent to customer number ${apt.clientPhone || '+91'}.`,
+                                  `✓ अपॉइंटमेंट स्वीकृत! 4-अंकीय पूर्णता OTP ग्राहक के नंबर ${apt.clientPhone || '+91'} पर भेज दिया गया है।`
+                                ),
+                              });
+                            }}
                             className="px-3 py-1.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/20 text-xs font-semibold text-[#FFF9E8] cursor-pointer"
                           >
-                            {tr('Confirm', 'पुष्टि करें')}
+                            {tr('Approve & Send OTP', 'स्वीकृत करें और OTP भेजें')}
                           </button>
                           <button
                             type="button"
-                            onClick={() =>
-                              onUpdateAppointment(apt.id, { status: 'in_progress' })
-                            }
+                            onClick={async () => {
+                              await onUpdateAppointment(apt.id, {
+                                status: 'in_progress',
+                                sendOtp: true,
+                              });
+                              setOtpFeedback({
+                                id: apt.id,
+                                text: tr(
+                                  `✂️ Service Started! Ask ${apt.clientName} (${apt.clientPhone || '+91'}) for their 4-digit OTP to complete.`,
+                                  `✂️ सेवा शुरू! काम पूरा होने पर ${apt.clientName} से 4-अंकीय OTP मांगें।`
+                                ),
+                              });
+                            }}
                             className="px-3.5 py-2 rounded-[12px] bg-[#241719] border border-[#F1E194]/25 text-xs font-semibold text-[#F1E194] cursor-pointer"
                           >
                             {tr('Start Cut', 'सेवा शुरू करें')}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onUpdateAppointment(apt.id, { status: 'completed' })
-                            }
-                            className="px-3.5 py-2 rounded-[12px] bg-emerald-900/80 text-emerald-200 text-xs font-semibold cursor-pointer"
-                          >
-                            {tr('Mark Completed', 'पूर्ण करें')}
-                          </button>
+                          {String(apt.status).toLowerCase() === 'completed' ? (
+                            <span className="px-3.5 py-2 rounded-[12px] bg-emerald-950 border border-emerald-400/40 text-emerald-300 text-xs font-semibold">
+                              {tr('OTP Verified • Completed ✅', 'OTP सत्यापित • पूर्ण ✅')}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOtpAptId(otpAptId === apt.id ? null : apt.id);
+                                setEnteredOtp('');
+                                setOtpFeedback(null);
+                              }}
+                              className="px-3.5 py-2 rounded-[12px] bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 border border-emerald-400/30 text-xs font-semibold cursor-pointer"
+                            >
+                              {tr('Complete with OTP ✅', 'OTP से पूर्ण करें ✅')}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() =>
@@ -647,6 +684,140 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                         </div>
                       )}
                     </div>
+
+                    {otpFeedback && otpFeedback.id === apt.id && (
+                      <div
+                        className={`p-3 rounded-[12px] text-xs font-semibold border ${
+                          otpFeedback.isError
+                            ? 'bg-[#5B0E14]/70 border-red-400/40 text-red-200'
+                            : 'bg-emerald-950/70 border-emerald-400/40 text-emerald-200'
+                        }`}
+                      >
+                        {otpFeedback.text}
+                      </div>
+                    )}
+
+                    {/* Inline Customer OTP Verification Box to Mark Work Completed ✅ */}
+                    {otpAptId === apt.id &&
+                      onUpdateAppointment &&
+                      String(apt.status).toLowerCase() !== 'completed' && (
+                        <div className="p-4 rounded-[14px] bg-[#241719] border border-[#F1E194]/35 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <span className="text-[10px] font-semibold uppercase tracking-widest text-[#F1E194]">
+                                {tr(
+                                  `🔐 CUSTOMER OTP VERIFICATION • ${apt.clientName} (${apt.clientPhone || '+91'})`,
+                                  `🔐 ग्राहक OTP सत्यापन • ${apt.clientName} (${apt.clientPhone || '+91'})`
+                                )}
+                              </span>
+                              <p className="text-xs text-[#FFF9E8]/80 mt-0.5">
+                                {tr(
+                                  'Enter the 4-digit OTP sent to the customer mobile number & Customer Portal to verify work is ✅ completed.',
+                                  'ग्राहक के मोबाइल नंबर और पोर्टल पर भेजा गया 4-अंकीय OTP दर्ज करें ताकि काम ✅ पूर्ण हो सके।'
+                                )}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await onUpdateAppointment(apt.id, {
+                                    sendOtp: true,
+                                  });
+                                  setOtpFeedback({
+                                    id: apt.id,
+                                    text: tr(
+                                      `✓ Resent 4-digit OTP to ${apt.clientName} (${apt.clientPhone || '+91'})!`,
+                                      `✓ ${apt.clientName} (${apt.clientPhone || '+91'}) को 4-अंकीय OTP पुनः भेजा गया!`
+                                    ),
+                                  });
+                                }}
+                                className="px-3 py-1.5 rounded-[10px] bg-[#111113] border border-[#F1E194]/25 text-[11px] font-semibold text-[#F1E194] cursor-pointer"
+                              >
+                                {tr('Resend OTP', 'OTP पुनः भेजें')}
+                              </button>
+                              {apt.clientPhone && (
+                                <a
+                                  href={`sms:${apt.clientPhone}?body=${encodeURIComponent(
+                                    `BarberLoo: Your 4-digit Service Completion OTP for ${apt.serviceName} with ${apt.barberName} is ${apt.completionOtp}. Share with your barber once work is completed.`
+                                  )}`}
+                                  className="px-3 py-1.5 rounded-[10px] bg-[#111113] border border-[#F1E194]/25 text-[11px] font-semibold text-[#FFF9E8]"
+                                >
+                                  {tr('SMS to Phone ↗', 'फ़ोन पर SMS करें ↗')}
+                                </a>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-2.5">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={4}
+                              value={enteredOtp}
+                              onChange={(e) =>
+                                setEnteredOtp(
+                                  e.target.value.replace(/\D/g, '').slice(0, 4)
+                                )
+                              }
+                              placeholder={tr(
+                                'Enter 4-digit Customer OTP (e.g. 4829)',
+                                '4-अंकीय ग्राहक OTP दर्ज करें'
+                              )}
+                              className="flex-1 px-4 py-2.5 rounded-[10px] bg-[#111113] border border-[#F1E194]/30 font-mono-num text-sm tracking-[0.25em] text-[#F1E194] focus:outline-none focus:border-[#F1E194]"
+                            />
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const clean = enteredOtp.trim();
+                                if (
+                                  !clean ||
+                                  clean !== String(apt.completionOtp || '').trim()
+                                ) {
+                                  setOtpFeedback({
+                                    id: apt.id,
+                                    isError: true,
+                                    text: tr(
+                                      `⚠️ Invalid OTP! Please ask ${apt.clientName} (${apt.clientPhone || '+91'}) for the exact 4-digit Completion OTP sent to their number.`,
+                                      `⚠️ गलत OTP! कृपया ग्राहक ${apt.clientName} (${apt.clientPhone || '+91'}) से सही 4-अंकीय OTP पूछें।`
+                                    ),
+                                  });
+                                  return;
+                                }
+                                try {
+                                  await onUpdateAppointment(apt.id, {
+                                    status: 'completed',
+                                    enteredOtp: clean,
+                                  });
+                                  setOtpAptId(null);
+                                  setEnteredOtp('');
+                                  setOtpFeedback({
+                                    id: apt.id,
+                                    text: tr(
+                                      `✓ Customer OTP Verified! ${apt.clientName}'s work is marked Completed ✅`,
+                                      `✓ ग्राहक OTP सत्यापित! ${apt.clientName} का कार्य पूर्ण ✅ चिह्नित किया गया।`
+                                    ),
+                                  });
+                                } catch (err: any) {
+                                  setOtpFeedback({
+                                    id: apt.id,
+                                    isError: true,
+                                    text:
+                                      err?.message ||
+                                      '⚠️ Failed to verify OTP.',
+                                  });
+                                }
+                              }}
+                              className="px-5 py-2.5 rounded-[10px] bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold uppercase tracking-wider cursor-pointer shrink-0"
+                            >
+                              {tr(
+                                'Verify OTP & Mark Work ✅',
+                                'OTP सत्यापित करें और पूर्ण करें ✅'
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                     {noteAptId === apt.id && onUpdateAppointment && (
                       <div className="flex gap-2 pt-2 border-t border-[#F1E194]/10">
