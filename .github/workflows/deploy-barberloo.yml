@@ -25,13 +25,13 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Build Production Bundle for barberloo.in
-        run: npm run build
+      - name: Build Production Bundle into wp-assets for barberloo.in
+        run: npx vite build --outDir wp-assets
 
       - name: Commit Built Assets for WP Pusher Push-to-Deploy
         run: |
           git config user.name "BarberLoo Deploy Bot"
           git config user.email "nexwaveservices@gmail.com"
-          git add -f dist
-          git diff --staged --quiet || git commit -m "chore(release): build production bundle for WP Pusher on barberloo.in [skip ci]"
+          git add -f wp-assets
+          git diff --staged --quiet || git commit -m "chore(release): build native wp-assets bundle for WP Pusher on barberloo.in [skip ci]"
           git push

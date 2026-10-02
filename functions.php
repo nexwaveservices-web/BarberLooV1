@@ -2,14 +2,11 @@
 /**
  * BarberLoo WordPress Theme Functions (WP Pusher Bridge for barberloo.in)
  * Connected GitHub Repository: https://github.com/nexwaveservices-web/BarberLooV1
+ * Renders the native BarberLoo React + Supabase SPA directly on barberloo.in (Zero iframe, Zero 404).
  */
 
 if (!defined('ABSPATH')) {
     exit;
-}
-
-if (!defined('BARBERLOO_CLOUD_URL')) {
-    define('BARBERLOO_CLOUD_URL', 'https://ais-pre-nj2coazdd4jx7u5jfte6yh-353284084828.asia-southeast1.run.app');
 }
 
 add_action('after_setup_theme', function () {
@@ -24,7 +21,7 @@ add_action('init', function () {
     if ($request_uri === '/sw.js') {
         $sw_path = get_template_directory() . '/public/sw.js';
         if (!file_exists($sw_path)) {
-            $sw_path = get_template_directory() . '/dist/sw.js';
+            $sw_path = get_template_directory() . '/wp-assets/sw.js';
         }
         header('Content-Type: application/javascript; charset=utf-8');
         header('Service-Worker-Allowed: /');
@@ -41,51 +38,68 @@ add_action('init', function () {
 
 if (!function_exists('barberloo_theme_render_app')) {
     function barberloo_theme_render_app() {
-        $dist_index = get_template_directory() . '/dist/index.html';
-        $theme_url  = get_template_directory_uri();
+        $theme_dir = get_template_directory();
+        $theme_url = get_template_directory_uri();
 
-        if (file_exists($dist_index)) {
-            $html = file_get_contents($dist_index);
-            $html = str_replace('href="/assets/', 'href="' . esc_url($theme_url . '/dist/assets/'), $html);
-            $html = str_replace('src="/assets/', 'src="' . esc_url($theme_url . '/dist/assets/'), $html);
-            return $html;
+        $css_url = 'https://cdn.jsdelivr.net/gh/nexwaveservices-web/BarberLooV1@main/wp-assets/assets/barberloo.css';
+        $js_url  = 'https://cdn.jsdelivr.net/gh/nexwaveservices-web/BarberLooV1@main/wp-assets/assets/barberloo.js';
+
+        if (file_exists($theme_dir . '/wp-assets/assets/barberloo.js')) {
+            $ver = filemtime($theme_dir . '/wp-assets/assets/barberloo.js');
+            $css_url = $theme_url . '/wp-assets/assets/barberloo.css?v=' . $ver;
+            $js_url  = $theme_url . '/wp-assets/assets/barberloo.js?v=' . $ver;
+        } elseif (file_exists($theme_dir . '/dist/assets/barberloo.js')) {
+            $ver = filemtime($theme_dir . '/dist/assets/barberloo.js');
+            $css_url = $theme_url . '/dist/assets/barberloo.css?v=' . $ver;
+            $js_url  = $theme_url . '/dist/assets/barberloo.js?v=' . $ver;
         }
-
-        $qs = !empty($_SERVER['QUERY_STRING']) ? '?' . $_SERVER['QUERY_STRING'] : '';
-        $target_src = esc_url(BARBERLOO_CLOUD_URL . '/' . $qs);
 
         ob_start();
         ?>
-<!DOCTYPE html>
-<html <?php language_attributes(); ?>>
-<head>
-    <meta charset="<?php bloginfo('charset'); ?>" />
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BarberLoo — Luxury Barber Booking &amp; Live Queue | barberloo.in</title>
-    <link rel="canonical" href="https://barberloo.in/" />
-    <style>
-        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #111113; }
-        #barberloo-theme-frame { width: 100%; height: 100vh; border: 0; display: block; }
-    </style>
-</head>
-<body>
-    <iframe
-        id="barberloo-theme-frame"
-        src="<?php echo $target_src; ?>"
-        allow="geolocation; notifications; clipboard-write; web-share; payment"
-        title="BarberLoo Platform"
-    ></iframe>
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(){});
-        }
-    </script>
-</body>
+    <meta name="description" content="Discover trusted master barbers, book bespoke grooming appointments, or join the real-time live queue. BOOK • QUEUE • CUT • REPEAT." />
+    <meta property="og:title" content="BarberLoo — Luxury Barber Booking &amp; Live Queue" />
+    <meta property="og:description" content="Discover trusted master barbers, book bespoke grooming appointments, or join the real-time live queue." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://barberloo.in" />
+    <link rel="canonical" href="https://barberloo.in" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,600&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" crossorigin href="<?php echo esc_url($css_url); ?>" />
+  </head>
+  <body class="bg-[#FAF6EA] text-[#111113] antialiased selection:bg-[#5B0E14] selection:text-[#FFF9E8]">
+    <div id="root"></div>
+    <script type="module" crossorigin src="<?php echo esc_url($js_url); ?>"></script>
+  </body>
 </html>
         <?php
         return ob_get_clean();
     }
 }
+
+// Intercept all front-end routes on barberloo.in so WordPress never returns "Error: Page not found"
+add_action('template_redirect', function () {
+    if (is_admin() || wp_doing_ajax() || wp_doing_cron()) {
+        return;
+    }
+    if (isset($_GET['wp_native']) && $_GET['wp_native'] === '1') {
+        return;
+    }
+    global $wp_query;
+    if ($wp_query) {
+        $wp_query->is_404 = false;
+    }
+    status_header(200);
+    echo barberloo_theme_render_app();
+    exit;
+}, 1);
 
 add_shortcode('barberloo_app', function () {
     return barberloo_theme_render_app();

@@ -121,6 +121,8 @@ async function startServer() {
         'barberloo.php',
         'public/sw.js',
         'public/CNAME',
+        'wp-assets/assets/barberloo.css',
+        'wp-assets/assets/barberloo.js',
       ];
 
       const pushedFiles: string[] = [];

@@ -12,6 +12,12 @@ async function safeBackendRequest<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T | null> {
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname.includes('barberloo.in')
+  ) {
+    return null;
+  }
   try {
     const token = await getAuthToken();
     const headers: Record<string, string> = {
