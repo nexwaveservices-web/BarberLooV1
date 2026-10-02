@@ -15,7 +15,6 @@ import { Navbar } from './components/Navbar';
 import { HomePage } from './components/HomePage';
 import { ShopPage } from './components/ShopPage';
 import { BookingPage } from './components/BookingPage';
-import { LiveQueuePage } from './components/LiveQueuePage';
 import { CustomerDashboard } from './components/CustomerDashboard';
 import { BarberDashboard } from './components/BarberDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -26,7 +25,6 @@ import {
   apiUpdateProfile,
   apiCreateAppointment,
   apiUpdateAppointment,
-  apiMutateQueue,
   apiCreateService,
   apiUpdateService,
   apiDeleteService,
@@ -59,7 +57,6 @@ import {
 import { LanguageProvider } from './lib/i18n';
 import {
   registerNotificationServiceWorker,
-  checkAndNotifyQueueChanges,
   checkAndNotifyAppointmentReminders,
   checkAndNotifyDatabaseNotifications,
   startBackgroundReminderTicker,
@@ -82,7 +79,6 @@ export default function App() {
   const [bookingBarber, setBookingBarber] = useState<BarberItem | null>(null);
 
   const [appointments, setAppointments] = useState<any[]>([]);
-  const [queue, setQueue] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
   const [workingHours, setWorkingHours] = useState<any[]>(OPENING_HOURS);
@@ -123,7 +119,6 @@ export default function App() {
         }
         if (Array.isArray(data.barbers)) setBarbers(data.barbers);
         if (Array.isArray(data.services)) setServices(data.services);
-        if (Array.isArray(data.queue)) setQueue(data.queue);
         if (Array.isArray(data.appointments)) setAppointments(data.appointments);
         if (Array.isArray(data.reviews)) setReviews(data.reviews);
         if (Array.isArray(data.coupons)) setCoupons(data.coupons);
@@ -174,13 +169,6 @@ export default function App() {
 
   useEffect(() => {
     if (!activeUserUid) return;
-    checkAndNotifyQueueChanges(activeUserUid, queue, (page) =>
-      setCurrentPage(page as PageView)
-    );
-  }, [activeUserUid, queue]);
-
-  useEffect(() => {
-    if (!activeUserUid) return;
     checkAndNotifyAppointmentReminders(activeUserUid, appointments, (page) =>
       setCurrentPage(page as PageView)
     );
@@ -200,19 +188,13 @@ export default function App() {
       checkAndNotifyAppointmentReminders(activeUserUid, appointments, (page) =>
         setCurrentPage(page as PageView)
       );
-      checkAndNotifyQueueChanges(activeUserUid, queue, (page) =>
-        setCurrentPage(page as PageView)
-      );
     });
     return stopTicker;
-  }, [activeUserUid, appointments, queue, loadBootstrapState]);
+  }, [activeUserUid, appointments, loadBootstrapState]);
 
   useEffect(() => {
     const disconnect = connectRealtimeSocket((event) => {
-      if (event.type === 'queue:updated' && Array.isArray(event.payload?.queue)) {
-        setQueue(event.payload.queue);
-        loadBootstrapState(activeUserUid);
-      } else if (event.type === 'state:updated') {
+      if (event.type === 'state:updated') {
         loadBootstrapState(activeUserUid);
       }
     });
@@ -301,13 +283,6 @@ export default function App() {
     };
   }, []);
 
-  const userQueueEntry = activeUserUid
-    ? queue.find(
-        (q) => q.isCurrentUser || q.customerUid === activeUserUid
-      )
-    : null;
-  const userQueuePosition = userQueueEntry ? userQueueEntry.position : null;
-
   const hasCompletedAppointment = Boolean(
     activeUserUid &&
       appointments.some(
@@ -394,88 +369,6 @@ export default function App() {
 
   const handleUpdateAppointment = async (id: string, updates: any) => {
     await apiUpdateAppointment(id, updates);
-    await loadBootstrapState(activeUserUid);
-  };
-
-  // Live Queue handlers
-  const handleLeaveQueue = async () => {
-    if (!activeUserUid) return;
-    const updated = await apiMutateQueue({
-      type: 'leave',
-      customerUid: activeUserUid,
-    });
-    setQueue(updated);
-    await loadBootstrapState(activeUserUid);
-  };
-
-  const handleRejoinQueue = async () => {
-    if (!activeUserUid || !currentUserProfile) {
-      setAuthModalOpen(true);
-      return;
-    }
-    if (getBrowserNotificationPermission() === 'default') {
-      requestBrowserNotificationPermission().catch(() => {});
-    }
-    const defaultBarberName = barbers[0]?.name || 'Available Barber';
-    const defaultServiceName = services[0]?.name || 'Haircut & Grooming';
-    const updated = await apiMutateQueue({
-      type: 'rejoin',
-      customerUid: activeUserUid,
-      clientName: currentUserProfile.name,
-      serviceName: defaultServiceName,
-      barberName: defaultBarberName,
-    });
-    setQueue(updated);
-    await loadBootstrapState(activeUserUid);
-  };
-
-  const handleAdvanceQueue = async () => {
-    const updated = await apiMutateQueue({ type: 'advance' });
-    setQueue(updated);
-    await loadBootstrapState(activeUserUid);
-  };
-
-  const handleResetQueue = async () => {
-    const updated = await apiMutateQueue({ type: 'reset' });
-    setQueue(updated);
-    await loadBootstrapState(activeUserUid);
-  };
-
-  const handleToggleGraceBuffer = async () => {
-    if (!activeUserUid) return;
-    const updated = await apiMutateQueue({
-      type: 'grace',
-      customerUid: activeUserUid,
-    });
-    setQueue(updated);
-  };
-
-  const handleAddWalkInToQueue = async (
-    clientName: string,
-    serviceName: string
-  ) => {
-    const defaultBarberName =
-      barbers[0]?.name || currentUserProfile?.name || 'Barber';
-    const updated = await apiMutateQueue({
-      type: 'walkin',
-      clientName,
-      serviceName,
-      barberName: defaultBarberName,
-    });
-    setQueue(updated);
-    await loadBootstrapState(activeUserUid);
-  };
-
-  const handleChangeQueueItemStatus = async (
-    queueId: string,
-    newStatus: string
-  ) => {
-    const updated = await apiMutateQueue({
-      type: 'status',
-      queueId,
-      newStatus,
-    });
-    setQueue(updated);
     await loadBootstrapState(activeUserUid);
   };
 
@@ -683,7 +576,6 @@ export default function App() {
         <Navbar
           currentPage={currentPage}
           onNavigate={setCurrentPage}
-          userQueuePosition={userQueuePosition}
           currentUserProfile={currentUserProfile}
           onAuthChange={handleAuthChange}
           authModalOpenExternal={authModalOpen}
@@ -697,7 +589,6 @@ export default function App() {
               onSelectServiceForBooking={(srv) => setBookingService(srv)}
               onSelectBarberForBooking={(brb) => setBookingBarber(brb)}
               onSelectShop={(shop) => setSelectedShop(shop)}
-              userQueuePosition={userQueuePosition}
               shops={shops}
               barbers={barbers}
               services={services}
@@ -751,22 +642,6 @@ export default function App() {
             />
           )}
 
-          {currentPage === 'queue' && (
-            <LiveQueuePage
-              queue={queue}
-              onLeaveQueue={handleLeaveQueue}
-              onRejoinQueue={handleRejoinQueue}
-              onAdvanceQueue={handleAdvanceQueue}
-              onResetQueue={handleResetQueue}
-              onToggleGraceBuffer={handleToggleGraceBuffer}
-              onNavigate={setCurrentPage}
-              currentUserUid={activeUserUid}
-              currentUserProfile={currentUserProfile}
-              shops={shops}
-              onOpenAuthModal={() => setAuthModalOpen(true)}
-            />
-          )}
-
           {currentPage === 'customer-dashboard' &&
             (canAccessCustomerPortal ? (
               <CustomerDashboard
@@ -775,7 +650,6 @@ export default function App() {
                 )}
                 onCancelAppointment={handleCancelAppointment}
                 onRescheduleAppointment={handleRescheduleAppointment}
-                queue={queue}
                 onNavigate={setCurrentPage}
                 onSelectServiceForBooking={(srv) => setBookingService(srv)}
                 onSelectBarberForBooking={(brb) => setBookingBarber(brb)}
@@ -800,7 +674,7 @@ export default function App() {
             ) : (
               renderRoleGuard(
                 'Customer Account Required',
-                'Please sign in or sign up as a Customer to view your appointments, live queue status, favorites, and loyalty rewards.'
+                'Please sign in or sign up as a Customer to view your appointments, favorites, and loyalty rewards.'
               )
             ))}
 
@@ -809,10 +683,6 @@ export default function App() {
               <BarberDashboard
                 appointments={appointments}
                 onUpdateAppointment={handleUpdateAppointment}
-                queue={queue}
-                onAdvanceQueue={handleAdvanceQueue}
-                onAddWalkInToQueue={handleAddWalkInToQueue}
-                onChangeQueueItemStatus={handleChangeQueueItemStatus}
                 services={services}
                 onCreateService={handleCreateService}
                 onUpdateService={handleUpdateService}
@@ -843,7 +713,7 @@ export default function App() {
             ) : (
               renderRoleGuard(
                 'Barber Partner Access Only',
-                'Only registered Barber & Salon Partner accounts can access the Barber Console. Sign up as a Barber to register your shop, services, and live chair queue.'
+                'Only registered Barber & Salon Partner accounts can access the Barber Console. Sign up as a Barber to register your shop and services.'
               )
             ))}
 
@@ -851,7 +721,6 @@ export default function App() {
             (isOwnerAdmin ? (
               <AdminDashboard
                 appointments={appointments}
-                queue={queue}
                 shops={shops}
                 barbers={barbers}
                 profiles={profiles}

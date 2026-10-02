@@ -26,7 +26,6 @@ import {
   getBootstrapState,
   createBookingInDb,
   updateAppointmentInDb,
-  mutateQueueInDb,
   OWNER_ADMIN_EMAIL,
   resolveAllowedRole,
 } from './src/db/users.ts';
@@ -365,23 +364,7 @@ async function startServer() {
     }
   );
 
-  // 6. Live Queue Real-Time Mutations
-  app.post('/api/queue', optionalAuth, async (req: AuthRequest, res) => {
-    try {
-      const updatedQueue = await mutateQueueInDb({
-        ...req.body,
-        customerUid: req.user?.uid || req.body.customerUid || 'cust-alexander',
-      });
-      broadcastEvent('queue:updated', { queue: updatedQueue });
-      res.json(updatedQueue);
-    } catch (error: any) {
-      res
-        .status(500)
-        .json({ error: error.message || 'Failed to mutate queue' });
-    }
-  });
-
-  // 7. Services CRUD (Barber / Shop Owner)
+  // 6. Services CRUD (Barber / Shop Owner)
   app.post('/api/services', optionalAuth, async (req: AuthRequest, res) => {
     try {
       const allSrv = await db.select().from(services);
@@ -574,7 +557,7 @@ async function startServer() {
           approvalStatus: 'approved',
           logoUrl: '',
           image: req.body.image || ASSETS.royalInterior,
-          tagline: req.body.tagline || 'Bespoke Grooming & Live Queue',
+          tagline: req.body.tagline || 'Bespoke Grooming & Reserved Appointments',
           about:
             req.body.about ||
             'Verified partner barbershop on the BarberLoo network.',

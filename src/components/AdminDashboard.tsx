@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
   AppointmentItem,
-  QueueItem,
 } from '../data/barberlooData';
 import {
   ShieldCheck,
@@ -19,10 +18,15 @@ import {
 import { useLanguage, getCurrentISTDisplay, formatISTDateString } from '../lib/i18n';
 import { OWNER_ADMIN_EMAIL } from '../lib/firebase';
 import { SUPABASE_URL, SUPABASE_SQL_SCHEMA } from '../lib/supabase';
+import { apiClaimSlaCompensation } from '../lib/api';
+import {
+  evaluateAppointmentSla,
+  calculatePlatformSlaSummary,
+  SLA_TARGETS,
+} from '../lib/sla';
 
 interface AdminDashboardProps {
   appointments: AppointmentItem[];
-  queue: QueueItem[];
   shops?: any[];
   barbers?: any[];
   profiles?: any[];
@@ -48,7 +52,6 @@ interface AdminDashboardProps {
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   appointments,
-  queue,
   shops = [],
   barbers = [],
   profiles = [],
@@ -71,6 +74,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const [activeSection, setActiveSection] = useState<
     | 'overview'
+    | 'sla'
     | 'users'
     | 'shops'
     | 'coupons'
@@ -80,6 +84,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'supabase'
     | 'wppusher'
   >('overview');
+  const [slaActionToast, setSlaActionToast] = useState('');
+  const platformSla = useMemo(
+    () => calculatePlatformSlaSummary(appointments, reports),
+    [appointments, reports]
+  );
   const [copiedSchema, setCopiedSchema] = useState(false);
   const [copiedKey, setCopiedKey] = useState('');
   const [wpPusherTestMsg, setWpPusherTestMsg] = useState('');
@@ -299,7 +308,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        {/* Real Platform KPIs (Total Users, Customers, Barbers, Shops, Appointments, Active Queues, Completed, Revenue) */}
+        {/* Real Platform KPIs (Total Users, Customers, Barbers, Shops, Appointments, Completed, Revenue) */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-5">
             <Users className="w-4 h-4 text-[#F1E194] mb-2" />
@@ -319,8 +328,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {shops.length}
             </div>
             <div className="text-xs text-[#8A8178] mt-1">
-              {tr('Partner Salons', 'पार्टनर सैलून')} · {queue.length}{' '}
-              {tr('In Queue', 'कतार में')}
+              {tr('Partner Salons', 'पार्टनर सैलून')} ·{' '}
+              {shops.filter((s: any) => s.verified).length}{' '}
+              {tr('Verified', 'सत्यापित')}
             </div>
           </div>
 
@@ -360,7 +370,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Navigation Tabs */}
         <div className="flex flex-wrap gap-2">
           {[
-            { id: 'overview', label: tr('Bookings, Queue & Analytics', 'बुकिंग, कतार और एनालिटिक्स') },
+            { id: 'overview', label: tr('Bookings & Analytics', 'बुकिंग और एनालिटिक्स') },
+            { id: 'sla', label: tr(`🛡️ SLA Governance (${platformSla.overallScorePercent}%)`, `🛡️ SLA प्रबंधन (${platformSla.overallScorePercent}%)`) },
             { id: 'users', label: tr('Users & Barber Verification', 'उपयोगकर्ता और बार्बर सत्यापन') },
             { id: 'shops', label: tr('Partner Salons', 'पार्टनर सैलून') },
             { id: 'broadcast', label: tr('Broadcast Messages', 'ब्रॉडकास्ट संदेश') },
@@ -385,7 +396,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           ))}
         </div>
 
-        {/* OVERVIEW: Real Appointments, Queue & Platform Analytics */}
+        {/* OVERVIEW: Real Appointments & Platform Analytics */}
         {activeSection === 'overview' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -429,33 +440,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
                 <h2 className="font-display text-2xl font-bold">
-                  {tr('Active Queue Telemetry', 'लाइव कतार मॉनिटर')} ({queue.length})
+                  {tr('Confirmed & Upcoming Bookings', 'आगामी व सक्रिय बुकिंग')} (
+                  {
+                    appointments.filter(
+                      (a) => a.status === 'confirmed' || a.status === 'in_progress'
+                    ).length
+                  }
+                  )
                 </h2>
-                {queue.length === 0 ? (
+                {appointments.filter(
+                  (a) => a.status === 'confirmed' || a.status === 'in_progress'
+                ).length === 0 ? (
                   <p className="text-xs text-[#8A8178] py-6">
-                    {tr('No customers in the live queue right now.', 'अभी लाइव कतार में कोई ग्राहक नहीं है।')}
+                    {tr(
+                      'No active or confirmed bookings currently scheduled.',
+                      'वर्तमान में कोई सक्रिय या पुष्टि की गई बुकिंग निर्धारित नहीं है।'
+                    )}
                   </p>
                 ) : (
-                  <div className="space-y-2.5">
-                    {queue.map((q) => (
-                      <div
-                        key={q.id}
-                        className="p-4 rounded-[14px] bg-[#111113] border border-[#F1E194]/12 flex items-center justify-between text-xs"
-                      >
-                        <div>
-                          <span className="font-mono-num text-[#F1E194] font-bold">
-                            #{q.position}
-                          </span>{' '}
-                          <span className="font-semibold">{q.clientName}</span>
-                          <p className="text-[#8A8178]">
-                            {q.serviceName} · {q.barberName}
-                          </p>
+                  <div className="space-y-2.5 max-h-80 overflow-y-auto">
+                    {appointments
+                      .filter(
+                        (a) => a.status === 'confirmed' || a.status === 'in_progress'
+                      )
+                      .map((apt) => (
+                        <div
+                          key={apt.id}
+                          className="p-4 rounded-[14px] bg-[#111113] border border-[#F1E194]/12 flex items-center justify-between text-xs"
+                        >
+                          <div>
+                            <span className="font-semibold text-[#FFF9E8]">
+                              {apt.clientName}
+                            </span>{' '}
+                            <span className="text-[#8A8178]">
+                              · {apt.serviceName} with {apt.barberName}
+                            </span>
+                            <p className="text-[#8A8178] mt-0.5">
+                              {apt.shopName} · {apt.date} at {apt.time} IST
+                            </p>
+                          </div>
+                          <span className="font-mono-num text-[#F1E194] uppercase text-[10px] px-2.5 py-1 rounded bg-[#F1E194]/10 border border-[#F1E194]/20">
+                            {apt.status}
+                          </span>
                         </div>
-                        <span className="font-mono-num text-[#F1E194]">
-                          {q.status}
-                        </span>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 )}
               </div>
@@ -493,10 +521,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div className="p-4 rounded-[14px] bg-[#111113] border border-[#F1E194]/12">
                   <span className="text-[#8A8178] block">
-                    {tr('Live Queue Usage', 'लाइव कतार उपयोग')}
+                    {tr('Partner Barbers', 'पंजीकृत बार्बर')}
                   </span>
                   <span className="font-mono-num text-xl font-bold text-[#F1E194]">
-                    {queue.length} {tr('Active', 'सक्रिय')}
+                    {barbers.length} {tr('Active', 'सक्रिय')}
                   </span>
                 </div>
               </div>
@@ -1432,6 +1460,195 @@ git push -u origin main`}
                     </li>
                   </ol>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* PLATFORM SLA GOVERNANCE & BREACH MONITOR */}
+        {activeSection === 'sla' && (
+          <div className="space-y-6">
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/25 p-6 sm:p-8 space-y-6">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#F1E194]/15 pb-5">
+                <div>
+                  <span className="text-[11px] font-semibold uppercase tracking-widest text-[#F1E194]">
+                    SERVICE LEVEL AGREEMENT (SLA) ENGINE • REAL-TIME TELEMETRY
+                  </span>
+                  <h2 className="font-display text-3xl font-bold mt-1 text-[#FFF9E8]">
+                    {tr(
+                      'Platform SLA Compliance & Breach Monitor',
+                      'प्लेटफ़ॉर्म SLA अनुपालन और उल्लंघन मॉनिटर'
+                    )}
+                  </h2>
+                  <p className="text-xs text-[#8A8178] mt-1">
+                    {tr(
+                      `Enforces ${SLA_TARGETS.APPOINTMENT_ON_TIME_MINS}-Min On-Time Chair Start SLA and ${SLA_TARGETS.REPORT_RESOLUTION_HOURS}-Hour Dispute Resolution SLA.`,
+                      `यह ${SLA_TARGETS.APPOINTMENT_ON_TIME_MINS}-मिनट ऑन-टाइम चेयर SLA और ${SLA_TARGETS.REPORT_RESOLUTION_HOURS}-घंटे विवाद समाधान SLA को ट्रैक करता है।`
+                    )}
+                  </p>
+                </div>
+                <div className="px-5 py-3 rounded-[16px] bg-[#111113] border border-[#F1E194]/30 text-right">
+                  <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                    {tr('Overall Platform SLA', 'कुल प्लेटफ़ॉर्म SLA')}
+                  </span>
+                  <span className="font-mono-num text-3xl font-bold text-emerald-400">
+                    {platformSla.overallScorePercent}%
+                  </span>
+                </div>
+              </div>
+
+              {slaActionToast && (
+                <div className="p-4 rounded-[14px] bg-emerald-950/80 border border-emerald-400/40 text-emerald-200 text-xs font-semibold">
+                  {slaActionToast}
+                </div>
+              )}
+
+              {/* 3 SLA Metric Pillars */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-5 rounded-[18px] bg-[#111113] border border-[#F1E194]/20 space-y-1">
+                  <span className="text-[11px] text-[#8A8178]">
+                    {tr('Appointment On-Time SLA', 'अपॉइंटमेंट समयबद्धता SLA')}
+                  </span>
+                  <div className="font-mono-num text-2xl font-bold text-[#F1E194]">
+                    {platformSla.appointmentSlaPercent}%
+                  </div>
+                  <p className="text-[11px] text-[#8A8178]">
+                    Target: &le; {SLA_TARGETS.APPOINTMENT_ON_TIME_MINS} mins chair delay
+                  </p>
+                </div>
+
+                <div className="p-5 rounded-[18px] bg-[#111113] border border-[#F1E194]/20 space-y-1">
+                  <span className="text-[11px] text-[#8A8178]">
+                    {tr('Dispute Resolution SLA', 'विवाद समाधान SLA')}
+                  </span>
+                  <div className="font-mono-num text-2xl font-bold text-emerald-400">
+                    {platformSla.reportResolutionSlaPercent}%
+                  </div>
+                  <p className="text-[11px] text-[#8A8178]">
+                    Target: &le; {SLA_TARGETS.REPORT_RESOLUTION_HOURS} hrs resolution
+                  </p>
+                </div>
+
+                <div className="p-5 rounded-[18px] bg-[#111113] border border-[#F1E194]/20 space-y-1">
+                  <span className="text-[11px] text-[#8A8178]">
+                    {tr('Active SLA Statuses', 'सक्रिय SLA स्थितियां')}
+                  </span>
+                  <div className="font-mono-num text-lg font-bold text-[#FFF9E8]">
+                    {platformSla.metCount + platformSla.onTrackCount} OK ·{' '}
+                    <span className="text-amber-300">
+                      {platformSla.atRiskCount} Risk
+                    </span>{' '}
+                    ·{' '}
+                    <span className="text-red-400">
+                      {platformSla.breachedCount} Breached
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#8A8178]">
+                    Auto-compensation: +{SLA_TARGETS.BREACH_COMPENSATION_POINTS} PTS
+                  </p>
+                </div>
+              </div>
+
+              {/* Live Appointment SLA Audit & Escalation Table */}
+              <div className="space-y-3 pt-2">
+                <h3 className="font-display text-2xl font-bold text-[#FFF9E8]">
+                  {tr(
+                    'Appointment SLA Audit & Escalation Console',
+                    'अपॉइंटमेंट SLA ऑडिट और एस्केलेशन कंसोल'
+                  )}
+                </h3>
+                {appointments.length === 0 ? (
+                  <p className="text-xs text-[#8A8178] py-4">
+                    {tr('No appointments to evaluate.', 'मूल्यांकन के लिए कोई अपॉइंटमेंट नहीं है।')}
+                  </p>
+                ) : (
+                  <div className="space-y-2.5 max-h-96 overflow-y-auto">
+                    {appointments.map((apt: any) => {
+                      const sla = evaluateAppointmentSla(apt);
+                      return (
+                        <div
+                          key={apt.id}
+                          className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs"
+                        >
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold text-[#FFF9E8]">
+                                {apt.clientName} ({apt.clientPhone || '+91'})
+                              </span>
+                              <span className="text-[#8A8178]">
+                                · {apt.serviceName} with {apt.barberName} ({apt.shopName})
+                              </span>
+                              <span
+                                className={`px-2.5 py-0.5 rounded-[8px] font-mono-num text-[10px] font-semibold ${
+                                  sla.status === 'BREACHED'
+                                    ? 'bg-red-950 text-red-200 border border-red-400/40'
+                                    : sla.status === 'AT_RISK'
+                                    ? 'bg-amber-950 text-amber-200 border border-amber-400/40'
+                                    : 'bg-emerald-950 text-emerald-200 border border-emerald-400/30'
+                                }`}
+                              >
+                                🛡️ {lang === 'hi' ? sla.badgeTextHi : sla.badgeText}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#8A8178] mt-1">
+                              {formatISTDateString(apt.date, lang)} · {apt.time} IST ·{' '}
+                              {lang === 'hi' ? sla.detailTextHi : sla.detailText}
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            {onBroadcastNotification && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await onBroadcastNotification({
+                                    shopName: '🚨 BarberLoo SLA Escalation',
+                                    message: `Urgent SLA Alert for ${apt.barberName} (${apt.shopName}): Client ${apt.clientName}'s ${apt.serviceName} (${apt.date} · ${apt.time} IST) requires immediate chair attention to maintain the 15-min SLA guarantee.`,
+                                    targetRole: 'barber',
+                                  });
+                                  setSlaActionToast(
+                                    tr(
+                                      `✓ SLA Escalation Alert dispatched to ${apt.barberName}!`,
+                                      `✓ SLA एस्केलेशन अलर्ट ${apt.barberName} को भेज दिया गया!`
+                                    )
+                                  );
+                                  setTimeout(() => setSlaActionToast(''), 3500);
+                                }}
+                                className="px-3 py-1.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/30 text-[#F1E194] font-semibold cursor-pointer"
+                              >
+                                {tr('Escalate to Barber', 'बार्बर को अलर्ट भेजें')}
+                              </button>
+                            )}
+                            {apt.customerUid && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await apiClaimSlaCompensation({
+                                    customerUid: apt.customerUid,
+                                    appointmentId: apt.id,
+                                    serviceName: apt.serviceName,
+                                    barberName: apt.barberName,
+                                    points: 100,
+                                  });
+                                  setSlaActionToast(
+                                    tr(
+                                      `✓ Granted +100 PTS SLA Guarantee Credit to ${apt.clientName}!`,
+                                      `✓ ${apt.clientName} को +100 PTS SLA क्रेडिट प्रदान किया गया!`
+                                    )
+                                  );
+                                  setTimeout(() => setSlaActionToast(''), 3500);
+                                }}
+                                className="px-3 py-1.5 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] font-semibold cursor-pointer"
+                              >
+                                {tr('Grant +100 PTS SLA Credit', '+100 PTS SLA क्रेडिट दें')}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -6,7 +6,6 @@ import {
   barbers,
   services,
   appointments,
-  queue,
   reviews,
   favorites,
   notifications,
@@ -156,7 +155,6 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     barberRows,
     serviceRows,
     appointmentRows,
-    queueRows,
     reviewRows,
     favoriteRows,
     notificationRows,
@@ -173,7 +171,6 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     db.select().from(barbers),
     db.select().from(services).orderBy(asc(services.indexCode)),
     db.select().from(appointments).orderBy(desc(appointments.createdAt)),
-    db.select().from(queue).orderBy(asc(queue.position)),
     db.select().from(reviews).orderBy(desc(reviews.createdAt)),
     activeCustomerUid
       ? db
@@ -266,49 +263,7 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     tagline: sh.tagline,
     about: sh.about,
     qrCodeSlug: sh.qrCodeSlug,
-    queueCount: queueRows.filter(
-      (q) =>
-        q.shopId === sh.id &&
-        (q.status === 'waiting' || q.status === 'called' || q.status === 'serving')
-    ).length,
-    waitMins:
-      queueRows.filter(
-        (q) =>
-          q.shopId === sh.id &&
-          (q.status === 'waiting' || q.status === 'called' || q.status === 'serving')
-      ).length * 12,
   }));
-
-  const mappedQueue = queueRows
-    .filter(
-      (q) =>
-        q.status === 'waiting' || q.status === 'called' || q.status === 'serving'
-    )
-    .map((q) => ({
-      id: q.id,
-      shopId: q.shopId,
-      barberId: q.barberId,
-      position: q.position,
-      customerUid: q.customerUid,
-      clientName: q.clientName,
-      serviceId: q.serviceId,
-      serviceName: q.serviceName,
-      barberName: q.barberName,
-      status:
-        q.status === 'serving'
-          ? 'Serving'
-          : q.status === 'called'
-          ? 'Next Up'
-          : 'Waiting',
-      rawStatus: q.status,
-      estimatedWaitMin: q.estimatedWaitMin,
-      waitMins: q.estimatedWaitMin + q.graceBufferMin,
-      graceBufferMin: q.graceBufferMin,
-      joinedAt: q.joinedAt,
-      isCurrentUser: Boolean(
-        activeCustomerUid && q.customerUid === activeCustomerUid
-      ),
-    }));
 
   const mappedAppointments = appointmentRows.map((a) => ({
     id: a.id,
@@ -376,7 +331,6 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     barbers: mappedBarbers,
     services: mappedServices,
     appointments: mappedAppointments,
-    queue: mappedQueue,
     reviews: mappedReviews,
     favorites: favoriteRows,
     notifications: notificationRows,
@@ -607,211 +561,3 @@ export async function updateAppointmentInDb(
   return updated;
 }
 
-export async function recalculateActiveQueuePositions(shopId = 'shop-1') {
-  const rows = await db
-    .select()
-    .from(queue)
-    .where(eq(queue.shopId, shopId))
-    .orderBy(asc(queue.position), asc(queue.createdAt));
-
-  const activeRows = rows.filter(
-    (r) =>
-      r.status === 'serving' || r.status === 'called' || r.status === 'waiting'
-  );
-
-  for (let i = 0; i < activeRows.length; i++) {
-    const item = activeRows[i];
-    const newPos = i + 1;
-    const newStatus =
-      newPos === 1 ? 'serving' : newPos === 2 ? 'called' : 'waiting';
-    const newWait = newPos === 1 ? 0 : (newPos - 1) * 12;
-
-    await db
-      .update(queue)
-      .set({
-        position: newPos,
-        status: newStatus,
-        estimatedWaitMin: newWait,
-      })
-      .where(eq(queue.id, item.id));
-
-    if (item.customerUid && newPos <= 2 && item.position !== newPos) {
-      await db.insert(notifications).values({
-        id: `notif-${Date.now()}-${i}`,
-        recipientUid: item.customerUid,
-        type: newPos === 1 ? 'service_started' : 'customer_next',
-        title:
-          newPos === 1
-            ? `Your chair is ready! ${item.barberName} is now serving you.`
-            : `You are Next Up (#2) for ${item.barberName}. Please head to the salon.`,
-        timeLabel: 'Just now · Live Queue Telemetry',
-        unread: true,
-      });
-    }
-  }
-}
-
-export async function mutateQueueInDb(action: {
-  type:
-    | 'advance'
-    | 'leave'
-    | 'rejoin'
-    | 'walkin'
-    | 'reset'
-    | 'status'
-    | 'grace';
-  customerUid?: string;
-  clientName?: string;
-  serviceName?: string;
-  barberName?: string;
-  queueId?: string;
-  newStatus?: string;
-  shopId?: string;
-}) {
-  const shopId = action.shopId || 'shop-1';
-  const customerUid = action.customerUid || '';
-
-  if (action.type === 'advance') {
-    const all = await db
-      .select()
-      .from(queue)
-      .where(eq(queue.shopId, shopId))
-      .orderBy(asc(queue.position));
-    const active = all.filter(
-      (q) =>
-        q.status === 'serving' || q.status === 'called' || q.status === 'waiting'
-    );
-    if (active.length > 0) {
-      await db
-        .update(queue)
-        .set({ status: 'completed', position: 0, estimatedWaitMin: 0 })
-        .where(eq(queue.id, active[0].id));
-      await recalculateActiveQueuePositions(shopId);
-    }
-  } else if (action.type === 'leave') {
-    if (customerUid) {
-      const userEntries = await db
-        .select()
-        .from(queue)
-        .where(eq(queue.customerUid, customerUid));
-      for (const entry of userEntries) {
-        if (
-          entry.status === 'waiting' ||
-          entry.status === 'called' ||
-          entry.status === 'serving'
-        ) {
-          await db
-            .update(queue)
-            .set({ status: 'cancelled', position: 0 })
-            .where(eq(queue.id, entry.id));
-        }
-      }
-      await recalculateActiveQueuePositions(shopId);
-    }
-  } else if (action.type === 'rejoin') {
-    if (!customerUid) {
-      throw new Error('Please sign in to join the live queue.');
-    }
-    const all = await db
-      .select()
-      .from(queue)
-      .where(eq(queue.shopId, shopId))
-      .orderBy(asc(queue.position));
-    const active = all.filter(
-      (q) =>
-        q.status === 'serving' || q.status === 'called' || q.status === 'waiting'
-    );
-    const alreadyIn = active.find((q) => q.customerUid === customerUid);
-    if (!alreadyIn) {
-      const newPos = active.length + 1;
-      await db.insert(queue).values({
-        id: `q-${Date.now()}`,
-        shopId,
-        barberId: 'brb-1',
-        barberName: action.barberName || 'Available Barber',
-        customerUid,
-        clientName: action.clientName || 'Verified Guest',
-        serviceId: 'srv-1',
-        serviceName: action.serviceName || 'Haircut & Grooming',
-        position: newPos,
-        status: newPos === 1 ? 'serving' : newPos === 2 ? 'called' : 'waiting',
-        estimatedWaitMin: Math.max(0, (newPos - 1) * 12),
-        graceBufferMin: 0,
-        joinedAt: new Date().toLocaleTimeString('en-IN', {
-          timeZone: 'Asia/Kolkata',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        }),
-      });
-      await db.insert(notifications).values({
-        id: `notif-${Date.now()}`,
-        recipientUid: customerUid,
-        type: 'queue_joined',
-        title: `Joined Live Queue at Position #${newPos}`,
-        timeLabel: 'Just now · Live Queue Telemetry',
-        unread: true,
-      });
-    }
-    await recalculateActiveQueuePositions(shopId);
-  } else if (action.type === 'walkin') {
-    const all = await db
-      .select()
-      .from(queue)
-      .where(eq(queue.shopId, shopId))
-      .orderBy(asc(queue.position));
-    const active = all.filter(
-      (q) =>
-        q.status === 'serving' || q.status === 'called' || q.status === 'waiting'
-    );
-    const newPos = active.length + 1;
-    await db.insert(queue).values({
-      id: `q-${Date.now()}`,
-      shopId,
-      barberId: 'brb-1',
-      barberName: action.barberName || 'Barber',
-      customerUid: `walkin-${Date.now()}`,
-      clientName: action.clientName || 'Walk-in Guest',
-      serviceId: 'srv-1',
-      serviceName: action.serviceName || 'Haircut & Styling',
-      position: newPos,
-      status: newPos === 1 ? 'serving' : newPos === 2 ? 'called' : 'waiting',
-      estimatedWaitMin: Math.max(0, (newPos - 1) * 12),
-      graceBufferMin: 0,
-      joinedAt: new Date().toLocaleTimeString('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }),
-    });
-    await recalculateActiveQueuePositions(shopId);
-  } else if (action.type === 'grace') {
-    if (customerUid) {
-      const userEntries = await db
-        .select()
-        .from(queue)
-        .where(eq(queue.customerUid, customerUid));
-      for (const entry of userEntries) {
-        if (entry.status === 'waiting' || entry.status === 'called') {
-          const nextGrace = entry.graceBufferMin > 0 ? 0 : 5;
-          await db
-            .update(queue)
-            .set({ graceBufferMin: nextGrace })
-            .where(eq(queue.id, entry.id));
-        }
-      }
-    }
-  } else if (action.type === 'status' && action.queueId && action.newStatus) {
-    await db
-      .update(queue)
-      .set({ status: action.newStatus })
-      .where(eq(queue.id, action.queueId));
-    await recalculateActiveQueuePositions(shopId);
-  } else if (action.type === 'reset') {
-    await db.delete(queue).where(eq(queue.shopId, shopId));
-  }
-
-  const state = await getBootstrapState(customerUid);
-  return state.queue;
-}

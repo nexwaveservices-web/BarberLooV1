@@ -2,7 +2,6 @@ export type PageView =
   | 'home'
   | 'shop'
   | 'booking'
-  | 'queue'
   | 'customer-dashboard'
   | 'barber-dashboard'
   | 'admin-dashboard'
@@ -66,8 +65,6 @@ export interface ShopItem {
   rating: number;
   reviewCount: number;
   isOpen: boolean;
-  waitMins: number;
-  queueCount: number;
   verified: boolean;
   approvalStatus?: string;
   image: string;
@@ -78,30 +75,6 @@ export interface ShopItem {
   tagline: string;
   about?: string;
   qrCodeUrl?: string;
-}
-
-export interface QueueItem {
-  id: string;
-  shopId?: string;
-  position: number;
-  customerUid?: string;
-  clientName: string;
-  serviceName: string;
-  barberId?: string;
-  barberName: string;
-  status:
-    | 'Serving'
-    | 'Next Up'
-    | 'Waiting'
-    | 'Grace Buffer'
-    | 'serving'
-    | 'called'
-    | 'waiting'
-    | 'completed'
-    | 'skipped'
-    | 'cancelled';
-  waitMins: number;
-  isCurrentUser?: boolean;
 }
 
 export interface AppointmentItem {
@@ -171,7 +144,6 @@ export interface CouponItem {
 export const SERVICES: ServiceItem[] = [];
 export const BARBERS: BarberItem[] = [];
 export const SHOPS: ShopItem[] = [];
-export const INITIAL_QUEUE: QueueItem[] = [];
 export const INITIAL_APPOINTMENTS: AppointmentItem[] = [];
 export const REVIEWS: ReviewItem[] = [];
 export const INITIAL_COUPONS: CouponItem[] = [];

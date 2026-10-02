@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import {
   AppointmentItem,
   OPENING_HOURS,
-  QueueItem,
 } from '../data/barberlooData';
 import {
   CheckCircle2,
@@ -21,14 +20,14 @@ import {
   formatISTDateString,
 } from '../lib/i18n';
 import { uploadImageToSupabaseStorage } from '../lib/supabase';
+import {
+  evaluateAppointmentSla,
+  calculatePlatformSlaSummary,
+} from '../lib/sla';
 
 interface BarberDashboardProps {
   appointments: AppointmentItem[];
   onUpdateAppointment?: (id: string, updates: any) => Promise<void>;
-  queue: QueueItem[];
-  onAdvanceQueue: () => void;
-  onAddWalkInToQueue?: (clientName: string, serviceName: string) => Promise<void>;
-  onChangeQueueItemStatus?: (queueId: string, newStatus: string) => Promise<void>;
   services?: any[];
   onCreateService?: (payload: any) => Promise<void>;
   onUpdateService?: (id: string, updates: any) => Promise<void>;
@@ -65,10 +64,6 @@ interface BarberDashboardProps {
 export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   appointments,
   onUpdateAppointment,
-  queue,
-  onAdvanceQueue,
-  onAddWalkInToQueue,
-  onChangeQueueItemStatus,
   services = [],
   onCreateService,
   onUpdateService,
@@ -98,7 +93,6 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
 
   const [activeTab, setActiveTab] = useState<
     | 'appointments'
-    | 'queue'
     | 'services'
     | 'team'
     | 'schedule'
@@ -106,10 +100,6 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
     | 'analytics'
     | 'shop'
   >('appointments');
-
-  // Walk-in form
-  const [walkInName, setWalkInName] = useState('');
-  const [walkInService, setWalkInService] = useState('');
 
   // New Service form (INR)
   const [newSrvName, setNewSrvName] = useState('');
@@ -198,7 +188,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   );
   const [newShopMinPrice, setNewShopMinPrice] = useState('650');
   const [newShopTagline, setNewShopTagline] = useState(
-    'Luxury Grooming & Live Chair Queue'
+    'Luxury Grooming & Bespoke Appointments'
   );
   const [newShopAbout, setNewShopAbout] = useState('');
 
@@ -312,17 +302,6 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
     return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
   }, [completedOrConfirmedApts]);
 
-  const handleWalkInSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!walkInName.trim() || !onAddWalkInToQueue) return;
-    await onAddWalkInToQueue(
-      walkInName.trim(),
-      walkInService.trim() || services[0]?.name || 'Haircut & Grooming'
-    );
-    setWalkInName('');
-    setWalkInService('');
-  };
-
   const handleCreateServiceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSrvName.trim() || !onCreateService) return;
@@ -422,10 +401,10 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
             </div>
             <div className="px-4 py-3 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
-                {tr('Live Queue', 'लाइव कतार')}
+                {tr('Completed Cuts', 'पूर्ण कट')}
               </span>
               <span className="font-mono-num text-xl font-bold text-[#F1E194]">
-                {queue.length}
+                {completedApts.length}
               </span>
             </div>
             <div className="px-4 py-3 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
@@ -496,7 +475,6 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
               label: tr('Appointments', 'अपॉइंटमेंट्स'),
               icon: Calendar,
             },
-            { id: 'queue', label: tr('Live Queue', 'लाइव कतार'), icon: Clock },
             {
               id: 'services',
               label: tr('Services Menu (₹)', 'सेवा मेनू (₹)'),
@@ -569,13 +547,30 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                   >
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                       <div>
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex flex-wrap items-center gap-2.5">
                           <span className="font-mono-num text-xs font-bold text-[#F1E194]">
                             {formatISTDateString(apt.date, lang)} · {apt.time} IST
                           </span>
                           <span className="px-2.5 py-0.5 rounded-[8px] bg-[#241719] text-[11px] text-[#FFF9E8]">
                             {apt.status}
                           </span>
+                          {(() => {
+                            const sla = evaluateAppointmentSla(apt);
+                            if (sla.status === 'EXEMPT') return null;
+                            return (
+                              <span
+                                className={`px-2.5 py-0.5 rounded-[8px] font-mono-num text-[10px] font-semibold border ${
+                                  sla.status === 'BREACHED'
+                                    ? 'bg-red-950/90 text-red-200 border-red-400/40'
+                                    : sla.status === 'AT_RISK'
+                                    ? 'bg-amber-950/90 text-amber-200 border-amber-400/40'
+                                    : 'bg-emerald-950/80 text-emerald-200 border-emerald-400/30'
+                                }`}
+                              >
+                                🛡️ {lang === 'hi' ? sla.badgeTextHi : sla.badgeText}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <h3 className="font-display text-2xl font-bold mt-1">
                           {apt.clientName} ({apt.clientPhone})
@@ -852,147 +847,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
           </div>
         )}
 
-        {/* TAB 2: LIVE QUEUE */}
-        {activeTab === 'queue' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-7 rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 sm:p-8 space-y-5">
-              <div className="flex items-center justify-between">
-                <h2 className="font-display text-3xl font-bold">
-                  {tr('Live Chair Queue', 'लाइव चेयर कतार')} ({queue.length})
-                </h2>
-                {queue.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={onAdvanceQueue}
-                    className="px-4 py-2.5 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>
-                      {tr('Complete #1 & Call Next', '#1 पूर्ण करें और अगले को बुलाएं')}
-                    </span>
-                  </button>
-                )}
-              </div>
-
-              {queue.length === 0 ? (
-                <p className="text-xs text-[#8A8178] py-8">
-                  {tr('Live queue is currently empty.', 'लाइव कतार अभी खाली है।')}
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {queue.map((q) => (
-                    <div
-                      key={q.id}
-                      className="rounded-[16px] bg-[#111113] border border-[#F1E194]/15 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                    >
-                      <div>
-                        <span className="font-mono-num text-xs text-[#F1E194] font-bold">
-                          #{q.position} · {q.status} (~{q.waitMins}m)
-                        </span>
-                        <p className="font-semibold text-sm mt-0.5">
-                          {q.clientName}
-                        </p>
-                        <p className="text-xs text-[#8A8178]">
-                          {q.serviceName} · {q.barberName}
-                        </p>
-                      </div>
-                      {onChangeQueueItemStatus && (
-                        <div className="flex flex-wrap gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onChangeQueueItemStatus(q.id, 'called')
-                            }
-                            className="px-2.5 py-1.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/25 text-[#F1E194] text-xs font-semibold cursor-pointer"
-                          >
-                            {tr('Call', 'बुलाएं')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onChangeQueueItemStatus(q.id, 'serving')
-                            }
-                            className="px-2.5 py-1.5 rounded-[10px] bg-[#241719] text-[#FFF9E8] text-xs font-semibold cursor-pointer"
-                          >
-                            {tr('Serve', 'सेवा में')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onChangeQueueItemStatus(q.id, 'completed')
-                            }
-                            className="px-3 py-1.5 rounded-[10px] bg-emerald-900/70 text-emerald-200 text-xs font-semibold cursor-pointer"
-                          >
-                            {tr('Done', 'पूर्ण')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onChangeQueueItemStatus(q.id, 'skipped')
-                            }
-                            className="px-2.5 py-1.5 rounded-[10px] bg-[#5B0E14] text-xs font-semibold cursor-pointer"
-                          >
-                            {tr('Skip', 'स्किप')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onChangeQueueItemStatus(q.id, 'cancelled')
-                            }
-                            className="px-2.5 py-1.5 rounded-[10px] bg-[#111113] border border-[#F1E194]/15 text-[#8A8178] hover:text-[#FFF9E8] text-xs font-semibold cursor-pointer"
-                          >
-                            {tr('Remove', 'हटाएं')}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="lg:col-span-5 rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 sm:p-8 space-y-4">
-              <h3 className="font-display text-2xl font-bold">
-                {tr('Add Walk-In Customer', 'वॉक-इन ग्राहक जोड़ें')}
-              </h3>
-              <form onSubmit={handleWalkInSubmit} className="space-y-3">
-                <div>
-                  <label className="block text-xs text-[#8A8178] mb-1">
-                    {tr('Customer Name', 'ग्राहक का नाम')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={walkInName}
-                    onChange={(e) => setWalkInName(e.target.value)}
-                    placeholder={tr('Enter customer name', 'ग्राहक का नाम लिखें')}
-                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-[#8A8178] mb-1">
-                    {tr('Service', 'सेवा')}
-                  </label>
-                  <input
-                    type="text"
-                    value={walkInService}
-                    onChange={(e) => setWalkInService(e.target.value)}
-                    placeholder={tr('e.g., Haircut & Beard', 'जैसे: हेयरकट और बियर्ड')}
-                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full py-3 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold uppercase tracking-wider cursor-pointer"
-                >
-                  {tr('+ Add Walk-In to Queue', '+ कतार में जोड़ें')}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: SERVICES CRUD (INR) */}
+        {/* TAB 2: SERVICES CRUD (INR) */}
         {activeTab === 'services' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             <div className="lg:col-span-7 rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 sm:p-8 space-y-4">
@@ -2001,6 +1856,54 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                     {peakBookingHour} · {cancellationRatePct}%
                   </span>
                 </div>
+                {(() => {
+                  const slaSummary = calculatePlatformSlaSummary(
+                    appointments,
+                    []
+                  );
+                  return (
+                    <>
+                      <div className="p-4 rounded-[14px] bg-[#111113] border border-[#F1E194]/20">
+                        <span className="text-[#8A8178] block">
+                          {tr(
+                            '🛡️ Salon SLA Compliance Score',
+                            '🛡️ सैलून SLA अनुपालन स्कोर'
+                          )}
+                        </span>
+                        <span className="font-mono-num text-2xl font-bold text-emerald-400">
+                          {slaSummary.overallScorePercent}%
+                        </span>
+                        <span className="text-[10px] text-[#8A8178] block mt-0.5">
+                          {tr(
+                            `15m Chair SLA: ${slaSummary.appointmentSlaPercent}% · On-Time Guarantee`,
+                            `15m चेयर SLA: ${slaSummary.appointmentSlaPercent}% · समय पर सेवा गारंटी`
+                          )}
+                        </span>
+                      </div>
+                      <div className="p-4 rounded-[14px] bg-[#111113] border border-[#F1E194]/20">
+                        <span className="text-[#8A8178] block">
+                          {tr(
+                            'SLA Status (Met / At Risk / Breached)',
+                            'SLA स्थिति (पूर्ण / जोखिम / उल्लंघन)'
+                          )}
+                        </span>
+                        <span className="font-mono-num text-lg font-bold text-[#F1E194]">
+                          {slaSummary.metCount + slaSummary.onTrackCount} OK ·{' '}
+                          {slaSummary.atRiskCount} Risk ·{' '}
+                          <span
+                            className={
+                              slaSummary.breachedCount > 0
+                                ? 'text-red-400'
+                                : 'text-emerald-400'
+                            }
+                          >
+                            {slaSummary.breachedCount} Breached
+                          </span>
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
 

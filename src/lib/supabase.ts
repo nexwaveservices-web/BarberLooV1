@@ -100,11 +100,6 @@ function ensureRealtimeChannel() {
           fn({ type: 'state:updated', payload: msg.payload })
         );
       })
-      .on('broadcast', { event: 'queue:updated' }, (msg) => {
-        realtimeListeners.forEach((fn) =>
-          fn({ type: 'queue:updated', payload: msg.payload })
-        );
-      })
       .on(
         'postgres_changes',
         { event: '*', schema: 'public' },
@@ -481,7 +476,7 @@ create table if not exists public.shops (
   approval_status text not null default 'approved', -- pending | approved | rejected | suspended
   logo_url text not null default '',
   image text not null default '${ASSETS.royalInterior}',
-  tagline text not null default 'Bespoke Grooming & Live Queue',
+  tagline text not null default 'Bespoke Grooming & Reserved Appointments',
   about text not null default '',
   qr_code_slug text not null default 'barberloo-india',
   created_at timestamptz default now()
@@ -554,25 +549,7 @@ create table if not exists public.appointments (
   created_at timestamptz default now()
 );
 
--- 6. LIVE QUEUE
-create table if not exists public.queue (
-  id text primary key,
-  shop_id text not null default 'shop-1',
-  barber_id text not null default 'brb-1',
-  barber_name text not null,
-  customer_uid text default '',
-  client_name text not null,
-  service_id text not null default 'srv-1',
-  service_name text not null,
-  position integer not null,
-  status text not null default 'waiting', -- waiting | called | serving | completed | skipped | cancelled
-  estimated_wait_min integer not null default 12,
-  grace_buffer_min integer not null default 0,
-  joined_at text not null default '',
-  created_at timestamptz default now()
-);
-
--- 7. REVIEWS
+-- 6. REVIEWS
 create table if not exists public.reviews (
   id text primary key,
   appointment_id text default '',
@@ -777,7 +754,6 @@ alter table public.shops enable row level security;
 alter table public.barbers enable row level security;
 alter table public.services enable row level security;
 alter table public.appointments enable row level security;
-alter table public.queue enable row level security;
 alter table public.reviews enable row level security;
 alter table public.favorites enable row level security;
 alter table public.notifications enable row level security;
@@ -794,7 +770,7 @@ declare
   t text;
 begin
   foreach t in array array[
-    'profiles','shops','barbers','services','appointments','queue',
+    'profiles','shops','barbers','services','appointments',
     'reviews','favorites','notifications','working_hours','shop_gallery',
     'barber_gallery','payments','coupons','rewards','reports'
   ]
@@ -831,7 +807,7 @@ declare
   t text;
 begin
   foreach t in array array[
-    'profiles','shops','barbers','services','appointments','queue',
+    'profiles','shops','barbers','services','appointments',
     'reviews','favorites','notifications','working_hours','shop_gallery',
     'barber_gallery','payments','coupons','rewards','reports'
   ]

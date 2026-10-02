@@ -43,14 +43,7 @@ async function safeBackendRequest<T>(
   }
 }
 
-function mapSupabaseShop(sh: any, queueRows: any[] = []) {
-  const activeQ = queueRows.filter(
-    (q) =>
-      (q.shop_id || q.shopId) === sh.id &&
-      ['waiting', 'called', 'serving', 'Waiting', 'Next Up', 'Serving'].includes(
-        String(q.status)
-      )
-  );
+function mapSupabaseShop(sh: any) {
   return {
     id: sh.id,
     ownerUid: sh.owner_uid ?? sh.ownerUid ?? '',
@@ -71,14 +64,12 @@ function mapSupabaseShop(sh: any, queueRows: any[] = []) {
     approvalStatus: sh.approval_status ?? sh.approvalStatus ?? 'approved',
     logoUrl: sh.logo_url ?? sh.logoUrl ?? '',
     image: sh.image || ASSETS.royalInterior,
-    tagline: sh.tagline || 'Bespoke Grooming & Live Queue',
+    tagline: sh.tagline || 'Bespoke Grooming & Reserved Appointments',
     about: sh.about || '',
     qrCodeSlug: sh.qr_code_slug ?? sh.qrCodeSlug ?? sh.id,
     qrCodeUrl: `${window.location.origin}/?shop=${encodeURIComponent(
       sh.qr_code_slug ?? sh.qrCodeSlug ?? sh.id
     )}`,
-    queueCount: activeQ.length,
-    waitMins: activeQ.length * 12,
   };
 }
 
@@ -201,36 +192,6 @@ function mapSupabaseAppointment(a: any) {
   };
 }
 
-function mapSupabaseQueue(q: any, activeCustomerUid?: string) {
-  const raw = String(q.status || 'waiting').toLowerCase();
-  const wait = Number(q.estimated_wait_min ?? q.waitMins ?? 12);
-  const grace = Number(q.grace_buffer_min ?? q.graceBufferMin ?? 0);
-  const custUid = q.customer_uid ?? q.customerUid ?? '';
-  return {
-    id: q.id,
-    shopId: q.shop_id ?? q.shopId ?? 'shop-1',
-    barberId: q.barber_id ?? q.barberId ?? 'brb-1',
-    position: Number(q.position ?? 1),
-    customerUid: custUid,
-    clientName: q.client_name ?? q.clientName ?? 'Client',
-    serviceId: q.service_id ?? q.serviceId ?? 'srv-1',
-    serviceName: q.service_name ?? q.serviceName ?? 'Haircut & Grooming',
-    barberName: q.barber_name ?? q.barberName ?? 'Barber',
-    status:
-      raw === 'serving'
-        ? 'Serving'
-        : raw === 'called' || raw === 'next up'
-        ? 'Next Up'
-        : 'Waiting',
-    rawStatus: raw,
-    estimatedWaitMin: wait,
-    waitMins: wait + grace,
-    graceBufferMin: grace,
-    joinedAt: q.joined_at ?? q.joinedAt ?? '',
-    isCurrentUser: Boolean(activeCustomerUid && custUid === activeCustomerUid),
-  };
-}
-
 function mapSupabaseProfile(p: any) {
   const email = String(p.email || '').toLowerCase();
   return {
@@ -280,7 +241,6 @@ export const apiFetchBootstrap = async (uid = '') => {
       barbersRes,
       servicesRes,
       aptsRes,
-      queueRes,
       reviewsRes,
       profilesRes,
       couponsRes,
@@ -297,7 +257,6 @@ export const apiFetchBootstrap = async (uid = '') => {
       supabase.from('barbers').select('*'),
       supabase.from('services').select('*'),
       supabase.from('appointments').select('*').order('created_at', { ascending: false }),
-      supabase.from('queue').select('*').order('position', { ascending: true }),
       supabase.from('reviews').select('*').order('created_at', { ascending: false }),
       supabase.from('profiles').select('*'),
       supabase.from('coupons').select('*'),
@@ -325,21 +284,11 @@ export const apiFetchBootstrap = async (uid = '') => {
         : Promise.resolve({ data: [] }),
     ]);
 
-    const rawQueue = Array.isArray(queueRes.data) ? queueRes.data : [];
-    const activeQueue = rawQueue
-      .filter((q) =>
-        ['waiting', 'called', 'serving'].includes(
-          String(q.status || 'waiting').toLowerCase()
-        )
-      )
-      .map((q) => mapSupabaseQueue(q, uid));
-
     supaData = {
-      shops: (shopsRes.data || []).map((s) => mapSupabaseShop(s, rawQueue)),
+      shops: (shopsRes.data || []).map(mapSupabaseShop),
       barbers: (barbersRes.data || []).map(mapSupabaseBarber),
       services: (servicesRes.data || []).map(mapSupabaseService),
       appointments: (aptsRes.data || []).map(mapSupabaseAppointment),
-      queue: activeQueue,
       reviews: (reviewsRes.data || []).map((r: any) => ({
         id: r.id,
         shopId: r.shop_id ?? r.shopId ?? 'shop-1',
@@ -472,10 +421,6 @@ export const apiFetchBootstrap = async (uid = '') => {
     barbers: mergeById(supaData.barbers, backendData?.barbers),
     services: mergeById(supaData.services, backendData?.services),
     appointments: mergeById(supaData.appointments, backendData?.appointments),
-    queue:
-      supaData.queue && supaData.queue.length > 0
-        ? supaData.queue
-        : backendData?.queue || [],
     reviews: mergeById(supaData.reviews, backendData?.reviews),
     profiles: mergeById(supaData.profiles, backendData?.profiles, 'uid'),
     coupons: mergeById(supaData.coupons, backendData?.coupons),
@@ -921,234 +866,6 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
   return updated;
 };
 
-async function recalculateSupabaseQueuePositions() {
-  try {
-    const { data: active } = await supabase
-      .from('queue')
-      .select('*')
-      .in('status', ['waiting', 'called', 'serving'])
-      .order('position', { ascending: true })
-      .order('created_at', { ascending: true });
-
-    const rows = active || [];
-    for (let idx = 0; idx < rows.length; idx++) {
-      const item = rows[idx];
-      const newPos = idx + 1;
-      const newStatus =
-        newPos === 1
-          ? 'serving'
-          : newPos === 2 && item.status === 'waiting'
-          ? 'called'
-          : item.status;
-      const newWait = Math.max(0, (newPos - 1) * 12);
-
-      if (
-        item.position !== newPos ||
-        item.status !== newStatus ||
-        item.estimated_wait_min !== newWait
-      ) {
-        await supabase
-          .from('queue')
-          .update({
-            position: newPos,
-            status: newStatus,
-            estimated_wait_min: newWait,
-          })
-          .eq('id', item.id);
-
-        if (item.customer_uid && !String(item.customer_uid).startsWith('walkin-')) {
-          const notifTitle =
-            newPos === 1
-              ? `It's your turn! ${item.barber_name} is ready for your ${item.service_name} now.`
-              : newPos === 2
-              ? `You are Next Up (#2) in the live queue for ${item.barber_name}! Please head to the chair.`
-              : `Queue update: You are now #${newPos} (~${newWait} mins wait).`;
-
-          await safeSupabaseUpsert('notifications', {
-            id: `notif-q-${Date.now()}-${idx}`,
-            recipient_uid: item.customer_uid,
-            type: newPos === 1 ? 'service_started' : newPos === 2 ? 'customer_next' : 'queue_position',
-            title: notifTitle,
-            time_label: 'Just now · Live Queue',
-            unread: true,
-          });
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-}
-
-export const apiMutateQueue = async (action: {
-  type:
-    | 'advance'
-    | 'leave'
-    | 'rejoin'
-    | 'walkin'
-    | 'reset'
-    | 'status'
-    | 'grace';
-  customerUid?: string;
-  clientName?: string;
-  serviceName?: string;
-  barberName?: string;
-  shopId?: string;
-  barberId?: string;
-  queueId?: string;
-  newStatus?: string;
-}) => {
-  try {
-    if (action.type === 'rejoin' && action.customerUid) {
-      const { data: existing } = await supabase
-        .from('queue')
-        .select('*')
-        .in('status', ['waiting', 'called', 'serving']);
-      const list = existing || [];
-      if (!list.some((q) => q.customer_uid === action.customerUid)) {
-        const pos = list.length + 1;
-        const estWait = Math.max(0, (pos - 1) * 12);
-        await safeSupabaseUpsert('queue', {
-          id: `q-${Date.now()}`,
-          shop_id: action.shopId || 'shop-1',
-          barber_id: action.barberId || 'brb-1',
-          barber_name: action.barberName || 'Available Barber',
-          customer_uid: action.customerUid,
-          client_name: action.clientName || 'Client',
-          service_id: 'srv-1',
-          service_name: action.serviceName || 'Haircut & Grooming',
-          position: pos,
-          status: pos === 1 ? 'serving' : pos === 2 ? 'called' : 'waiting',
-          estimated_wait_min: estWait,
-          grace_buffer_min: 0,
-          joined_at: new Date().toLocaleTimeString('en-IN', {
-            timeZone: 'Asia/Kolkata',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-          }),
-        });
-
-        await safeSupabaseUpsert('notifications', {
-          id: `notif-qjoin-${Date.now()}`,
-          recipient_uid: action.customerUid,
-          type: 'queue_joined',
-          title: `Joined Live Queue at position #${pos} (~${estWait} mins wait) with ${
-            action.barberName || 'Available Barber'
-          }.`,
-          time_label: 'Just now · Live Queue',
-          unread: true,
-        });
-      }
-    } else if (action.type === 'walkin') {
-      const { data: existing } = await supabase
-        .from('queue')
-        .select('*')
-        .in('status', ['waiting', 'called', 'serving']);
-      const pos = (existing?.length || 0) + 1;
-      await safeSupabaseUpsert('queue', {
-        id: `q-${Date.now()}`,
-        shop_id: action.shopId || 'shop-1',
-        barber_id: action.barberId || 'brb-1',
-        barber_name: action.barberName || 'Barber',
-        customer_uid: `walkin-${Date.now()}`,
-        client_name: action.clientName || 'Walk-in Guest',
-        service_id: 'srv-1',
-        service_name: action.serviceName || 'Haircut',
-        position: pos,
-        status: pos === 1 ? 'serving' : pos === 2 ? 'called' : 'waiting',
-        estimated_wait_min: Math.max(0, (pos - 1) * 12),
-        grace_buffer_min: 0,
-        joined_at: new Date().toLocaleTimeString('en-IN', {
-          timeZone: 'Asia/Kolkata',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        }),
-      });
-    } else if (action.type === 'leave' && action.customerUid) {
-      await supabase
-        .from('queue')
-        .update({ status: 'cancelled', position: 0 })
-        .eq('customer_uid', action.customerUid)
-        .in('status', ['waiting', 'called', 'serving']);
-      await recalculateSupabaseQueuePositions();
-    } else if (action.type === 'advance') {
-      const { data: active } = await supabase
-        .from('queue')
-        .select('*')
-        .in('status', ['waiting', 'called', 'serving'])
-        .order('position', { ascending: true });
-      if (active && active.length > 0) {
-        const first = active[0];
-        await supabase
-          .from('queue')
-          .update({ status: 'completed', position: 0 })
-          .eq('id', first.id);
-        if (first.customer_uid && !String(first.customer_uid).startsWith('walkin-')) {
-          await safeSupabaseUpsert('notifications', {
-            id: `notif-qdone-${Date.now()}`,
-            recipient_uid: first.customer_uid,
-            type: 'service_completed',
-            title: `Your live queue cut with ${first.barber_name} is complete! Thank you for visiting.`,
-            time_label: 'Just now · Live Queue',
-            unread: true,
-          });
-        }
-        await recalculateSupabaseQueuePositions();
-      }
-    } else if (action.type === 'status' && action.queueId && action.newStatus) {
-      const normalized = action.newStatus.toLowerCase();
-      const isRemoving = ['completed', 'skipped', 'cancelled'].includes(
-        normalized
-      );
-      await supabase
-        .from('queue')
-        .update({
-          status: normalized,
-          ...(isRemoving ? { position: 0 } : {}),
-        })
-        .eq('id', action.queueId);
-      await recalculateSupabaseQueuePositions();
-    } else if (action.type === 'grace' && action.customerUid) {
-      const { data: myRow } = await supabase
-        .from('queue')
-        .select('*')
-        .eq('customer_uid', action.customerUid)
-        .in('status', ['waiting', 'called', 'serving'])
-        .maybeSingle();
-      if (myRow) {
-        const nextGrace = Number(myRow.grace_buffer_min || 0) === 0 ? 5 : 0;
-        await supabase
-          .from('queue')
-          .update({ grace_buffer_min: nextGrace })
-          .eq('id', myRow.id);
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const backendQueue = await safeBackendRequest<any[]>('/api/queue', {
-    method: 'POST',
-    body: JSON.stringify(action),
-  });
-
-  const { data: freshSupaQueue } = await supabase
-    .from('queue')
-    .select('*')
-    .in('status', ['waiting', 'called', 'serving'])
-    .order('position', { ascending: true });
-
-  const mappedQueue = (freshSupaQueue || []).map((q) =>
-    mapSupabaseQueue(q, action.customerUid)
-  );
-  const finalQueue = mappedQueue.length > 0 ? mappedQueue : backendQueue || [];
-
-  broadcastSupabaseEvent('queue:updated', { queue: finalQueue });
-  return finalQueue;
-};
-
 export const apiCreateService = async (payload: any) => {
   const id = `srv-${Date.now()}`;
   const supaSrv = {
@@ -1328,7 +1045,7 @@ export const apiCreateShop = async (payload: any) => {
     approval_status: 'approved',
     logo_url: payload.logoUrl || '',
     image: payload.image || ASSETS.royalInterior,
-    tagline: payload.tagline || 'Bespoke Grooming & Live Queue',
+    tagline: payload.tagline || 'Bespoke Grooming & Reserved Appointments',
     about: payload.about || '',
     qr_code_slug: id,
   };
@@ -1884,6 +1601,54 @@ export const apiBroadcastShopNotification = async (payload: {
   }
   broadcastSupabaseEvent('state:updated', { entity: 'notifications' });
   return { ok: true, recipientCount };
+};
+
+export const apiClaimSlaCompensation = async (payload: {
+  customerUid: string;
+  appointmentId: string;
+  serviceName: string;
+  barberName: string;
+  points?: number;
+}) => {
+  const pts = payload.points || 100;
+  try {
+    await safeSupabaseUpsert('rewards', {
+      id: `rew-sla-${Date.now()}`,
+      customer_uid: payload.customerUid,
+      points_delta: pts,
+      reason: `SLA On-Time Guarantee Credit (+${pts} PTS): ${payload.serviceName} with ${payload.barberName}`,
+      type: 'earned',
+    });
+
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('reward_balance')
+      .eq('uid', payload.customerUid)
+      .maybeSingle();
+
+    if (prof) {
+      await supabase
+        .from('profiles')
+        .update({
+          reward_balance: Number(prof.reward_balance || 0) + pts,
+        })
+        .eq('uid', payload.customerUid);
+    }
+
+    await safeSupabaseUpsert('notifications', {
+      id: `notif-sla-${Date.now()}`,
+      recipient_uid: payload.customerUid,
+      type: 'important_shop_notification',
+      title: `🛡️ SLA Guarantee Credit: +${pts} PTS added to your account for delay on ${payload.serviceName} with ${payload.barberName}.`,
+      time_label: 'Just now · SLA Engine',
+      unread: true,
+    });
+  } catch {
+    // ignore
+  }
+
+  broadcastSupabaseEvent('state:updated', { entity: 'rewards' });
+  return { ok: true, pointsAwarded: pts };
 };
 
 export function connectRealtimeSocket(

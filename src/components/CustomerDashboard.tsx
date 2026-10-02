@@ -3,7 +3,6 @@ import {
   AppointmentItem,
   BarberItem,
   PageView,
-  QueueItem,
   ServiceItem,
   ShopItem,
 } from '../data/barberlooData';
@@ -27,6 +26,11 @@ import {
   formatISTTimeSlot,
 } from '../lib/i18n';
 import { uploadImageToSupabaseStorage } from '../lib/supabase';
+import { apiClaimSlaCompensation } from '../lib/api';
+import {
+  evaluateAppointmentSla,
+  markCustomerClaimedSla,
+} from '../lib/sla';
 import {
   getBrowserNotificationPermission,
   requestBrowserNotificationPermission,
@@ -43,7 +47,6 @@ interface CustomerDashboardProps {
     date: string,
     time: string
   ) => Promise<void>;
-  queue: QueueItem[];
   onNavigate: (page: PageView) => void;
   onSelectServiceForBooking?: (service: ServiceItem) => void;
   onSelectBarberForBooking: (barber: BarberItem) => void;
@@ -70,7 +73,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   appointments,
   onCancelAppointment,
   onRescheduleAppointment,
-  queue,
   onNavigate,
   onSelectServiceForBooking,
   onSelectBarberForBooking,
@@ -130,10 +132,27 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [browserAlertsOn, setBrowserAlertsOn] = useState<boolean>(() =>
     areBrowserAlertsEnabled()
   );
+  const [claimedSlaIds, setClaimedSlaIds] = useState<string[]>([]);
 
-  const userQueueEntry = queue.find(
-    (q) => q.isCurrentUser || q.customerUid === currentUserProfile?.uid
-  );
+  const handleClaimSlaBonus = async (apt: any) => {
+    if (!currentUserProfile?.uid || claimedSlaIds.includes(apt.id)) return;
+    markCustomerClaimedSla(apt.id);
+    setClaimedSlaIds((prev) => [...prev, apt.id]);
+    await apiClaimSlaCompensation({
+      customerUid: currentUserProfile.uid,
+      appointmentId: apt.id,
+      serviceName: apt.serviceName,
+      barberName: apt.barberName,
+      points: 100,
+    });
+    setStatusToast(
+      tr(
+        '🛡️ +100 PTS SLA On-Time Chair Guarantee Credit added to your rewards!',
+        '🛡️ +100 PTS SLA ऑन-टाइम गारंटी क्रेडिट आपके रिवॉर्ड्स में जोड़ दिया गया है!'
+      )
+    );
+    setTimeout(() => setStatusToast(''), 4000);
+  };
 
   const upcomingAppointments = appointments.filter(
     (a) =>
@@ -160,9 +179,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     if (nextState) {
       await sendBrowserNotification({
         title: 'BarberLoo Background Alerts Active',
-        body: 'Queue status changes and appointment reminders will alert you even when the tab is in the background.',
+        body: 'Appointment reminders and status changes will alert you even when the tab is in the background.',
         tag: `barberloo-toggle-on-${Date.now()}`,
-        category: 'queue_status',
+        category: 'appointment_reminder',
       });
     }
   };
@@ -177,18 +196,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     setBrowserAlertsEnabledPreference(true);
     setBrowserAlertsOn(true);
     await sendBrowserNotification({
-      title: userQueueEntry
-        ? `💈 Queue Status • Position #${userQueueEntry.position}`
-        : nextAppointment
-          ? `⏰ Reminder: ${nextAppointment.serviceName} at ${nextAppointment.time}`
-          : '🔔 BarberLoo Real-Time Alert',
-      body: userQueueEntry
-        ? `Estimated wait: ~${userQueueEntry.waitMins} mins with ${userQueueEntry.barberName}. Background alerts are working!`
-        : nextAppointment
-          ? `Upcoming appointment with ${nextAppointment.barberName} on ${nextAppointment.date} at ${nextAppointment.time}.`
-          : 'Real-time Queue Status Changes & Appointment Reminders are active in the background.',
+      title: nextAppointment
+        ? `⏰ Reminder: ${nextAppointment.serviceName} at ${nextAppointment.time}`
+        : '🔔 BarberLoo Appointment Alert',
+      body: nextAppointment
+        ? `Upcoming appointment with ${nextAppointment.barberName} on ${nextAppointment.date} at ${nextAppointment.time}.`
+        : 'Real-time Appointment Reminders and booking updates are active in the background.',
       tag: `barberloo-test-alert-${Date.now()}`,
-      category: userQueueEntry ? 'queue_status' : 'appointment_reminder',
+      category: 'appointment_reminder',
     });
   };
 
@@ -556,6 +571,47 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     </div>
                   )}
 
+                  {/* Real-Time SLA On-Time Chair Guarantee Bar */}
+                  {(() => {
+                    const sla = evaluateAppointmentSla(nextAppointment);
+                    if (sla.status === 'EXEMPT') return null;
+                    const alreadyClaimed =
+                      claimedSlaIds.includes(nextAppointment.id) ||
+                      !sla.canClaimCompensation;
+                    return (
+                      <div
+                        className={`p-3.5 rounded-[14px] border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                          sla.status === 'BREACHED'
+                            ? 'bg-[#5B0E14]/65 border-red-400/40 text-red-100'
+                            : sla.status === 'AT_RISK'
+                            ? 'bg-amber-950/60 border-amber-400/40 text-amber-100'
+                            : 'bg-emerald-950/50 border-emerald-400/30 text-emerald-100'
+                        }`}
+                      >
+                        <div>
+                          <span className="font-mono-num font-bold uppercase tracking-wider">
+                            🛡️ {lang === 'hi' ? sla.badgeTextHi : sla.badgeText}
+                          </span>
+                          <p className="text-[11px] opacity-85 mt-0.5">
+                            {lang === 'hi' ? sla.detailTextHi : sla.detailText}
+                          </p>
+                        </div>
+                        {sla.status === 'BREACHED' && !alreadyClaimed && (
+                          <button
+                            type="button"
+                            onClick={() => handleClaimSlaBonus(nextAppointment)}
+                            className="px-3.5 py-2 rounded-[10px] bg-[#F1E194] text-[#111113] text-[11px] font-semibold uppercase tracking-wider shrink-0 cursor-pointer"
+                          >
+                            {tr(
+                              'Claim +100 PTS SLA Credit',
+                              '+100 PTS SLA क्रेडिट प्राप्त करें'
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {reschedulingId === nextAppointment.id && (
                     <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/30 flex flex-wrap items-end gap-3">
                       <div>
@@ -753,6 +809,23 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                               )}
                           </div>
                           <div className="flex flex-wrap items-center gap-2.5">
+                            {(() => {
+                              const sla = evaluateAppointmentSla(apt);
+                              if (sla.status === 'EXEMPT') return null;
+                              return (
+                                <span
+                                  className={`px-2.5 py-1 rounded-[10px] text-[10px] font-mono-num font-semibold ${
+                                    sla.status === 'BREACHED'
+                                      ? 'bg-red-950 text-red-200'
+                                      : sla.status === 'AT_RISK'
+                                      ? 'bg-amber-950 text-amber-200'
+                                      : 'bg-emerald-950 text-emerald-200'
+                                  }`}
+                                >
+                                  🛡️ {lang === 'hi' ? sla.badgeTextHi : sla.badgeText}
+                                </span>
+                              );
+                            })()}
                             <span className="font-mono-num text-sm font-bold text-[#5B0E14]">
                               {formatINR(apt.price)}
                             </span>
@@ -944,43 +1017,28 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             </div>
           </div>
 
-          {/* Right 4 Cols: Queue Status, Favorites & Notifications */}
+          {/* Right 4 Cols: Book Appointment, Favorites & Notifications */}
           <div className="lg:col-span-4 space-y-6">
-            {/* Live Queue Status */}
+            {/* Quick Book Appointment Card */}
             <div className="rounded-[24px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold tracking-wider uppercase text-[#F1E194]">
-                  {tr('LIVE QUEUE STATUS', 'लाइव कतार स्थिति')}
+                  {tr('BOOK NEXT APPOINTMENT', 'अगला अपॉइंटमेंट बुक करें')}
                 </span>
-                <span className="w-2 h-2 rounded-full bg-[#F1E194] animate-pulse" />
+                <Calendar className="w-4 h-4 text-[#F1E194]" />
               </div>
-              {userQueueEntry ? (
-                <div>
-                  <p className="font-display text-3xl font-bold text-[#F1E194]">
-                    {tr(
-                      `Position #${userQueueEntry.position}`,
-                      `आपका स्थान #${userQueueEntry.position}`
-                    )}
-                  </p>
-                  <p className="text-xs text-[#8A8178] mt-1">
-                    ~{userQueueEntry.waitMins} {tr('mins wait', 'मिनट प्रतीक्षा')} ·{' '}
-                    {userQueueEntry.barberName}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-xs text-[#8A8178]">
-                  {tr(
-                    'You are not currently in a live queue.',
-                    'आप अभी किसी लाइव कतार में नहीं हैं।'
-                  )}
-                </p>
-              )}
+              <p className="text-xs text-[#8A8178] leading-relaxed">
+                {tr(
+                  'Reserve your preferred master barber and premium slot in advance with guaranteed on-time chair start.',
+                  'अपने पसंदीदा मास्टर बार्बर और समय को पहले से आरक्षित करें और 15-मिनट ऑन-टाइम चेयर गारंटी प्राप्त करें।'
+                )}
+              </p>
               <button
                 type="button"
-                onClick={() => onNavigate('queue')}
-                className="w-full py-3 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+                onClick={() => onNavigate('booking')}
+                className="w-full py-3.5 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold uppercase tracking-wider hover:bg-[#FFF9E8] transition-colors cursor-pointer"
               >
-                {tr('Open Live Queue', 'लाइव कतार खोलें')}
+                {tr('Book New Appointment', 'नया अपॉइंटमेंट बुक करें')}
               </button>
             </div>
 
@@ -1091,7 +1149,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       type="button"
                       onClick={handleSendTestBrowserAlert}
                       className="px-2 py-1 rounded-full text-[10px] font-semibold bg-[#FAF6EA] text-[#5B0E14] border border-[#5B0E14]/25 hover:bg-[#5B0E14]/10 cursor-pointer"
-                      title="Send a live browser notification for Queue Status & Appointment Reminders"
+                      title="Send a live browser notification for Appointment Reminders & Status Updates"
                     >
                       {tr('Test Alert', 'टेस्ट अलर्ट')}
                     </button>

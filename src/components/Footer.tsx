@@ -25,14 +25,14 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             </div>
             <p className="text-sm text-[#8A8178] max-w-md leading-relaxed">
               {tr(
-                'India’s luxury grooming reservation and live chair queue platform. Connecting discerning clients with verified partner barbershops across Mumbai, Bengaluru, New Delhi, and beyond.',
-                'भारत का प्रमुख लग्ज़री ग्रूमिंग अपॉइंटमेंट और लाइव कतार प्लेटफ़ॉर्म। मुंबई, बेंगलुरु, नई दिल्ली और पूरे भारत में सत्यापित सैलून नेटवर्क।'
+                'India’s luxury grooming reservation and verified appointment platform. Connecting discerning clients with verified partner barbershops across Mumbai, Bengaluru, New Delhi, and beyond.',
+                'भारत का प्रमुख लग्ज़री ग्रूमिंग अपॉइंटमेंट प्लेटफ़ॉर्म। मुंबई, बेंगलुरु, नई दिल्ली और पूरे भारत में सत्यापित सैलून नेटवर्क।'
               )}
             </p>
             <p className="text-xs font-mono-num tracking-[0.22em] text-[#F1E194] uppercase pt-1">
               {tr(
-                'INR (₹) • IST (UTC+05:30) • REAL-TIME QUEUE',
-                'भारतीय रुपया (₹) • भारतीय मानक समय (IST) • लाइव कतार'
+                'INR (₹) • IST (UTC+05:30) • VERIFIED APPOINTMENTS',
+                'भारतीय रुपया (₹) • भारतीय मानक समय (IST) • सत्यापित अपॉइंटमेंट्स'
               )}
             </p>
           </div>
@@ -68,15 +68,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   className="hover:text-[#F1E194] transition-colors cursor-pointer"
                 >
                   {tr('Book Appointment (IST)', 'अपॉइंटमेंट बुक करें (IST)')}
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={() => handleNav('queue')}
-                  className="hover:text-[#F1E194] transition-colors cursor-pointer"
-                >
-                  {tr('Live Chair Queue', 'लाइव चेयर कतार')}
                 </button>
               </li>
             </ul>

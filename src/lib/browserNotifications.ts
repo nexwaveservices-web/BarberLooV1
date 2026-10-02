@@ -1,14 +1,12 @@
 // Browser Notification API + Background Service Worker Integration for BarberLoo
-// Delivers real-time OS notifications for Queue Status Changes and Appointment Reminders
+// Delivers real-time OS notifications for Appointment Reminders, Status Changes, and Bookings
 // even when the application tab is minimized or in the background.
 
 const SENT_ALERTS_STORAGE_KEY = 'barberloo_sent_browser_alerts_v1';
 const ALERTS_ENABLED_STORAGE_KEY = 'barberloo_browser_alerts_enabled_v1';
-const LAST_QUEUE_STATE_KEY = 'barberloo_last_queue_snapshot_v1';
 const LAST_APT_STATE_KEY = 'barberloo_last_apt_snapshot_v1';
 
 export type BrowserNotificationCategory =
-  | 'queue_status'
   | 'appointment_reminder'
   | 'booking_update'
   | 'broadcast';
@@ -111,7 +109,7 @@ export async function registerNotificationServiceWorker(
   }
 }
 
-// Subtle Web Audio API notification chime for urgent queue / reminder alerts
+// Subtle Web Audio API notification chime for urgent appointment / reminder alerts
 function playAlertChime(urgent = false) {
   try {
     const AudioCtx =
@@ -149,9 +147,9 @@ export async function requestBrowserNotificationPermission(): Promise<
       setBrowserAlertsEnabledPreference(true);
       await sendBrowserNotification({
         title: 'BarberLoo Live Alerts Enabled',
-        body: "You'll now receive real-time alerts for Queue Status Changes and Appointment Reminders even when BarberLoo is in the background.",
+        body: "You'll now receive real-time alerts for Appointment Reminders, Status Changes, and Confirmations even when BarberLoo is in the background.",
         tag: `barberloo-welcome-alert-${Date.now()}`,
-        category: 'queue_status',
+        category: 'appointment_reminder',
         targetPage: 'customer-dashboard',
       });
     }
@@ -185,7 +183,7 @@ export async function sendBrowserNotification(
   const notificationData = {
     url: window.location.origin,
     targetPage: payload.targetPage || 'customer-dashboard',
-    category: payload.category || 'queue_status',
+    category: payload.category || 'appointment_reminder',
   };
 
   try {
@@ -245,200 +243,7 @@ export async function sendBrowserNotification(
 }
 
 // ============================================================================
-// 1. REAL-TIME QUEUE STATUS CHANGE DETECTOR
-// ============================================================================
-interface QueueSnapshot {
-  id: string;
-  status: string;
-  position: number;
-  estimatedWaitMins: number;
-  barberName?: string;
-  serviceName?: string;
-}
-
-function getSavedQueueSnapshot(uid: string): QueueSnapshot | null {
-  try {
-    const raw = localStorage.getItem(`${LAST_QUEUE_STATE_KEY}_${uid}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveQueueSnapshot(uid: string, snap: QueueSnapshot | null) {
-  try {
-    if (!snap) {
-      localStorage.removeItem(`${LAST_QUEUE_STATE_KEY}_${uid}`);
-    } else {
-      localStorage.setItem(`${LAST_QUEUE_STATE_KEY}_${uid}`, JSON.stringify(snap));
-    }
-  } catch {
-    // ignore
-  }
-}
-
-export async function checkAndNotifyQueueChanges(
-  uid: string,
-  queue: any[],
-  onNavigate?: (page: string) => void
-) {
-  if (!uid || !Array.isArray(queue)) return;
-
-  const userEntry = queue.find(
-    (q) =>
-      q.customerUid === uid ||
-      q.customer_uid === uid ||
-      q.isCurrentUser === true
-  );
-
-  const prevSnap = getSavedQueueSnapshot(uid);
-
-  if (!userEntry) {
-    if (prevSnap) {
-      saveQueueSnapshot(uid, null);
-    }
-    return;
-  }
-
-  const currentSnap: QueueSnapshot = {
-    id: String(userEntry.id),
-    status: String(userEntry.status || 'waiting').toLowerCase(),
-    position: Number(userEntry.position ?? 1),
-    estimatedWaitMins: Number(
-      userEntry.estimatedWaitMins ?? userEntry.estimated_wait ?? 15
-    ),
-    barberName: userEntry.barberName || userEntry.barber_name || 'Your Barber',
-    serviceName: userEntry.serviceName || userEntry.service || 'Grooming Service',
-  };
-
-  // First time seeing this queue entry
-  if (!prevSnap || prevSnap.id !== currentSnap.id) {
-    saveQueueSnapshot(uid, currentSnap);
-
-    if (currentSnap.status === 'waiting') {
-      await sendBrowserNotification(
-        {
-          title: `Joined Live Queue • Position #${currentSnap.position}`,
-          body: `${currentSnap.serviceName} with ${currentSnap.barberName}. Est. wait: ~${currentSnap.estimatedWaitMins} mins.`,
-          tag: `queue-join-${currentSnap.id}-${currentSnap.position}`,
-          category: 'queue_status',
-          targetPage: 'queue',
-        },
-        onNavigate
-      );
-    }
-    return;
-  }
-
-  // Status changed (e.g. waiting -> called -> serving -> completed / skipped / cancelled)
-  if (prevSnap.status !== currentSnap.status) {
-    saveQueueSnapshot(uid, currentSnap);
-
-    if (currentSnap.status === 'called') {
-      await sendBrowserNotification(
-        {
-          title: `🔔 You're Being Called! Head to the Chair`,
-          body: `${currentSnap.barberName} is ready for your ${currentSnap.serviceName}. Please proceed to the chair now!`,
-          tag: `queue-status-${currentSnap.id}-called`,
-          category: 'queue_status',
-          requireInteraction: true,
-          targetPage: 'queue',
-        },
-        onNavigate
-      );
-    } else if (
-      currentSnap.status === 'serving' ||
-      currentSnap.status === 'in-chair' ||
-      currentSnap.status === 'in_progress'
-    ) {
-      await sendBrowserNotification(
-        {
-          title: `✂️ Your Service Has Started`,
-          body: `${currentSnap.barberName} has started your ${currentSnap.serviceName}. Enjoy your session!`,
-          tag: `queue-status-${currentSnap.id}-serving`,
-          category: 'queue_status',
-          targetPage: 'queue',
-        },
-        onNavigate
-      );
-    } else if (
-      currentSnap.status === 'completed' ||
-      currentSnap.status === 'done'
-    ) {
-      await sendBrowserNotification(
-        {
-          title: `✅ Queue Service Completed`,
-          body: `Your ${currentSnap.serviceName} with ${currentSnap.barberName} is complete! Tap to leave a review.`,
-          tag: `queue-status-${currentSnap.id}-completed`,
-          category: 'queue_status',
-          targetPage: 'customer-dashboard',
-        },
-        onNavigate
-      );
-    } else if (currentSnap.status === 'skipped') {
-      await sendBrowserNotification(
-        {
-          title: `⚠️ Queue Turn Skipped`,
-          body: `Your turn for ${currentSnap.serviceName} was marked as skipped. Please check in with the shop desk.`,
-          tag: `queue-status-${currentSnap.id}-skipped`,
-          category: 'queue_status',
-          requireInteraction: true,
-          targetPage: 'queue',
-        },
-        onNavigate
-      );
-    } else if (currentSnap.status === 'cancelled') {
-      await sendBrowserNotification(
-        {
-          title: `Queue Entry Cancelled`,
-          body: `Your live queue spot for ${currentSnap.serviceName} has been removed.`,
-          tag: `queue-status-${currentSnap.id}-cancelled`,
-          category: 'queue_status',
-          targetPage: 'queue',
-        },
-        onNavigate
-      );
-    }
-    return;
-  }
-
-  // Position improved while waiting
-  if (
-    currentSnap.status === 'waiting' &&
-    currentSnap.position > 0 &&
-    currentSnap.position !== prevSnap.position
-  ) {
-    saveQueueSnapshot(uid, currentSnap);
-
-    if (currentSnap.position === 1) {
-      await sendBrowserNotification(
-        {
-          title: `🔥 You're #1 Next in Line!`,
-          body: `Get ready! You are next for ${currentSnap.serviceName} with ${currentSnap.barberName} (~${currentSnap.estimatedWaitMins} mins).`,
-          tag: `queue-pos-${currentSnap.id}-1`,
-          category: 'queue_status',
-          requireInteraction: true,
-          targetPage: 'queue',
-        },
-        onNavigate
-      );
-    } else if (currentSnap.position < prevSnap.position) {
-      await sendBrowserNotification(
-        {
-          title: `Queue Update • Moved Up to #${currentSnap.position}`,
-          body: `There ${currentSnap.position - 1 === 1 ? 'is 1 person' : `are ${currentSnap.position - 1} people`} ahead of you for ${currentSnap.barberName}. Est. wait: ~${currentSnap.estimatedWaitMins} mins.`,
-          tag: `queue-pos-${currentSnap.id}-${currentSnap.position}`,
-          category: 'queue_status',
-          targetPage: 'queue',
-        },
-        onNavigate
-      );
-    }
-  }
-}
-
-// ============================================================================
-// 2. REAL-TIME & BACKGROUND APPOINTMENT REMINDERS & STATUS ALERTS
+// 1. REAL-TIME & BACKGROUND APPOINTMENT REMINDERS & STATUS ALERTS
 // ============================================================================
 function parseAppointmentDateTime(dateStr: string, timeStr: string): Date | null {
   if (!dateStr) return null;
@@ -666,22 +471,15 @@ export async function checkAndNotifyDatabaseNotifications(
     const notifId = String(notif.id);
     const type = String(notif.type || '');
     const title = String(notif.title || 'BarberLoo Update');
-    const isQueue =
-      type.includes('queue') ||
-      title.toLowerCase().includes('queue') ||
-      title.toLowerCase().includes('chair');
 
     await sendBrowserNotification(
       {
-        title: isQueue ? '💈 BarberLoo Queue Alert' : '📅 BarberLoo Notification',
+        title: '📅 BarberLoo Notification',
         body: title,
         tag: `db-notif-${notifId}`,
-        category: isQueue ? 'queue_status' : 'appointment_reminder',
-        requireInteraction:
-          type === 'queue_called' ||
-          type === 'queue_next' ||
-          type === 'appointment_reminder',
-        targetPage: isQueue ? 'queue' : 'customer-dashboard',
+        category: 'appointment_reminder',
+        requireInteraction: type === 'appointment_reminder',
+        targetPage: 'customer-dashboard',
       },
       onNavigate
     );

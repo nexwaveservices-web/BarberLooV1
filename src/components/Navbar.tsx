@@ -23,7 +23,6 @@ import { useLanguage } from '../lib/i18n';
 interface NavbarProps {
   currentPage: PageView;
   onNavigate: (page: PageView) => void;
-  userQueuePosition: number | null;
   currentUserProfile?: any | null;
   onAuthChange?: (profilePayload: any | null) => Promise<void> | void;
   authModalOpenExternal?: boolean;
@@ -33,7 +32,6 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   currentPage,
   onNavigate,
-  userQueuePosition,
   currentUserProfile,
   onAuthChange,
   authModalOpenExternal,
@@ -66,8 +64,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const isDarkTheme =
     currentPage === 'barber-dashboard' ||
-    currentPage === 'admin-dashboard' ||
-    currentPage === 'queue';
+    currentPage === 'admin-dashboard';
 
   const userRole = currentUserProfile?.role || null;
   const isOwnerAdmin =
@@ -79,12 +76,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'home', label: tr('Home', 'होम') },
     { id: 'shop', label: tr('Shops', 'सैलून') },
     { id: 'booking', label: tr('Book Appointment', 'अपॉइंटमेंट बुक करें') },
-    {
-      id: 'queue',
-      label: userQueuePosition
-        ? tr(`Live Queue (#${userQueuePosition})`, `लाइव कतार (#${userQueuePosition})`)
-        : tr('Live Queue', 'लाइव कतार'),
-    },
   ];
 
   if (currentUserProfile) {
@@ -601,8 +592,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                       <p className="text-[11px] opacity-80 mt-1">
                         {tr(
-                          'Book cuts & join live queues',
-                          'अपॉइंटमेंट बुक करें और कतार में जुड़ें'
+                          'Discover barbers & book appointments',
+                          'बार्बर खोजें और अपॉइंटमेंट बुक करें'
                         )}
                       </p>
                     </button>
@@ -622,8 +613,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                       <p className="text-[11px] opacity-80 mt-1">
                         {tr(
-                          'List your salon & manage queue',
-                          'अपना सैलून और कतार प्रबंधित करें'
+                          'List your salon & receive bookings',
+                          'अपना सैलून पंजीकृत करें और बुकिंग प्राप्त करें'
                         )}
                       </p>
                     </button>

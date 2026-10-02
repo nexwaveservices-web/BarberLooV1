@@ -2,7 +2,7 @@
 /**
  * Plugin Name: BarberLoo Platform (WP Pusher GitHub Bridge)
  * Plugin URI: https://barberloo.in
- * Description: Official BarberLoo Luxury Barber Booking & Real-Time Live Queue Platform connected via WP Pusher from https://github.com/nexwaveservices-web/BarberLooV1 and Supabase.
+ * Description: Official BarberLoo Luxury Barber Booking & Salon Discovery Platform connected via WP Pusher from https://github.com/nexwaveservices-web/BarberLooV1 and Supabase.
  * Version: 1.0.1
  * Author: NexWave Services (BarberLoo)
  * Author URI: https://barberloo.in
@@ -65,10 +65,10 @@ function barberloo_render_application($full_viewport = true) {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BarberLoo — Luxury Barber Booking &amp; Live Queue | barberloo.in</title>
-    <meta name="description" content="Discover trusted master barbers, book bespoke grooming appointments, or join the real-time live queue. BOOK • QUEUE • CUT • REPEAT." />
-    <meta property="og:title" content="BarberLoo — Luxury Barber Booking &amp; Live Queue" />
-    <meta property="og:description" content="Discover trusted master barbers, book bespoke grooming appointments, or join the real-time live queue." />
+    <title>BarberLoo — Luxury Barber Booking &amp; Salon Discovery | barberloo.in</title>
+    <meta name="description" content="Discover trusted master barbers, book bespoke grooming appointments, and manage salon schedules seamlessly. DISCOVER • BOOK • CUT • REPEAT." />
+    <meta property="og:title" content="BarberLoo — Luxury Barber Booking &amp; Salon Discovery" />
+    <meta property="og:description" content="Discover trusted master barbers, book bespoke grooming appointments, and manage salon schedules seamlessly." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://barberloo.in" />
     <link rel="canonical" href="https://barberloo.in" />

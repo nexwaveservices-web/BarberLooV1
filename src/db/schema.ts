@@ -130,25 +130,7 @@ export const appointments = pgTable('appointments', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// 6. queue
-export const queue = pgTable('queue', {
-  id: text('id').primaryKey(),
-  shopId: text('shop_id').notNull().default('shop-1'),
-  barberId: text('barber_id').notNull().default('brb-1'),
-  barberName: text('barber_name').notNull(),
-  customerUid: text('customer_uid').default(''),
-  clientName: text('client_name').notNull(),
-  serviceId: text('service_id').notNull().default('srv-1'),
-  serviceName: text('service_name').notNull(),
-  position: integer('position').notNull(),
-  status: text('status').notNull().default('waiting'), // waiting | called | serving | completed | skipped | cancelled
-  estimatedWaitMin: integer('estimated_wait_min').notNull().default(24),
-  graceBufferMin: integer('grace_buffer_min').notNull().default(0),
-  joinedAt: text('joined_at').notNull(),
-  createdAt: timestamp('created_at').defaultNow(),
-});
-
-// 7. reviews
+// 6. reviews
 export const reviews = pgTable('reviews', {
   id: text('id').primaryKey(),
   appointmentId: text('appointment_id').default(''),

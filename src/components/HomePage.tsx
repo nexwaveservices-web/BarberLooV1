@@ -25,7 +25,6 @@ interface HomePageProps {
   onSelectServiceForBooking: (service: ServiceItem) => void;
   onSelectBarberForBooking: (barber: BarberItem) => void;
   onSelectShop: (shop: ShopItem) => void;
-  userQueuePosition: number | null;
   shops?: any[];
   barbers?: any[];
   services?: any[];
@@ -41,7 +40,6 @@ export const HomePage: React.FC<HomePageProps> = ({
   onSelectServiceForBooking,
   onSelectBarberForBooking,
   onSelectShop,
-  userQueuePosition,
   shops = [],
   barbers = [],
   services = [],
@@ -184,8 +182,8 @@ export const HomePage: React.FC<HomePageProps> = ({
           <div className="max-w-3xl space-y-6">
             <p className="text-xs sm:text-sm font-semibold tracking-[0.22em] uppercase text-[#F1E194]">
               {tr(
-                'BARBERLOO INDIA • BOOK • QUEUE • CUT • REPEAT',
-                'बारबरलू इंडिया • बुक करें • कतार में जुड़ें • ग्रूमिंग'
+                'BARBERLOO INDIA • BOOK • GROOM • LOOK SHARP • REPEAT',
+                'बारबरलू इंडिया • बुक करें • ग्रूमिंग • लुक शार्प'
               )}
             </p>
 
@@ -199,8 +197,8 @@ export const HomePage: React.FC<HomePageProps> = ({
 
             <p className="text-base sm:text-xl text-[#FFF9E8]/85 max-w-xl leading-relaxed font-normal">
               {tr(
-                'Discover verified barbershops across India, book your appointment in IST, or join the real-time live chair queue.',
-                'भारत के सत्यापित सैलून खोजें, भारतीय मानक समय (IST) में अपॉइंटमेंट बुक करें, या लाइव कतार में शामिल हों।'
+                'Discover trusted barbers, book your appointment, and enjoy bespoke grooming without wasting time waiting.',
+                'विश्वसनीय बार्बर खोजें, अपना अपॉइंटमेंट बुक करें और बिना समय बर्बाद किए प्रीमियम ग्रूमिंग का आनंद लें।'
               )}
             </p>
 
@@ -210,23 +208,15 @@ export const HomePage: React.FC<HomePageProps> = ({
                 onClick={() => onNavigate('booking')}
                 className="px-8 py-4 rounded-[20px] bg-[#5B0E14] text-[#FFF9E8] border border-[#F1E194]/30 text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase hover:bg-[#73121a] transition-all duration-200 shadow-xl cursor-pointer"
               >
-                {tr('BOOK NOW', 'अपॉइंटमेंट बुक करें')}
+                {tr('BOOK AN APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
               </button>
 
               <button
                 type="button"
-                onClick={() => onNavigate('queue')}
+                onClick={() => onNavigate('shop')}
                 className="px-8 py-4 rounded-[20px] bg-[#F1E194] text-[#111113] text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase hover:bg-[#FFF9E8] transition-all duration-200 shadow-xl inline-flex items-center gap-2.5 cursor-pointer"
               >
-                <span className="w-2 h-2 rounded-full bg-[#5B0E14] animate-pulse" />
-                <span>
-                  {userQueuePosition
-                    ? tr(
-                        `LIVE QUEUE (YOU ARE #${userQueuePosition})`,
-                        `लाइव कतार (आपका नंबर #${userQueuePosition})`
-                      )
-                    : tr('JOIN LIVE QUEUE', 'लाइव कतार में जुड़ें')}
-                </span>
+                <span>{tr('EXPLORE BARBERS', 'बार्बर देखें')}</span>
               </button>
             </div>
           </div>
@@ -412,7 +402,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </h2>
               <p className="text-sm text-[#8A8178] max-w-2xl leading-relaxed">
                 {tr(
-                  'All mock data has been removed. Are you a barbershop owner or master barber? Sign up as a Barber Partner to register your salon, publish your ₹ INR service menu, and open your live chair queue. Customers can sign up to book real appointments in IST.',
+                  'All mock data has been removed. Are you a barbershop owner or master barber? Sign up as a Barber Partner to register your salon, publish your ₹ INR service menu, and manage real online bookings. Customers can sign up to book real appointments in IST.',
                   'सभी डेमो डेटा हटा दिए गए हैं। यदि आप सैलून मालिक या बार्बर हैं, तो बार्बर पार्टनर के रूप में साइन अप करें और अपनी दुकान व सेवाएं (₹ में) जोड़ें। ग्राहक अपॉइंटमेंट बुक करने के लिए ग्राहक खाता बना सकते हैं।'
                 )}
               </p>

@@ -373,10 +373,13 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => onNavigate('queue')}
-                className="px-6 py-3.5 rounded-[16px] bg-[#111113] text-[#F1E194] border border-[#F1E194]/30 text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                onClick={() => {
+                  const srvElem = document.getElementById('shop-services-list');
+                  if (srvElem) srvElem.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="px-6 py-3.5 rounded-[16px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 text-xs font-semibold tracking-wider uppercase cursor-pointer"
               >
-                {tr('JOIN LIVE QUEUE', 'लाइव कतार में जुड़ें')}
+                {tr('VIEW SERVICES', 'सेवाएं देखें')}
               </button>
               <button
                 type="button"
@@ -818,8 +821,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               </div>
               <p className="text-xs text-[#8A8178] leading-relaxed">
                 {tr(
-                  'Customers scanning this salon QR code can immediately view services, book an appointment, or join the live chair queue.',
-                  'इस सैलून QR कोड को स्कैन करने वाले ग्राहक तुरंत सेवाएं देख सकते हैं, अपॉइंटमेंट बुक कर सकते हैं, या लाइव कतार में शामिल हो सकते हैं।'
+                  'Customers scanning this salon QR code can immediately view services, compare barbers, and book a verified appointment.',
+                  'इस सैलून QR कोड को स्कैन करने वाले ग्राहक तुरंत सेवाएं देख सकते हैं, बार्बर चुन सकते हैं और अपॉइंटमेंट बुक कर सकते हैं।'
                 )}
               </p>
               <div className="p-3.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 font-mono-num text-xs text-[#F1E194] break-all">
@@ -850,13 +853,6 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   className="px-5 py-2.5 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer"
                 >
                   {tr('Book Appointment', 'अपॉइंटमेंट बुक करें')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onNavigate('queue')}
-                  className="px-5 py-2.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/30 text-[#F1E194] text-xs font-semibold cursor-pointer"
-                >
-                  {tr('Join Live Queue', 'लाइव कतार में जुड़ें')}
                 </button>
               </div>
             </div>
