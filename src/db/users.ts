@@ -1,6 +1,8 @@
 import { db } from './index.ts';
 import {
   users,
+  states,
+  cities,
   profiles,
   shops,
   barbers,
@@ -26,19 +28,19 @@ export function resolveAllowedRole(
   email: string | undefined | null,
   requestedRole?: string | null,
   existingRole?: string | null
-): 'admin' | 'barber' | 'customer' {
+): 'admin' | 'shop_owner' | 'barber' | 'customer' {
   const cleanEmail = String(email || '').trim().toLowerCase();
   if (cleanEmail === OWNER_ADMIN_EMAIL) {
     return 'admin';
   }
-  if (existingRole === 'barber' || existingRole === 'shop_owner') {
+  if (existingRole === 'shop_owner' || requestedRole === 'shop_owner') {
+    return 'shop_owner';
+  }
+  if (existingRole === 'barber' || requestedRole === 'barber') {
     return 'barber';
   }
   if (existingRole === 'customer') {
     return 'customer';
-  }
-  if (requestedRole === 'barber' || requestedRole === 'shop_owner') {
-    return 'barber';
   }
   return 'customer';
 }
@@ -48,7 +50,11 @@ export async function getOrCreateUser(
   email: string,
   name?: string,
   requestedRole?: string,
-  phone?: string
+  phone?: string,
+  stateId?: string,
+  cityId?: string,
+  stateName?: string,
+  cityName?: string
 ) {
   const cleanEmail = email.trim().toLowerCase();
   const displayName = name?.trim() || cleanEmail.split('@')[0];
@@ -104,6 +110,10 @@ export async function getOrCreateUser(
         phone: phone || '',
         avatarUrl: '',
         role: finalRole,
+        stateId: stateId || 'st-pb',
+        cityId: cityId || 'ct-jal',
+        state: stateName || 'Punjab',
+        city: cityName || 'Jalandhar',
         tier:
           finalRole === 'admin'
             ? 'Founder & Platform Admin'
@@ -138,6 +148,18 @@ export async function getOrCreateUser(
     if (phone && phone.trim() && !existingProfiles[0].phone) {
       updates.phone = phone.trim();
     }
+    if (stateId && existingProfiles[0].stateId !== stateId) {
+      updates.stateId = stateId;
+    }
+    if (cityId && existingProfiles[0].cityId !== cityId) {
+      updates.cityId = cityId;
+    }
+    if (stateName && existingProfiles[0].state !== stateName) {
+      updates.state = stateName;
+    }
+    if (cityName && existingProfiles[0].city !== cityName) {
+      updates.city = cityName;
+    }
     if (Object.keys(updates).length > 0) {
       await db
         .update(profiles)
@@ -151,6 +173,8 @@ export async function getOrCreateUser(
 
 export async function getBootstrapState(activeCustomerUid?: string) {
   const [
+    stateRows,
+    cityRows,
     shopRows,
     barberRows,
     serviceRows,
@@ -167,6 +191,8 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     profileRows,
     reportRows,
   ] = await Promise.all([
+    db.select().from(states).orderBy(asc(states.name)),
+    db.select().from(cities).orderBy(asc(cities.name)),
     db.select().from(shops).orderBy(asc(shops.distanceMilesTenths)),
     db.select().from(barbers),
     db.select().from(services).orderBy(asc(services.indexCode)),
@@ -364,6 +390,11 @@ export async function createBookingInDb(payload: {
   paymentMethod: string;
   notes?: string;
   couponCode?: string;
+  razorpayPaymentId?: string;
+  razorpayOrderId?: string;
+  woocommerceOrderId?: string | number;
+  addOns?: any[];
+  addOnsTotal?: number;
 }) {
   if (payload.barberId) {
     const conflicts = await db
@@ -387,7 +418,34 @@ export async function createBookingInDb(payload: {
     }
   }
 
-  const paymentStatus = payload.paymentMethod === 'online' ? 'paid' : 'pending';
+  const isPaidOnline =
+    payload.paymentMethod === 'razorpay' ||
+    payload.paymentMethod === 'online' ||
+    Boolean(payload.razorpayPaymentId);
+  const paymentStatus = isPaidOnline ? 'paid' : 'pending';
+
+  let methodDisplay = 'Pay at Salon (INR)';
+  if (payload.paymentMethod === 'razorpay' || payload.paymentMethod === 'online') {
+    methodDisplay = payload.razorpayPaymentId
+      ? `Razorpay (${payload.razorpayPaymentId})`
+      : 'Razorpay Instant (UPI / Card)';
+  } else if (payload.paymentMethod === 'woocommerce') {
+    methodDisplay = payload.woocommerceOrderId
+      ? `WooCommerce Order #${payload.woocommerceOrderId}`
+      : 'WooCommerce Checkout';
+  }
+
+  let finalNotes = payload.notes || '';
+  if (Array.isArray(payload.addOns) && payload.addOns.length > 0) {
+    const addOnNames = payload.addOns.map((a: any) => `${a.name} (+₹${a.price})`).join(', ');
+    finalNotes += ` | Add-ons: ${addOnNames}`;
+  }
+  if (payload.razorpayPaymentId) {
+    finalNotes += ` | Razorpay Txn: ${payload.razorpayPaymentId}`;
+  }
+  if (payload.woocommerceOrderId) {
+    finalNotes += ` | WooCommerce Order: #${payload.woocommerceOrderId}`;
+  }
 
   const [created] = await db
     .insert(appointments)
@@ -410,7 +468,7 @@ export async function createBookingInDb(payload: {
       status: 'confirmed',
       paymentMethod: payload.paymentMethod,
       paymentStatus,
-      notes: payload.notes || '',
+      notes: finalNotes,
       internalBarberNotes: '',
       couponCode: payload.couponCode || '',
     })
@@ -426,12 +484,11 @@ export async function createBookingInDb(payload: {
     amount: payload.price,
     platformFee: Math.max(25, Math.round(payload.price * 0.08)),
     method: payload.paymentMethod,
-    methodDisplay:
-      payload.paymentMethod === 'online'
-        ? 'UPI / Razorpay Instant'
-        : 'Pay at Salon (INR)',
+    methodDisplay,
     status: paymentStatus,
-    receiptNumber: `BL-IN-${Math.floor(10000 + Math.random() * 89999)}`,
+    receiptNumber: payload.razorpayPaymentId
+      ? `RZP-${payload.razorpayPaymentId}`
+      : `BL-IN-${Math.floor(10000 + Math.random() * 89999)}`,
   });
 
   await db.insert(notifications).values({

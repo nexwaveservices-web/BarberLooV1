@@ -84,7 +84,7 @@ if (!function_exists('barberloo_theme_render_app')) {
     }
 }
 
-// Intercept all front-end routes on barberloo.in so WordPress never returns "Error: Page not found"
+// Intercept front-end routes while allowing WooCommerce cart, checkout, REST API, and Razorpay webhooks
 add_action('template_redirect', function () {
     if (is_admin() || wp_doing_ajax() || wp_doing_cron()) {
         return;
@@ -92,6 +92,15 @@ add_action('template_redirect', function () {
     if (isset($_GET['wp_native']) && $_GET['wp_native'] === '1') {
         return;
     }
+    // Allow WooCommerce and Razorpay webhook passthrough
+    $uri = $_SERVER['REQUEST_URI'] ?? '';
+    if (strpos($uri, '/wc-api/') !== false || strpos($uri, '/wp-json/') !== false) {
+        return;
+    }
+    if (function_exists('is_checkout') && (is_checkout() || is_cart() || is_account_page())) {
+        return;
+    }
+
     global $wp_query;
     if ($wp_query) {
         $wp_query->is_404 = false;
@@ -103,4 +112,117 @@ add_action('template_redirect', function () {
 
 add_shortcode('barberloo_app', function () {
     return barberloo_theme_render_app();
+});
+
+// WooCommerce + Razorpay REST Bridge for BarberLoo Appointments
+add_action('rest_api_init', function () {
+    register_rest_route('barberloo/v1', '/create-wc-order', [
+        'methods'             => 'POST',
+        'callback'            => 'barberloo_rest_create_wc_order',
+        'permission_callback' => '__return_true',
+    ]);
+
+    register_rest_route('barberloo/v1', '/wc-status', [
+        'methods'             => 'GET',
+        'callback'            => function () {
+            $wc_active = class_exists('WooCommerce');
+            $rzp_active = false;
+            if ($wc_active) {
+                $available_gateways = function_exists('WC') && WC()->payment_gateways ? WC()->payment_gateways->get_available_payment_gateways() : [];
+                $rzp_active = isset($available_gateways['razorpay']) || class_exists('WC_Razorpay');
+            }
+            return new WP_REST_Response([
+                'woocommerce_active' => $wc_active,
+                'razorpay_active'    => $rzp_active,
+                'currency'           => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'INR',
+            ], 200);
+        },
+        'permission_callback' => '__return_true',
+    ]);
+});
+
+function barberloo_rest_create_wc_order($request) {
+    if (!class_exists('WooCommerce')) {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'WooCommerce is not active on this WordPress site.',
+        ], 200);
+    }
+
+    $params = $request->get_json_params();
+    $service_name = sanitize_text_field($params['serviceName'] ?? 'Bespoke Grooming');
+    $barber_name  = sanitize_text_field($params['barberName'] ?? 'Master Barber');
+    $price        = floatval($params['price'] ?? 500);
+    $client_name  = sanitize_text_field($params['clientName'] ?? 'Guest');
+    $client_phone = sanitize_text_field($params['clientPhone'] ?? '');
+    $client_email = sanitize_email($params['clientEmail'] ?? 'guest@barberloo.in');
+    $date         = sanitize_text_field($params['date'] ?? '');
+    $time         = sanitize_text_field($params['time'] ?? '');
+    $apt_id       = sanitize_text_field($params['appointmentId'] ?? '');
+    $add_ons      = $params['addOns'] ?? [];
+
+    try {
+        $order = wc_create_order();
+
+        // 1. Primary Service Fee / Line Item
+        $item  = new WC_Order_Item_Fee();
+        $item->set_name($service_name . ' (Barber: ' . $barber_name . ' · ' . $date . ' ' . $time . ' IST)');
+        $item->set_amount($price);
+        $item->set_total($price);
+        $order->add_item($item);
+
+        // 2. Add-ons Line Items
+        if (!empty($add_ons) && is_array($add_ons)) {
+            foreach ($add_ons as $addon) {
+                $addon_name  = sanitize_text_field($addon['name'] ?? 'Add-on Service');
+                $addon_price = floatval($addon['price'] ?? 0);
+                if ($addon_price > 0) {
+                    $addon_item = new WC_Order_Item_Fee();
+                    $addon_item->set_name('[Add-on] ' . $addon_name);
+                    $addon_item->set_amount($addon_price);
+                    $addon_item->set_total($addon_price);
+                    $order->add_item($addon_item);
+                }
+            }
+            $order->update_meta_data('_barberloo_addons', wp_json_encode($add_ons));
+        }
+
+        $order->set_billing_first_name($client_name);
+        $order->set_billing_email($client_email);
+        $order->set_billing_phone($client_phone);
+        $order->set_payment_method('razorpay');
+        $order->set_payment_method_title('Razorpay (UPI / Card / NetBanking)');
+
+        $order->update_meta_data('_barberloo_appointment_id', $apt_id);
+        $order->update_meta_data('_barberloo_service', $service_name);
+        $order->update_meta_data('_barberloo_barber', $barber_name);
+        $order->update_meta_data('_barberloo_slot', $date . ' ' . $time . ' IST');
+
+        $order->calculate_totals();
+        $order->save();
+
+        return new WP_REST_Response([
+            'success'     => true,
+            'orderId'     => $order->get_id(),
+            'orderKey'    => $order->get_order_key(),
+            'checkoutUrl' => $order->get_checkout_payment_url(),
+            'status'      => $order->get_status(),
+            'total'       => $order->get_total(),
+        ], 200);
+    } catch (Exception $e) {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+// Hook to update BarberLoo appointment when WooCommerce order completes via Razorpay
+add_action('woocommerce_payment_complete', function ($order_id) {
+    $order = wc_get_order($order_id);
+    if (!$order) return;
+    $apt_id = $order->get_meta('_barberloo_appointment_id');
+    if ($apt_id) {
+        $order->add_order_note('BarberLoo appointment ' . $apt_id . ' confirmed & paid via Razorpay.');
+    }
 });

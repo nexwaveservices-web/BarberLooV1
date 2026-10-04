@@ -205,7 +205,20 @@ export const HomePage: React.FC<HomePageProps> = ({
             <div className="flex flex-wrap items-center gap-4 pt-3">
               <button
                 type="button"
-                onClick={() => onNavigate('booking')}
+                onClick={() => {
+                  const targetShop = shops[0];
+                  if (targetShop) {
+                    onSelectShop(targetShop);
+                    window.history.pushState(
+                      {},
+                      '',
+                      `booking.html?shop_id=${encodeURIComponent(targetShop.id)}`
+                    );
+                  } else {
+                    window.history.pushState({}, '', 'booking.html');
+                  }
+                  onNavigate('booking');
+                }}
                 className="px-8 py-4 rounded-[20px] bg-[#5B0E14] text-[#FFF9E8] border border-[#F1E194]/30 text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase hover:bg-[#73121a] transition-all duration-200 shadow-xl cursor-pointer"
               >
                 {tr('BOOK AN APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
@@ -519,7 +532,18 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      const targetShop =
+                        shops.find((sh: any) => sh.id === service.shopId) || shops[0];
+                      if (targetShop) onSelectShop(targetShop);
                       onSelectServiceForBooking(service);
+                      const targetId = service.shopId || targetShop?.id;
+                      if (targetId) {
+                        window.history.pushState(
+                          {},
+                          '',
+                          `booking.html?shop_id=${encodeURIComponent(targetId)}`
+                        );
+                      }
                       onNavigate('booking');
                     }}
                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-[16px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold tracking-wider uppercase hover:bg-[#241719] transition-colors cursor-pointer"
@@ -629,6 +653,11 @@ export const HomePage: React.FC<HomePageProps> = ({
                         type="button"
                         onClick={() => {
                           onSelectShop(shop);
+                          window.history.pushState(
+                            {},
+                            '',
+                            `booking.html?shop_id=${encodeURIComponent(shop.id)}`
+                          );
                           onNavigate('booking');
                         }}
                         className="px-4 py-2.5 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold cursor-pointer"
@@ -721,7 +750,18 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <button
                       type="button"
                       onClick={() => {
+                        const targetShop =
+                          shops.find((sh: any) => sh.id === barber.shopId) || shops[0];
+                        if (targetShop) onSelectShop(targetShop);
                         onSelectBarberForBooking(barber);
+                        const targetId = barber.shopId || targetShop?.id;
+                        if (targetId) {
+                          window.history.pushState(
+                            {},
+                            '',
+                            `booking.html?shop_id=${encodeURIComponent(targetId)}`
+                          );
+                        }
                         onNavigate('booking');
                       }}
                       className="px-5 py-2.5 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold uppercase tracking-wider cursor-pointer"

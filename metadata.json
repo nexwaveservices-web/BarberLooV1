@@ -1,6 +1,6 @@
 {
-  "name": "BarberLoo — Luxury Barber Booking & Live Queue",
-  "description": "Discover trusted master barbers, book bespoke grooming appointments, or join the real-time live queue.",
+  "name": "BarberLoo — Luxury Barber Booking",
+  "description": "Discover trusted master barbers, view verified salon services, and book bespoke grooming appointments seamlessly.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

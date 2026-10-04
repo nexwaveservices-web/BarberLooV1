@@ -37,8 +37,6 @@ async function startServer() {
   const httpServer = createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
-  app.use(express.json());
-
   // Allow cross-origin requests from https://barberloo.in and WordPress WP Pusher bridge
   app.use((req, res, next) => {
     const origin = req.headers.origin || '';
@@ -65,6 +63,21 @@ async function startServer() {
       return res.sendStatus(204);
     }
     next();
+  });
+
+  // Support large JSON payloads (e.g. photos, base64 avatars, gallery, salon media)
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  // Gracefully handle any PayloadTooLargeError (HTTP 413) or malformed body
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err?.type === 'entity.too.large' || err?.status === 413) {
+      return res.status(413).json({
+        error: 'PayloadTooLargeError',
+        message: 'Request entity too large. The payload exceeds the allowable size limit (50MB).',
+      });
+    }
+    next(err);
   });
 
   // WP Pusher & GitHub (nexwaveservices-web/BarberLooV1) status & webhook endpoints
@@ -307,7 +320,7 @@ async function startServer() {
     }
   });
 
-  // 4. Create Appointment (with Double-Booking Prevention)
+  // 4. Create Appointment (with Double-Booking Prevention & Payment Verification)
   app.post('/api/appointments', optionalAuth, async (req: AuthRequest, res) => {
     try {
       const created = await createBookingInDb({
@@ -328,8 +341,13 @@ async function startServer() {
         durationMin: Number(req.body.durationMin) || 45,
         price: Number(req.body.price) || 850,
         paymentMethod: req.body.paymentMethod || 'pay_at_shop',
+        razorpayPaymentId: req.body.razorpayPaymentId || '',
+        razorpayOrderId: req.body.razorpayOrderId || '',
+        woocommerceOrderId: req.body.woocommerceOrderId || '',
         notes: req.body.notes || '',
         couponCode: req.body.couponCode || '',
+        addOns: req.body.addOns || [],
+        addOnsTotal: Number(req.body.addOnsTotal) || 0,
       });
 
       broadcastEvent('state:updated', {
@@ -959,6 +977,105 @@ async function startServer() {
         res
           .status(500)
           .json({ error: error.message || 'Failed to update payment' });
+      }
+    }
+  );
+
+  // 18. Razorpay Create Order API
+  app.post(
+    '/api/payments/razorpay/create-order',
+    optionalAuth,
+    async (req: AuthRequest, res) => {
+      try {
+        const { amount, currency = 'INR', receipt, notes } = req.body;
+        const keyId =
+          process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
+        const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+        if (keyId && keySecret && !keyId.includes('YOUR_KEY_ID')) {
+          const Razorpay = (await import('razorpay')).default;
+          const razorpay = new Razorpay({
+            key_id: keyId,
+            key_secret: keySecret,
+          });
+
+          const order = await razorpay.orders.create({
+            amount: Math.round(Number(amount) * 100), // amount in paise
+            currency,
+            receipt: receipt || `rcpt_${Date.now()}`,
+            notes: notes || {},
+          });
+
+          return res.json({
+            success: true,
+            orderId: order.id,
+            amount: order.amount,
+            currency: order.currency,
+            keyId,
+          });
+        }
+
+        // Test Mode order fallback
+        const simulatedOrderId = `order_${Date.now().toString(36)}${Math.random()
+          .toString(36)
+          .substring(2, 6)}`;
+        res.json({
+          success: true,
+          orderId: simulatedOrderId,
+          amount: Math.round(Number(amount) * 100),
+          currency,
+          keyId: keyId || 'rzp_test_barberloo_india',
+          isSimulator: true,
+        });
+      } catch (err: any) {
+        res
+          .status(500)
+          .json({ error: err.message || 'Failed to create Razorpay order' });
+      }
+    }
+  );
+
+  // 19. Razorpay Verify Signature API
+  app.post(
+    '/api/payments/razorpay/verify',
+    optionalAuth,
+    async (req: AuthRequest, res) => {
+      try {
+        const {
+          razorpay_order_id,
+          razorpay_payment_id,
+          razorpay_signature,
+        } = req.body;
+        const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+        if (!keySecret || keySecret.includes('YOUR_RAZORPAY_SECRET')) {
+          // Test mode verification
+          return res.json({
+            verified: true,
+            paymentId: razorpay_payment_id,
+            isTest: true,
+          });
+        }
+
+        const crypto = await import('crypto');
+        const expectedSignature = crypto
+          .createHmac('sha256', keySecret)
+          .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+          .digest('hex');
+
+        const isAuthentic = expectedSignature === razorpay_signature;
+        if (isAuthentic) {
+          res.json({ verified: true, paymentId: razorpay_payment_id });
+        } else {
+          res.status(400).json({
+            verified: false,
+            error: 'Invalid Razorpay payment signature',
+          });
+        }
+      } catch (err: any) {
+        res
+          .status(500)
+          .json({ error: err.message || 'Payment signature verification failed' });
       }
     }
   );

@@ -29,6 +29,10 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+if (typeof window !== 'undefined') {
+  (window as any).barberLooSupabase = supabase;
+}
+
 async function hashPassword(password: string): Promise<string> {
   const input = `barberloo-india-v1:${password}`;
   try {
@@ -821,6 +825,72 @@ begin
 end $$;
 `;
 
+/**
+ * Compresses an image client-side to keep high visual quality while preventing massive payloads.
+ */
+async function compressImageToDataUrl(
+  file: File,
+  maxDimension = 1280,
+  quality = 0.85
+): Promise<string> {
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml' || file.type === 'image/gif') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Failed to read image file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let { width, height } = img;
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      try {
+        const dataUrl = canvas.toDataURL(mime, quality);
+        resolve(dataUrl);
+      } catch {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(file);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    };
+    img.src = objectUrl;
+  });
+}
+
 export async function uploadImageToSupabaseStorage(
   file: File,
   folder = 'uploads'
@@ -846,11 +916,6 @@ export async function uploadImageToSupabaseStorage(
     // Fallback to inline data URL if storage bucket is not yet provisioned
   }
 
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Failed to read image file'));
-    reader.readAsDataURL(file);
-  });
+  return compressImageToDataUrl(file);
 }
 

@@ -111,6 +111,8 @@ export interface AppointmentItem {
   paymentStatus?: string;
   couponCode?: string;
   completionOtp?: string;
+  razorpayPaymentId?: string;
+  razorpayOrderId?: string;
 }
 
 export interface ReviewItem {
@@ -157,3 +159,4 @@ export const OPENING_HOURS = [
   { id: 'wh-sat', day: 'Saturday', hours: '10:00 – 21:00', status: 'Peak Hours', breakWindow: '14:00 – 14:30' },
   { id: 'wh-sun', day: 'Sunday', hours: '11:00 – 19:00', status: 'By Appointment', breakWindow: 'None' },
 ];
+

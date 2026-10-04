@@ -383,7 +383,15 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => onNavigate('booking')}
+                onClick={() => {
+                  if (onSelectShop) onSelectShop(activeShop);
+                  window.history.pushState(
+                    {},
+                    '',
+                    `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
+                  );
+                  onNavigate('booking');
+                }}
                 className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
               >
                 {tr('BOOK APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
@@ -460,7 +468,13 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          if (onSelectShop) onSelectShop(activeShop);
                           onSelectServiceForBooking(srv);
+                          window.history.pushState(
+                            {},
+                            '',
+                            `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
+                          );
                           onNavigate('booking');
                         }}
                         className="mt-2 px-4 py-2 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer"
@@ -548,7 +562,13 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                         <button
                           type="button"
                           onClick={() => {
+                            if (onSelectShop) onSelectShop(activeShop);
                             onSelectBarberForBooking(brb);
+                            window.history.pushState(
+                              {},
+                              '',
+                              `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
+                            );
                             onNavigate('booking');
                           }}
                           className="px-4 py-2 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold cursor-pointer"
@@ -849,7 +869,15 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onNavigate('booking')}
+                  onClick={() => {
+                    if (onSelectShop) onSelectShop(activeShop);
+                    window.history.pushState(
+                      {},
+                      '',
+                      `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
+                    );
+                    onNavigate('booking');
+                  }}
                   className="px-5 py-2.5 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer"
                 >
                   {tr('Book Appointment', 'अपॉइंटमेंट बुक करें')}

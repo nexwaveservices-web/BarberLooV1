@@ -98,17 +98,17 @@ export default function App() {
         if (Array.isArray(data.shops)) {
           setShops(data.shops);
           const params = new URLSearchParams(window.location.search);
-          const qrShopSlug = params.get('shop');
+          const targetShopId = params.get('shop_id') || params.get('shop');
           setSelectedShop((prev) => {
             if (!data.shops.length) return null;
-            if (qrShopSlug) {
-              const qrMatched = data.shops.find(
+            if (targetShopId) {
+              const matched = data.shops.find(
                 (s: any) =>
-                  s.id === qrShopSlug ||
-                  s.qrCodeSlug === qrShopSlug ||
-                  String(s.name || '').toLowerCase() === qrShopSlug.toLowerCase()
+                  s.id === targetShopId ||
+                  s.qrCodeSlug === targetShopId ||
+                  String(s.name || '').toLowerCase() === targetShopId.toLowerCase()
               );
-              if (qrMatched) return qrMatched;
+              if (matched) return matched;
             }
             if (prev) {
               const matched = data.shops.find((s: any) => s.id === prev.id);
@@ -149,10 +149,24 @@ export default function App() {
   );
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('shop')) {
-      setCurrentPage('shop');
-    }
+    const handleUrlRoute = () => {
+      const pathname = window.location.pathname.toLowerCase();
+      const params = new URLSearchParams(window.location.search);
+      const isBookingPath =
+        pathname.includes('booking') ||
+        params.get('page') === 'booking' ||
+        (Boolean(params.get('shop_id')) && params.get('page') !== 'shop');
+
+      if (isBookingPath) {
+        setCurrentPage('booking');
+      } else if (params.get('page') === 'shop' || params.get('shop')) {
+        setCurrentPage('shop');
+      }
+    };
+
+    handleUrlRoute();
+    window.addEventListener('popstate', handleUrlRoute);
+    return () => window.removeEventListener('popstate', handleUrlRoute);
   }, []);
 
   useEffect(() => {
@@ -313,7 +327,15 @@ export default function App() {
         setCurrentUserProfile(profile);
         await loadBootstrapState(userPayload.uid);
 
-        if (
+        const isCurrentlyInBooking =
+          currentPage === 'booking' ||
+          window.location.pathname.toLowerCase().includes('booking') ||
+          new URLSearchParams(window.location.search).get('page') === 'booking' ||
+          Boolean(new URLSearchParams(window.location.search).get('shop_id'));
+
+        if (isCurrentlyInBooking) {
+          setCurrentPage('booking');
+        } else if (
           profile.email?.toLowerCase() === OWNER_ADMIN_EMAIL ||
           profile.role === 'admin'
         ) {
@@ -629,8 +651,20 @@ export default function App() {
             <BookingPage
               initialService={bookingService}
               initialBarber={bookingBarber}
+              initialShop={selectedShop}
+              initialShopId={selectedShop?.id}
               onConfirmBooking={handleConfirmBooking}
-              onNavigate={setCurrentPage}
+              onNavigate={(page) => {
+                if (page === 'home') {
+                  window.history.pushState({}, '', '/');
+                } else if (page === 'shop') {
+                  const targetShopId = selectedShop?.id || (shops.length === 1 ? shops[0]?.id : '');
+                  if (targetShopId) {
+                    window.history.pushState({}, '', `?shop_id=${encodeURIComponent(targetShopId)}&page=shop`);
+                  }
+                }
+                setCurrentPage(page);
+              }}
               shops={shops}
               services={services}
               barbers={barbers}

@@ -797,6 +797,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                 ({String(matchedPayment.status).toUpperCase()})
                               </p>
                             )}
+                            {((apt.addOns && apt.addOns.length > 0) ||
+                              (apt.notes && apt.notes.includes('Add-ons:'))) && (
+                              <p className="text-[11px] text-[#5B0E14] font-medium mt-1">
+                                ✦ {tr('Add-ons:', 'ऐड-ऑन्स:')}{' '}
+                                {apt.addOns && apt.addOns.length > 0
+                                  ? apt.addOns.map((a: any) => `${a.name} (+₹${a.price})`).join(', ')
+                                  : apt.notes?.split('Add-ons:')[1]?.split('|')[0]?.trim()}
+                              </p>
+                            )}
                             {!isCompleted &&
                               String(apt.status).toLowerCase() !== 'cancelled' &&
                               apt.completionOtp && (

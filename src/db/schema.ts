@@ -16,6 +16,20 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// 0a. states (Structured Location Hierarchy)
+export const states = pgTable('states', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  code: text('code').notNull().unique(),
+});
+
+// 0b. cities (Belong to a state)
+export const cities = pgTable('cities', {
+  id: text('id').primaryKey(),
+  stateId: text('state_id').notNull(),
+  name: text('name').notNull(),
+});
+
 // 1. profiles
 export const profiles = pgTable('profiles', {
   id: text('id').primaryKey(),
@@ -25,6 +39,10 @@ export const profiles = pgTable('profiles', {
   phone: text('phone').notNull().default(''),
   avatarUrl: text('avatar_url').notNull().default(''),
   role: text('role').notNull().default('customer'), // customer | barber | shop_owner | admin
+  stateId: text('state_id').default('st-pb'),
+  cityId: text('city_id').default('ct-jal'),
+  state: text('state').default('Punjab'),
+  city: text('city').default('Jalandhar'),
   tier: text('tier').notNull().default('Sovereign Member'),
   preferredNotes: text('preferred_notes').notNull().default(''),
   rewardBalance: integer('reward_balance').notNull().default(1450),
@@ -39,8 +57,11 @@ export const shops = pgTable('shops', {
   id: text('id').primaryKey(),
   ownerUid: text('owner_uid').notNull().default('owner-royal'),
   name: text('name').notNull(),
+  stateId: text('state_id').notNull().default('st-pb'),
+  cityId: text('city_id').notNull().default('ct-jal'),
+  state: text('state').notNull().default('Punjab'),
   district: text('district').notNull(),
-  city: text('city').notNull().default('London'),
+  city: text('city').notNull().default('Jalandhar'),
   address: text('address').notNull(),
   phone: text('phone').notNull().default('+44 (0) 20 7946 0192'),
   distance: text('distance').notNull().default('0.4 miles away'),
@@ -276,3 +297,14 @@ export const reports = pgTable('reports', {
   resolutionNote: text('resolution_note').notNull().default(''),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// Legacy queue table preserved for database schema parity (Queue feature disabled in BarberLoo)
+export const queue = pgTable('queue', {
+  id: text('id').primaryKey(),
+  shopId: text('shop_id').notNull().default('shop-1'),
+  customerUid: text('customer_uid').notNull(),
+  clientName: text('client_name').notNull(),
+  status: text('status').notNull().default('waiting'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+

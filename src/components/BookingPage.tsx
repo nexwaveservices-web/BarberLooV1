@@ -3,6 +3,7 @@ import {
   BarberItem,
   PageView,
   ServiceItem,
+  ShopItem,
 } from '../data/barberlooData';
 import { SmartImage } from './SmartImage';
 import {
@@ -13,8 +14,12 @@ import {
   ArrowRight,
   Sparkles,
   AlertCircle,
-  Globe,
   Scissors,
+  Zap,
+  ShieldCheck,
+  MapPin,
+  RefreshCw,
+  Globe,
   LogIn,
 } from 'lucide-react';
 import {
@@ -24,10 +29,14 @@ import {
   formatISTDateString,
   formatISTTimeSlot,
 } from '../lib/i18n';
+import { initiateRazorpayPayment } from '../lib/razorpay';
+import { loadShopForBooking, parseShopIdFromUrl } from '../lib/booking';
 
 interface BookingPageProps {
   initialService: ServiceItem | null;
   initialBarber: BarberItem | null;
+  initialShop?: ShopItem | null;
+  initialShopId?: string;
   onConfirmBooking: (appointmentPayload: any) => Promise<any>;
   onNavigate: (page: PageView) => void;
   shops?: any[];
@@ -49,6 +58,8 @@ const TIME_SLOTS = {
 export const BookingPage: React.FC<BookingPageProps> = ({
   initialService,
   initialBarber,
+  initialShop,
+  initialShopId,
   onConfirmBooking,
   onNavigate,
   shops = [],
@@ -72,21 +83,47 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const istDates = useMemo(() => getUpcomingISTDates(6, lang), [lang]);
   const istNowDisplay = useMemo(() => getCurrentISTDisplay(lang), [lang]);
 
-  const activeServices = services.filter((s: any) => s.active !== false);
-  const activeBarbers = barbers.filter(
-    (b: any) => b.active !== false && b.verificationStatus !== 'suspended'
-  );
+  // Determine shop ID strictly from URL query parameter (as required by specification)
+  // or fall back to explicitly selected shop context if passed
+  const urlShopId = parseShopIdFromUrl();
+  const detectedShopId = urlShopId || initialShopId || initialShop?.id || '';
 
-  const [selectedShopId, setSelectedShopId] = useState<string>(
-    initialBarber?.shopId || initialService?.shopId || shops[0]?.id || ''
-  );
+  const [selectedShopId, setSelectedShopId] = useState<string>(detectedShopId);
+  const [loadedShop, setLoadedShop] = useState<any | null>(() => {
+    if (!detectedShopId) return null;
+    return (
+      (initialShop && initialShop.id === detectedShopId ? initialShop : null) ||
+      shops.find((s: any) => s.id === detectedShopId) ||
+      null
+    );
+  });
+  const [shopServices, setShopServices] = useState<any[]>(() => {
+    if (detectedShopId) {
+      return services.filter(
+        (s: any) => s.shopId === detectedShopId && s.active !== false
+      );
+    }
+    return [];
+  });
+  const [shopBarbers, setShopBarbers] = useState<any[]>(() => {
+    if (detectedShopId) {
+      return barbers.filter(
+        (b: any) =>
+          b.shopId === detectedShopId &&
+          b.active !== false &&
+          b.verificationStatus !== 'suspended'
+      );
+    }
+    return [];
+  });
+  const [shopLoading, setShopLoading] = useState<boolean>(Boolean(detectedShopId));
+  const [shopError, setShopError] = useState<
+    'missing_shop' | 'shop_not_found' | 'no_services' | null
+  >(!detectedShopId ? 'missing_shop' : null);
+
   const [step, setStep] = useState<number>(1);
-  const [selectedService, setSelectedService] = useState<any | null>(
-    initialService || activeServices[0] || null
-  );
-  const [selectedBarber, setSelectedBarber] = useState<any | null>(
-    initialBarber || activeBarbers[0] || null
-  );
+  const [selectedService, setSelectedService] = useState<any | null>(initialService || null);
+  const [selectedBarber, setSelectedBarber] = useState<any | null>(initialBarber || null);
   const [selectedDate, setSelectedDate] = useState<string>(
     istDates[0]?.isoDate || new Date().toISOString().slice(0, 10)
   );
@@ -100,12 +137,9 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const [clientNotes, setClientNotes] = useState<string>(
     currentUserProfile?.preferredNotes || ''
   );
-  const [beverageChoice, setBeverageChoice] = useState<string>(
-    'Coorg Single-Estate Filter Coffee (Complimentary)'
-  );
-  const [paymentMethod, setPaymentMethod] = useState<'online' | 'pay_at_shop'>(
-    'online'
-  );
+  const [paymentMethod, setPaymentMethod] = useState<
+    'razorpay' | 'pay_at_shop'
+  >('razorpay');
   const [couponInput, setCouponInput] = useState<string>('');
   const [appliedCouponCode, setAppliedCouponCode] = useState<string>('');
   const [appliedDiscountPercent, setAppliedDiscountPercent] = useState<number>(0);
@@ -114,17 +148,84 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [bookingComplete, setBookingComplete] = useState<any | null>(null);
 
+  // Sync shop ID if URL or prop changes
   useEffect(() => {
-    if (!selectedService && activeServices.length > 0) {
-      setSelectedService(activeServices[0]);
+    const fromUrl = parseShopIdFromUrl();
+    const candidate = fromUrl || initialShopId || initialShop?.id || '';
+    if (candidate !== selectedShopId) {
+      setSelectedShopId(candidate);
     }
-  }, [activeServices, selectedService]);
+  }, [initialShopId, initialShop]);
 
+  // Load shop, services, and barbers strictly from Supabase for this shop_id
   useEffect(() => {
-    if (!selectedBarber && activeBarbers.length > 0) {
-      setSelectedBarber(activeBarbers[0]);
-    }
-  }, [activeBarbers, selectedBarber]);
+    let isCancelled = false;
+    const fetchScopedData = async () => {
+      if (!selectedShopId) {
+        setShopLoading(false);
+        setShopError('missing_shop');
+        return;
+      }
+
+      setShopLoading(true);
+      try {
+        const result = await loadShopForBooking(
+          selectedShopId,
+          shops,
+          services,
+          barbers
+        );
+        if (isCancelled) return;
+
+        setLoadedShop(result.shop);
+        setShopServices(result.services);
+        setShopBarbers(result.barbers);
+        setShopError(result.error);
+
+        // Sync selected service if valid
+        if (result.services.length > 0) {
+          setSelectedService((prev: any) => {
+            if (prev && result.services.some((s) => s.id === prev.id)) {
+              return prev;
+            }
+            if (initialService && result.services.some((s) => s.id === initialService.id)) {
+              return initialService;
+            }
+            return result.services[0];
+          });
+        } else {
+          setSelectedService(null);
+        }
+
+        // Sync selected barber or assign salon master barber
+        if (result.barbers.length > 0) {
+          setSelectedBarber((prev: any) => {
+            if (prev && result.barbers.some((b) => b.id === prev.id)) {
+              return prev;
+            }
+            if (initialBarber && result.barbers.some((b) => b.id === initialBarber.id)) {
+              return initialBarber;
+            }
+            return result.barbers[0];
+          });
+        }
+      } catch (err) {
+        console.warn('[BarberLoo] Error during booking initialization:', err);
+        if (!isCancelled) {
+          setShopError('shop_not_found');
+        }
+      } finally {
+        if (!isCancelled) {
+          setShopLoading(false);
+        }
+      }
+    };
+
+    fetchScopedData();
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedShopId, shops, services, barbers, initialService, initialBarber]);
 
   useEffect(() => {
     if (currentUserProfile) {
@@ -137,6 +238,48 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     }
   }, [currentUserProfile, clientName, clientPhone]);
 
+  const currentShop =
+    loadedShop || shops.find((s: any) => s.id === selectedShopId) || null;
+
+  // Active services strictly scoped to the selected shop
+  const shopFilteredServices = shopServices;
+
+  // Default on-duty master barber if the shop hasn't added individual barber profiles yet
+  const defaultOnDutyBarber: BarberItem = useMemo(() => {
+    return {
+      id: `brb-${currentShop?.id || selectedShopId || 'master'}`,
+      userUid: '',
+      shopId: currentShop?.id || selectedShopId || '',
+      shopName: currentShop?.name || 'Partner Salon',
+      name: `${currentShop?.name || 'Salon'} Master Barber`,
+      role: 'Salon Master Stylist (On-Duty Team)',
+      rating: parseFloat(currentShop?.rating) || 5.0,
+      reviews: currentShop?.reviewCount || 10,
+      experience: '5+ yrs',
+      experienceYears: 5,
+      specialty: 'All Hair & Beard Treatments',
+      nextAvailable: 'Today · IST',
+      priceFrom: Number(shopFilteredServices[0]?.price || 120),
+      image: currentShop?.image || '/src/assets/images/hero_barber_craft_1790869666069.jpg',
+      avatar: currentShop?.image || '/src/assets/images/hero_barber_craft_1790869666069.jpg',
+      bio: `Dedicated master grooming team at ${currentShop?.name || 'this salon'}.`,
+      featured: true,
+      active: true,
+      verified: true,
+      verificationStatus: 'verified',
+      chairBreakActive: false,
+      assignedServiceIds: '',
+    };
+  }, [currentShop, selectedShopId, shopFilteredServices]);
+
+  const shopFilteredBarbers =
+    shopBarbers.length > 0 ? shopBarbers : [defaultOnDutyBarber];
+
+  const currentService =
+    selectedService || shopFilteredServices[0] || null;
+  const currentBarber =
+    selectedBarber || shopFilteredBarbers[0] || defaultOnDutyBarber;
+
   const steps = [
     { num: 1, label: tr('Select Service', 'सेवा चुनें') },
     { num: 2, label: tr('Select Barber', 'बार्बर चुनें') },
@@ -145,8 +288,8 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     { num: 5, label: tr('Confirm Booking', 'बुकिंग की पुष्टि') },
   ];
 
-  // If no services or barbers exist yet on the platform, show a clean startup state
-  if (activeServices.length === 0 || activeBarbers.length === 0) {
+  // CASE A: shop_id is missing
+  if (!selectedShopId || shopError === 'missing_shop') {
     return (
       <div className="min-h-[78vh] bg-[#FAF6EA] py-16 px-5 sm:px-8 flex items-center justify-center">
         <div className="max-w-xl w-full rounded-[24px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 p-8 sm:p-10 text-center space-y-5 shadow-2xl">
@@ -154,42 +297,25 @@ export const BookingPage: React.FC<BookingPageProps> = ({
             <Scissors className="w-6 h-6" />
           </div>
           <p className="text-xs font-semibold tracking-[0.2em] uppercase text-[#F1E194]">
-            {tr('BARBERLOO INDIA • LIVE BOOKING ENGINE', 'बारबरलू इंडिया • लाइव बुकिंग')}
+            {tr('BARBERLOO INDIA • SALON SELECTION', 'बारबरलू इंडिया • सैलून चयन')}
           </p>
           <h1 className="font-display text-3xl sm:text-4xl font-bold">
-            {tr(
-              'No Services or Barbers Listed Yet',
-              'अभी कोई सेवा या बार्बर सूचीबद्ध नहीं है'
-            )}
+            {tr('No Barber Shop Selected', 'कोई सैलून चयनित नहीं है')}
           </h1>
           <p className="text-xs text-[#8A8178] leading-relaxed">
             {tr(
-              'This platform uses 100% real partner data. Once a registered Barber Partner adds their salon, services (in ₹ INR), and barber profile in the Barber Console, live IST booking slots will appear here.',
-              'यह प्लेटफ़ॉर्म 100% वास्तविक डेटा का उपयोग करता है। जब कोई पंजीकृत बार्बर पार्टनर अपनी दुकान और सेवाएं जोड़ेगा, तो यहां लाइव IST बुकिंग स्लॉट दिखाई देंगे।'
+              'No shop was selected. Please choose a partner salon to view services and book an appointment.',
+              'कोई सैलून चयनित नहीं है। सेवाएं देखने और अपनी अपॉइंटमेंट बुक करने के लिए कृपया एक सैलून चुनें।'
             )}
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-            {currentUserProfile?.role === 'barber' ||
-            currentUserProfile?.role === 'admin' ? (
-              <button
-                type="button"
-                onClick={() => onNavigate('barber-dashboard')}
-                className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
-              >
-                {tr(
-                  'Open Barber Console to Add Services',
-                  'सेवाएं जोड़ने के लिए बार्बर कंसोल खोलें'
-                )}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onOpenAuthModal && onOpenAuthModal()}
-                className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
-              >
-                {tr('Sign Up as a Barber Partner', 'बार्बर पार्टनर के रूप में जुड़ें')}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => onNavigate('shop')}
+              className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
+            >
+              {tr('Explore Partner Salons', 'पार्टनर सैलून देखें')}
+            </button>
             <button
               type="button"
               onClick={() => onNavigate('home')}
@@ -203,18 +329,112 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     );
   }
 
-  const shopFilteredServices =
-    selectedShopId && activeServices.some((s: any) => s.shopId === selectedShopId)
-      ? activeServices.filter((s: any) => s.shopId === selectedShopId)
-      : activeServices;
+  // CASE B: shop_id is invalid or shop doesn't exist
+  if (shopError === 'shop_not_found') {
+    return (
+      <div className="min-h-[78vh] bg-[#FAF6EA] py-16 px-5 sm:px-8 flex items-center justify-center">
+        <div className="max-w-xl w-full rounded-[24px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 p-8 sm:p-10 text-center space-y-5 shadow-2xl">
+          <div className="w-12 h-12 rounded-full bg-[#5B0E14] text-[#F1E194] flex items-center justify-center mx-auto">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-[#F1E194]">
+            {tr('BARBERLOO INDIA • VERIFIED DIRECTORY', 'बारबरलू इंडिया • सत्यापित डायरेक्टरी')}
+          </p>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold">
+            {tr('Shop Not Found', 'सैलून नहीं मिला')}
+          </h1>
+          <p className="text-xs text-[#8A8178] leading-relaxed">
+            {tr(
+              "We couldn't find this shop. It may have been moved or the booking link is invalid.",
+              'हम इस सैलून को ढूंढ नहीं सके। कृपया हमारे अन्य सत्यापित सैलून में से चुनें।'
+            )}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
+            <button
+              type="button"
+              onClick={() => onNavigate('shop')}
+              className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
+            >
+              {tr('Explore Available Salons', 'उपलब्ध सैलून देखें')}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('home')}
+              className="px-6 py-3.5 rounded-[16px] border border-[#F1E194]/25 text-xs font-semibold tracking-wider uppercase cursor-pointer"
+            >
+              {tr('Back to Home', 'होम पर वापस जाएं')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const shopFilteredBarbers =
-    selectedShopId && activeBarbers.some((b: any) => b.shopId === selectedShopId)
-      ? activeBarbers.filter((b: any) => b.shopId === selectedShopId)
-      : activeBarbers;
+  // CASE C: shop exists but services = 0
+  if (!shopLoading && (shopError === 'no_services' || shopFilteredServices.length === 0)) {
+    return (
+      <div className="min-h-[78vh] bg-[#FAF6EA] py-16 px-5 sm:px-8 flex items-center justify-center">
+        <div className="max-w-xl w-full rounded-[24px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 p-8 sm:p-10 text-center space-y-5 shadow-2xl">
+          <div className="w-12 h-12 rounded-full bg-[#5B0E14] text-[#F1E194] flex items-center justify-center mx-auto">
+            <Scissors className="w-6 h-6" />
+          </div>
+          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-[#F1E194]">
+            {currentShop?.name || tr('SALON MENU', 'सैलून मेनू')}
+          </p>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold">
+            {tr(
+              "This shop hasn't added any services yet.",
+              'इस दुकान ने अभी तक कोई सेवा नहीं जोड़ी है।'
+            )}
+          </h1>
+          <p className="text-xs text-[#8A8178] leading-relaxed">
+            {tr(
+              'This salon is registered on BarberLoo, but has not published active services yet. Please choose another partner salon.',
+              'यह सैलून पंजीकृत है लेकिन अभी तक सेवाएं प्रकाशित नहीं की हैं। कृपया कोई अन्य सैलून चुनें।'
+            )}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
+            <button
+              type="button"
+              onClick={() => onNavigate('shop')}
+              className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
+            >
+              {tr('Explore Other Salons', 'अन्य सैलून देखें')}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('home')}
+              className="px-6 py-3.5 rounded-[16px] border border-[#F1E194]/25 text-xs font-semibold tracking-wider uppercase cursor-pointer"
+            >
+              {tr('Back to Home', 'होम पर वापस जाएं')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const currentService = selectedService || shopFilteredServices[0] || activeServices[0];
-  const currentBarber = selectedBarber || shopFilteredBarbers[0] || activeBarbers[0];
+  // Loading indicator while scoped shop services are being retrieved
+  if (shopLoading && shopFilteredServices.length === 0) {
+    return (
+      <div className="min-h-[78vh] bg-[#FAF6EA] py-16 px-5 sm:px-8 flex items-center justify-center">
+        <div className="max-w-md w-full rounded-[24px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 p-8 text-center space-y-4 shadow-2xl">
+          <RefreshCw className="w-8 h-8 text-[#F1E194] animate-spin mx-auto" />
+          <h2 className="font-display text-2xl font-bold text-[#FFF9E8]">
+            {tr('Loading Salon Services...', 'सैलून सेवाएं लोड हो रही हैं...')}
+          </h2>
+          <p className="text-xs text-[#8A8178]">
+            {tr(
+              'Connecting to Supabase for verified menu & IST chair availability.',
+              'सत्यापित मेनू और IST उपलब्धता लोड की जा रही है।'
+            )}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+
 
   const selectedDaySchedule = useMemo(() => {
     try {
@@ -302,7 +522,13 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     }
   };
 
-  const grossPrice = Number(currentService?.price || 0);
+  const baseServiceDuration = Number(
+    currentService?.durationMins || currentService?.durationMin || 45
+  );
+  const totalAppointmentDuration = baseServiceDuration;
+
+  const basePrice = Number(currentService?.price || 0);
+  const grossPrice = basePrice;
   const discountAmount = Math.round((grossPrice * appliedDiscountPercent) / 100);
   const inrBreakdown = getINRBreakdown(grossPrice, discountAmount);
   const finalPrice = inrBreakdown.finalPayable;
@@ -336,11 +562,86 @@ export const BookingPage: React.FC<BookingPageProps> = ({
       return;
     }
 
+    const fullBookingNotes = clientNotes ? clientNotes.trim() : '';
+
+    if (paymentMethod === 'razorpay') {
+      setIsSubmitting(true);
+      setBookingError('');
+      try {
+        await initiateRazorpayPayment({
+          amountINR: finalPrice,
+          serviceName: currentService.name,
+          barberName: currentBarber.name,
+          shopName: currentShop?.name || currentBarber.shopName || 'BarberLoo Partner Salon',
+          clientName: clientName || currentUserProfile?.name || 'Guest',
+          clientPhone: clientPhone || currentUserProfile?.phone || '+91',
+          clientEmail: currentUserProfile?.email || 'guest@barberloo.in',
+          appointmentId: `apt-${Date.now().toString(36)}`,
+          onSuccess: async (rzpResult) => {
+            try {
+              const payload = {
+                shopId: currentShop?.id || selectedShopId || currentBarber.shopId || 'shop-1',
+                shopName: currentShop?.name || currentBarber.shopName || 'BarberLoo Partner Salon',
+                serviceId: currentService.id,
+                serviceName: currentService.name,
+                barberId: currentBarber.id,
+                barberName: currentBarber.name,
+                barberAvatar: currentBarber.avatar,
+                date: selectedDate,
+                time: selectedTime,
+                durationMins: totalAppointmentDuration,
+                durationMin: totalAppointmentDuration,
+                price: finalPrice,
+                clientName: clientName || currentUserProfile?.name,
+                clientPhone: clientPhone || currentUserProfile?.phone || '+91',
+                notes: fullBookingNotes,
+                paymentMethod: 'razorpay',
+                razorpayPaymentId: rzpResult.razorpay_payment_id,
+                razorpayOrderId: rzpResult.razorpay_order_id,
+                couponCode: appliedCouponCode || undefined,
+              };
+              const created = await onConfirmBooking(payload);
+              setBookingComplete({
+                ...(created || payload),
+                razorpayPaymentId: rzpResult.razorpay_payment_id,
+                paymentMethod: 'razorpay',
+              });
+            } catch (err: any) {
+              setBookingError(
+                err?.message || 'Error saving appointment after Razorpay payment.'
+              );
+            } finally {
+              setIsSubmitting(false);
+            }
+          },
+          onError: (err) => {
+            setIsSubmitting(false);
+            setBookingError(
+              err?.description ||
+                err?.message ||
+                tr(
+                  'Razorpay authorization was not completed. Please retry or choose another payment method.',
+                  'रेज़रपे भुगतान पूरा नहीं हुआ। कृपया पुनः प्रयास करें या अन्य तरीका चुनें।'
+                )
+            );
+          },
+          onDismiss: () => {
+            setIsSubmitting(false);
+          },
+        });
+      } catch (err: any) {
+        setIsSubmitting(false);
+        setBookingError(err?.message || 'Failed to initialize Razorpay checkout.');
+      }
+      return;
+    }
+
+    // Default: Pay at salon
     setIsSubmitting(true);
     try {
       const payload = {
-        shopId: currentBarber.shopId || 'shop-1',
-        shopName: currentBarber.shopName || 'BarberLoo Partner Salon',
+        shopId: currentShop?.id || selectedShopId || currentBarber.shopId || 'shop-1',
+        shopName: currentShop?.name || currentBarber.shopName || 'BarberLoo Partner Salon',
         serviceId: currentService.id,
         serviceName: currentService.name,
         barberId: currentBarber.id,
@@ -348,17 +649,20 @@ export const BookingPage: React.FC<BookingPageProps> = ({
         barberAvatar: currentBarber.avatar,
         date: selectedDate,
         time: selectedTime,
-        durationMins: currentService.durationMins || currentService.durationMin || 45,
-        durationMin: currentService.durationMins || currentService.durationMin || 45,
+        durationMins: totalAppointmentDuration,
+        durationMin: totalAppointmentDuration,
         price: finalPrice,
-        clientName: clientName || currentUserProfile.name,
-        clientPhone: clientPhone || currentUserProfile.phone || '+91',
-        notes: `${clientNotes} | Beverage: ${beverageChoice}`,
-        paymentMethod,
+        clientName: clientName || currentUserProfile?.name,
+        clientPhone: clientPhone || currentUserProfile?.phone || '+91',
+        notes: fullBookingNotes,
+        paymentMethod: 'pay_at_shop',
         couponCode: appliedCouponCode || undefined,
       };
       const created = await onConfirmBooking(payload);
-      setBookingComplete(created || payload);
+      setBookingComplete({
+        ...(created || payload),
+        paymentMethod: 'pay_at_shop',
+      });
     } catch (err: any) {
       setBookingError(
         err?.message ||
@@ -448,6 +752,48 @@ export const BookingPage: React.FC<BookingPageProps> = ({
               <p className="text-sm font-semibold text-[#FFF9E8] mt-1">
                 {currentBarber.shopName}
               </p>
+            </div>
+
+            {/* Payment & Gateway Settlement Metadata */}
+            <div className="sm:col-span-2 pt-3 border-t border-[#F1E194]/15">
+              <p className="text-[11px] uppercase tracking-wider text-[#8A8178]">
+                {tr('Payment Settlement & Verification', 'भुगतान निपटान और सत्यापन')}
+              </p>
+              {bookingComplete.paymentMethod === 'razorpay' ? (
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2 p-3 rounded-[12px] bg-emerald-950/60 border border-emerald-500/30">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-emerald-400" />
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-200">
+                        {tr('Paid via Razorpay (UPI / Card)', 'रेज़रपे द्वारा भुगतान सफल')}
+                      </p>
+                      <p className="text-[10px] text-emerald-300/80 font-mono-num">
+                        {bookingComplete.razorpayPaymentId
+                          ? `Txn: ${bookingComplete.razorpayPaymentId}`
+                          : 'Payment Authorized'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-800 text-emerald-100">
+                    PAID • VERIFIED
+                  </span>
+                </div>
+              ) : (
+                <div className="mt-1 flex items-center justify-between gap-2 p-3 rounded-[12px] bg-[#111113] border border-[#F1E194]/15">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-[#F1E194]" />
+                    <p className="text-xs font-medium text-[#FFF9E8]">
+                      {tr(
+                        'Pay at Salon (Cash, Card or UPI after haircut)',
+                        'सैलून पर भुगतान (हेयरकट के बाद नकद, कार्ड या UPI)'
+                      )}
+                    </p>
+                  </div>
+                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/30">
+                    PAY IN-STORE
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -554,40 +900,51 @@ export const BookingPage: React.FC<BookingPageProps> = ({
             {/* STEP 1: SELECT SERVICE */}
             {step === 1 && (
               <div className="space-y-4">
-                {shops.length > 1 && (
-                  <div className="rounded-[18px] bg-[#E9D9B8]/45 border border-[#5B0E14]/15 p-4 flex flex-wrap items-center justify-between gap-3">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-[#5B0E14]">
-                      {tr('Select Salon Location:', 'सैलून स्थान चुनें:')}
-                    </span>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedShopId('')}
-                        className={`px-3 py-1.5 rounded-[10px] text-xs font-semibold cursor-pointer ${
-                          !selectedShopId
-                            ? 'bg-[#5B0E14] text-[#FFF9E8]'
-                            : 'bg-[#FAF6EA] text-[#111113]'
-                        }`}
-                      >
-                        {tr('All Salons', 'सभी सैलून')}
-                      </button>
+                <div className="rounded-[18px] bg-[#E9D9B8]/45 border border-[#5B0E14]/15 p-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-[#5B0E14] text-[#F1E194] flex items-center justify-center shrink-0">
+                      <MapPin className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-[#111113]">
+                        {currentShop?.name || 'Selected Partner Salon'}
+                      </p>
+                      <p className="text-[11px] text-[#8A8178]">
+                        {currentShop?.address
+                          ? `${currentShop.address}, ${currentShop.city || currentShop.district}`
+                          : currentShop?.city || currentShop?.district || 'India'}
+                      </p>
+                    </div>
+                  </div>
+                  {shops.length > 1 && (
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <span className="text-[10px] uppercase font-semibold text-[#8A8178]">
+                        {tr('Switch Salon:', 'सैलून बदलें:')}
+                      </span>
                       {shops.map((sh: any) => (
                         <button
                           key={sh.id}
                           type="button"
-                          onClick={() => setSelectedShopId(sh.id)}
-                          className={`px-3 py-1.5 rounded-[10px] text-xs font-semibold cursor-pointer ${
+                          onClick={() => {
+                            setSelectedShopId(sh.id);
+                            window.history.pushState(
+                              {},
+                              '',
+                              `booking.html?shop_id=${encodeURIComponent(sh.id)}`
+                            );
+                          }}
+                          className={`px-3 py-1.5 rounded-[10px] text-xs font-semibold cursor-pointer transition-all ${
                             selectedShopId === sh.id
                               ? 'bg-[#5B0E14] text-[#FFF9E8]'
-                              : 'bg-[#FAF6EA] text-[#111113]'
+                              : 'bg-[#FAF6EA] text-[#111113] hover:bg-[#E9D9B8]'
                           }`}
                         >
                           {sh.name}
                         </button>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
@@ -709,9 +1066,29 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   </button>
                 </div>
 
+                {shopBarbers.length === 0 && (
+                  <div className="p-4 rounded-[18px] bg-[#111113] border border-[#F1E194]/30 text-[#FFF9E8] space-y-1">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-[#F1E194]" />
+                      <span className="text-xs font-bold text-[#F1E194]">
+                        {tr(
+                          'Services Available • On-Duty Salon Team',
+                          'सेवाएं उपलब्ध • ऑन-ड्यूटी सैलून टीम'
+                        )}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#8A8178] leading-relaxed">
+                      {tr(
+                        "Services are available, but this shop hasn't added individual barber profiles yet. Your appointment will be reserved with the salon's verified on-duty master barber.",
+                        'सेवाएं उपलब्ध हैं, लेकिन इस दुकान ने अभी तक अलग-अलग बार्बर प्रोफ़ाइल नहीं जोड़ी हैं। आपकी बुकिंग सैलून के ऑन-ड्यूटी मास्टर बार्बर के साथ आरक्षित होगी।'
+                      )}
+                    </p>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {shopFilteredBarbers.map((brb: any) => {
-                    const isSelected = currentBarber.id === brb.id;
+                    const isSelected = currentBarber?.id === brb.id;
                     return (
                       <div
                         key={brb.id}
@@ -1032,23 +1409,35 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   <div className="p-4 rounded-[16px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold text-[#F1E194]">
-                        {tr('Sign In Required to Book', 'बुक करने के लिए साइन इन आवश्यक है')}
+                        {tr(
+                          'Create your free BarberLoo account to book this appointment.',
+                          'इस अपॉइंटमेंट को बुक करने के लिए अपना मुफ़्त बारबरलू खाता बनाएं।'
+                        )}
                       </p>
                       <p className="text-[11px] text-[#8A8178]">
                         {tr(
-                          'Please sign in or create a Customer account to confirm your appointment.',
-                          'अपॉइंटमेंट कन्फर्म करने के लिए कृपया अपने ग्राहक खाते में साइन इन करें।'
+                          'Sign in to confirm your chair reservation and receive instant IST confirmation.',
+                          'अपनी चेयर की पुष्टि और तुरंत IST कन्फर्मेशन पाने के लिए साइन इन करें।'
                         )}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onOpenAuthModal && onOpenAuthModal()}
-                      className="px-4 py-2 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
-                    >
-                      <LogIn className="w-3.5 h-3.5" />
-                      <span>{tr('Sign In / Sign Up', 'साइन इन करें')}</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onOpenAuthModal && onOpenAuthModal()}
+                        className="px-4 py-2 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <LogIn className="w-3.5 h-3.5" />
+                        <span>{tr('LOGIN', 'साइन इन')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenAuthModal && onOpenAuthModal()}
+                        className="px-4 py-2 rounded-[12px] border border-[#F1E194]/40 text-[#F1E194] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer hover:bg-[#F1E194]/10"
+                      >
+                        <span>{tr('CREATE ACCOUNT', 'खाता बनाएं')}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -1088,65 +1477,79 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-[#241719] mb-1.5">
-                      {tr('Complimentary Lounge Beverage', 'निःशुल्क लाउंज पेय')}
-                    </label>
-                    <select
-                      value={beverageChoice}
-                      onChange={(e) => setBeverageChoice(e.target.value)}
-                      className="w-full px-4 py-3 rounded-[14px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs font-medium text-[#111113]"
+                {/* Settlement Preference (Razorpay + Pay at Salon) */}
+                <div className="pt-2">
+                  <label className="block text-xs font-semibold text-[#241719] mb-2 flex items-center justify-between">
+                    <span>
+                      {tr(
+                        'Settlement Preference & Payment Method',
+                        'भुगतान का तरीका'
+                      )}
+                    </span>
+                    <span className="text-[10px] text-[#8A8178] font-normal">
+                      {tr('Secured by 256-bit SSL', '256-बिट SSL सुरक्षित')}
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* 1. Razorpay Instant */}
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('razorpay')}
+                      className={`p-4 rounded-[16px] border text-left cursor-pointer transition-all ${
+                        paymentMethod === 'razorpay'
+                          ? 'bg-[#241719] text-[#FFF9E8] border-[#F1E194] shadow-md ring-1 ring-[#F1E194]/40'
+                          : 'bg-[#FAF6EA] text-[#111113] border-[#5B0E14]/20 hover:border-[#5B0E14]/40'
+                      }`}
                     >
-                      <option value="Coorg Single-Estate Filter Coffee (Complimentary)">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#F1E194]">
+                          <Zap className="w-3.5 h-3.5 fill-[#F1E194]" />
+                          <span>Razorpay</span>
+                        </span>
+                        <span className="text-[9px] uppercase font-mono font-semibold px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">
+                          Instant
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-semibold">
+                        {tr('UPI / Cards / NetBanking', 'UPI / कार्ड / नेटबैंकिंग')}
+                      </p>
+                      <p className="text-[10px] text-[#8A8178] mt-0.5 leading-tight">
                         {tr(
-                          'Coorg Single-Estate Filter Coffee (Complimentary)',
-                          'कूर्ग सिंगल-एस्टेट फ़िल्टर कॉफ़ी (निःशुल्क)'
+                          'GPay, PhonePe, Paytm, Visa, RuPay',
+                          'GPay, PhonePe, कार्ड्स'
                         )}
-                      </option>
-                      <option value="Royal Kashmiri Kahwa Tea (Complimentary)">
-                        {tr(
-                          'Royal Kashmiri Kahwa Tea (Complimentary)',
-                          'रॉयल कश्मीरी कहवा चाय (निःशुल्क)'
-                        )}
-                      </option>
-                      <option value="Artisanal Masala Chai & Sparkling Water (Complimentary)">
-                        {tr(
-                          'Artisanal Masala Chai & Sparkling Water (Complimentary)',
-                          'पारंपरिक मसाला चाय और स्पार्कलिंग वाटर (निःशुल्क)'
-                        )}
-                      </option>
-                    </select>
-                  </div>
+                      </p>
+                    </button>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-[#241719] mb-1.5">
-                      {tr('Settlement Preference (INR)', 'भुगतान का तरीका (₹ INR)')}
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('online')}
-                        className={`py-3 px-3 rounded-[14px] text-xs font-semibold border cursor-pointer ${
-                          paymentMethod === 'online'
-                            ? 'bg-[#241719] text-[#F1E194] border-[#241719]'
-                            : 'bg-[#FAF6EA] text-[#111113] border-[#5B0E14]/20'
-                        }`}
-                      >
-                        {tr('UPI / Card Now', 'UPI / कार्ड पेमेंट')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('pay_at_shop')}
-                        className={`py-3 px-3 rounded-[14px] text-xs font-semibold border cursor-pointer ${
-                          paymentMethod === 'pay_at_shop'
-                            ? 'bg-[#241719] text-[#F1E194] border-[#241719]'
-                            : 'bg-[#FAF6EA] text-[#111113] border-[#5B0E14]/20'
-                        }`}
-                      >
-                        {tr('Pay at Salon', 'सैलून पर भुगतान करें')}
-                      </button>
-                    </div>
+                    {/* 2. Pay at Salon */}
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('pay_at_shop')}
+                      className={`p-4 rounded-[16px] border text-left cursor-pointer transition-all ${
+                        paymentMethod === 'pay_at_shop'
+                          ? 'bg-[#241719] text-[#FFF9E8] border-[#F1E194] shadow-md ring-1 ring-[#F1E194]/40'
+                          : 'bg-[#FAF6EA] text-[#111113] border-[#5B0E14]/20 hover:border-[#5B0E14]/40'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#F1E194]">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Salon Counter</span>
+                        </span>
+                        <span className="text-[9px] uppercase font-mono font-semibold px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/30">
+                          Post-Cut
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-semibold">
+                        {tr('Pay at Salon (Post-Cut)', 'सैलून पर भुगतान')}
+                      </p>
+                      <p className="text-[10px] text-[#8A8178] mt-0.5 leading-tight">
+                        {tr(
+                          'Cash or UPI after service completion',
+                          'सेवा के बाद नकद या UPI'
+                        )}
+                      </p>
+                    </button>
                   </div>
                 </div>
 
@@ -1203,10 +1606,15 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   <Sparkles className="w-4 h-4 text-[#F1E194]" />
                   <span>
                     {isSubmitting
-                      ? tr('RESERVING CHAIR...', 'चेयर आरक्षित हो रही है...')
+                      ? tr('PROCESSING RESERVATION...', 'प्रक्रिया जारी है...')
+                      : paymentMethod === 'razorpay'
+                      ? tr(
+                          `PAY WITH RAZORPAY • ${inrBreakdown.formattedFinal}`,
+                          `रेज़रपे से भुगतान करें • ${inrBreakdown.formattedFinal}`
+                        )
                       : tr(
-                          `CONFIRM BOOKING • ${inrBreakdown.formattedFinal}`,
-                          `बुकिंग कन्फर्म करें • ${inrBreakdown.formattedFinal}`
+                          `RESERVE CHAIR (PAY AT SALON) • ${inrBreakdown.formattedFinal}`,
+                          `चेयर आरक्षित करें (सैलून पर भुगतान) • ${inrBreakdown.formattedFinal}`
                         )}
                   </span>
                 </button>
@@ -1269,7 +1677,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                     {tr('Duration', 'अवधि')}
                   </span>
                   <span className="font-mono-num text-[#FFF9E8]">
-                    {currentService.durationMins || 45} {tr('mins', 'मिनट')}
+                    {totalAppointmentDuration} {tr('mins', 'मिनट')}
                   </span>
                 </div>
               </div>
@@ -1277,8 +1685,8 @@ export const BookingPage: React.FC<BookingPageProps> = ({
               {/* Indian Locale Pricing & GST Breakdown */}
               <div className="pt-4 border-t border-[#F1E194]/15 space-y-2">
                 <div className="flex justify-between text-xs text-[#8A8178]">
-                  <span>{tr('Service Tariff (MRP)', 'सेवा शुल्क (MRP)')}</span>
-                  <span className="font-mono-num">{inrBreakdown.formattedGross}</span>
+                  <span>{tr('Base Service MRP', 'मूल सेवा शुल्क')}</span>
+                  <span className="font-mono-num">{formatINR(basePrice)}</span>
                 </div>
 
                 {appliedDiscountPercent > 0 && (
