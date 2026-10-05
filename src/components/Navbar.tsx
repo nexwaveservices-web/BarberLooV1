@@ -19,6 +19,12 @@ import {
   supabaseSignOut,
 } from '../lib/supabase';
 import { useLanguage } from '../lib/i18n';
+import {
+  DEFAULT_STATES,
+  DEFAULT_CITIES,
+  getCitiesForState,
+  validateCityBelongsToState,
+} from '../lib/locations';
 
 interface NavbarProps {
   currentPage: PageView;
@@ -45,9 +51,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [passwordInput, setPasswordInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [phoneInput, setPhoneInput] = useState('');
+  const [selectedStateId, setSelectedStateId] = useState('st-pb');
+  const [selectedCityId, setSelectedCityId] = useState('ct-jal');
   const [signupAccountType, setSignupAccountType] = useState<'customer' | 'barber'>(
     'customer'
   );
+
+  const handleStateChange = (newStateId: string) => {
+    setSelectedStateId(newStateId);
+    const validCities = getCitiesForState(newStateId);
+    if (validCities.length > 0) {
+      setSelectedCityId(validCities[0].id);
+    }
+  };
   const [authMessage, setAuthMessage] = useState('');
   const [authError, setAuthError] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
@@ -152,6 +168,22 @@ export const Navbar: React.FC<NavbarProps> = ({
         const assignedRole =
           cleanEmail === OWNER_ADMIN_EMAIL ? 'admin' : signupAccountType;
 
+        const validCities = getCitiesForState(selectedStateId);
+        const cityValid = validateCityBelongsToState(selectedCityId, selectedStateId);
+        if (!cityValid) {
+          setAuthError(
+            tr(
+              'Selected city does not belong to the selected state. Please choose a valid city.',
+              'चुना गया शहर चुने गए राज्य से संबंधित नहीं है। कृपया मान्य शहर चुनें।'
+            )
+          );
+          setAuthBusy(false);
+          return;
+        }
+
+        const stateObj = DEFAULT_STATES.find((s) => s.id === selectedStateId);
+        const cityObj = validCities.find((c) => c.id === selectedCityId) || validCities[0];
+
         const supaUser = await supabaseSignUpUser(cleanEmail, passwordInput, {
           name:
             nameInput.trim() ||
@@ -160,6 +192,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               : cleanEmail.split('@')[0]),
           phone: phoneInput.trim() || '+91',
           role: assignedRole,
+          state_id: selectedStateId,
+          city_id: cityObj.id,
+          state: stateObj?.name || 'Punjab',
+          city: cityObj.name || 'Jalandhar',
         });
 
         if (onAuthChange) {
@@ -169,6 +205,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             name: supaUser.name,
             phone: supaUser.phone,
             role: assignedRole,
+            stateId: selectedStateId,
+            cityId: cityObj.id,
+            state: stateObj?.name || 'Punjab',
+            city: cityObj.name || 'Jalandhar',
           });
         }
       } else {
@@ -650,6 +690,40 @@ export const Navbar: React.FC<NavbarProps> = ({
                       placeholder="+91 98XXXXXXXX"
                       className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-xs text-[#8A8178] mb-1">
+                        {tr('State', 'राज्य')}
+                      </label>
+                      <select
+                        value={selectedStateId}
+                        onChange={(e) => handleStateChange(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8] cursor-pointer"
+                      >
+                        {DEFAULT_STATES.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[#8A8178] mb-1">
+                        {tr('City', 'शहर')}
+                      </label>
+                      <select
+                        value={selectedCityId}
+                        onChange={(e) => setSelectedCityId(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8] cursor-pointer"
+                      >
+                        {getCitiesForState(selectedStateId).map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </>
               )}

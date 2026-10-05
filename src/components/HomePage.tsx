@@ -19,6 +19,11 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useLanguage } from '../lib/i18n';
+import {
+  DEFAULT_STATES,
+  DEFAULT_CITIES,
+  getCitiesForState,
+} from '../lib/locations';
 
 interface HomePageProps {
   onNavigate: (page: PageView) => void;
@@ -57,12 +62,22 @@ export const HomePage: React.FC<HomePageProps> = ({
     translateService,
   } = useLanguage();
 
-  const [searchDistrict, setSearchDistrict] = useState('All Indian Cities');
+  const [selectedStateId, setSelectedStateId] = useState<string>(() => {
+    return currentUserProfile?.stateId || currentUserProfile?.state_id || 'all';
+  });
+  const [selectedCityId, setSelectedCityId] = useState<string>(() => {
+    return currentUserProfile?.cityId || currentUserProfile?.city_id || 'all';
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [activeServiceFilter, setActiveServiceFilter] = useState<string>('All');
   const [minRatingFilter, setMinRatingFilter] = useState<number>(0);
   const [maxPriceFilter, setMaxPriceFilter] = useState<number>(99999);
   const [sortBy, setSortBy] = useState<'distance' | 'rating' | 'price'>('distance');
+
+  const handleStateSelect = (stId: string) => {
+    setSelectedStateId(stId);
+    setSelectedCityId('all');
+  };
 
   const isFavorited = (type: 'shop' | 'barber', id: string) =>
     favorites.some((f) => f.targetType === type && f.targetId === id);
@@ -114,20 +129,52 @@ export const HomePage: React.FC<HomePageProps> = ({
       ) {
         return false;
       }
-      const matchesDistrict =
-        searchDistrict === 'All Indian Cities' ||
-        (shop.district || '')
-          .toLowerCase()
-          .includes(searchDistrict.toLowerCase()) ||
-        (shop.city || '').toLowerCase().includes(searchDistrict.toLowerCase());
+
+      // 1. State matching
+      if (selectedStateId !== 'all') {
+        const stateObj = DEFAULT_STATES.find((s) => s.id === selectedStateId);
+        const stateName = stateObj?.name.toLowerCase() || '';
+        const sState = (shop.state || '').toLowerCase();
+        const sAddress = (shop.address || '').toLowerCase();
+        const sDistrict = (shop.district || '').toLowerCase();
+        const matchesState =
+          shop.stateId === selectedStateId ||
+          shop.state_id === selectedStateId ||
+          (stateName &&
+            (sState.includes(stateName) ||
+              sAddress.includes(stateName) ||
+              sDistrict.includes(stateName)));
+        if (!matchesState) return false;
+      }
+
+      // 2. City matching
+      if (selectedCityId !== 'all') {
+        const cityObj = DEFAULT_CITIES.find((c) => c.id === selectedCityId);
+        const cityName = cityObj?.name.toLowerCase() || '';
+        const sCity = (shop.city || '').toLowerCase();
+        const sAddress = (shop.address || '').toLowerCase();
+        const sDistrict = (shop.district || '').toLowerCase();
+        const matchesCity =
+          shop.cityId === selectedCityId ||
+          shop.city_id === selectedCityId ||
+          (cityName &&
+            (sCity.includes(cityName) ||
+              sAddress.includes(cityName) ||
+              sDistrict.includes(cityName)));
+        if (!matchesCity) return false;
+      }
+
+      // 3. Search query
       const matchesQuery =
         !searchQuery.trim() ||
         shop.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (shop.district || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (shop.city || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (shop.address || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (shop.tagline || '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesRating = Number(shop.rating) >= minRatingFilter;
       const matchesPrice = Number(shop.minPrice || 0) <= maxPriceFilter;
-      return matchesDistrict && matchesQuery && matchesRating && matchesPrice;
+      return matchesQuery && matchesRating && matchesPrice;
     })
     .sort((a: any, b: any) => {
       if (sortBy === 'rating') return Number(b.rating) - Number(a.rating);
@@ -243,38 +290,59 @@ export const HomePage: React.FC<HomePageProps> = ({
             onSubmit={handleSearchSubmit}
             className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-center"
           >
-            <div className="md:col-span-4 flex items-center gap-3.5 px-4 py-3 rounded-[16px] bg-[#111113]/75 border border-[#F1E194]/15">
+            <div className="md:col-span-3 flex items-center gap-3 px-3.5 py-3 rounded-[16px] bg-[#111113]/75 border border-[#F1E194]/15">
               <MapPin className="w-4 h-4 text-[#F1E194] shrink-0" />
               <div className="w-full">
                 <label className="block text-[10px] uppercase tracking-[0.16em] text-[#8A8178]">
-                  {tr('City / Location', 'शहर / स्थान')}
+                  {tr('State', 'राज्य')}
                 </label>
                 <select
-                  value={searchDistrict}
-                  onChange={(e) => setSearchDistrict(e.target.value)}
-                  className="w-full bg-transparent text-sm font-medium text-[#FFF9E8] focus:outline-none cursor-pointer"
+                  value={selectedStateId}
+                  onChange={(e) => handleStateSelect(e.target.value)}
+                  className="w-full bg-transparent text-xs font-semibold text-[#FFF9E8] focus:outline-none cursor-pointer"
                 >
-                  <option value="All Indian Cities" className="bg-[#111113]">
-                    {translateCity('All Indian Cities')}
+                  <option value="all" className="bg-[#111113]">
+                    {tr('All States', 'सभी राज्य')}
                   </option>
-                  <option value="Mumbai" className="bg-[#111113]">
-                    {tr('Mumbai', 'मुंबई')}
-                  </option>
-                  <option value="Bengaluru" className="bg-[#111113]">
-                    {tr('Bengaluru', 'बेंगलुरु')}
-                  </option>
-                  <option value="New Delhi" className="bg-[#111113]">
-                    {tr('New Delhi', 'नई दिल्ली')}
-                  </option>
+                  {DEFAULT_STATES.map((s) => (
+                    <option key={s.id} value={s.id} className="bg-[#111113]">
+                      {s.name}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
 
-            <div className="md:col-span-5 flex items-center gap-3.5 px-4 py-3 rounded-[16px] bg-[#111113]/75 border border-[#F1E194]/15">
+            <div className="md:col-span-3 flex items-center gap-3 px-3.5 py-3 rounded-[16px] bg-[#111113]/75 border border-[#F1E194]/15">
+              <MapPin className="w-4 h-4 text-[#F1E194] shrink-0" />
+              <div className="w-full">
+                <label className="block text-[10px] uppercase tracking-[0.16em] text-[#8A8178]">
+                  {tr('City', 'शहर')}
+                </label>
+                <select
+                  value={selectedCityId}
+                  onChange={(e) => setSelectedCityId(e.target.value)}
+                  className="w-full bg-transparent text-xs font-semibold text-[#FFF9E8] focus:outline-none cursor-pointer"
+                >
+                  <option value="all" className="bg-[#111113]">
+                    {selectedStateId !== 'all'
+                      ? tr('All Cities in State', 'राज्य के सभी शहर')
+                      : tr('All Indian Cities', 'सभी भारतीय शहर')}
+                  </option>
+                  {getCitiesForState(selectedStateId).map((c) => (
+                    <option key={c.id} value={c.id} className="bg-[#111113]">
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="md:col-span-4 flex items-center gap-3 px-3.5 py-3 rounded-[16px] bg-[#111113]/75 border border-[#F1E194]/15">
               <Search className="w-4 h-4 text-[#F1E194] shrink-0" />
               <div className="w-full">
                 <label className="block text-[10px] uppercase tracking-[0.16em] text-[#8A8178]">
-                  {tr('Search Salon, Barber or Service', 'सैलून, बार्बर या सेवा खोजें')}
+                  {tr('Search Salon or Service', 'सैलून या सेवा खोजें')}
                 </label>
                 <input
                   type="text"
@@ -284,17 +352,17 @@ export const HomePage: React.FC<HomePageProps> = ({
                     'Search by salon name, barber or haircut...',
                     'सैलून का नाम, बार्बर या हेयरकट खोजें...'
                   )}
-                  className="w-full bg-transparent text-sm text-[#FFF9E8] placeholder:text-[#8A8178] focus:outline-none"
+                  className="w-full bg-transparent text-xs text-[#FFF9E8] placeholder:text-[#8A8178] focus:outline-none"
                 />
               </div>
             </div>
 
-            <div className="md:col-span-3">
+            <div className="md:col-span-2">
               <button
                 type="submit"
-                className="w-full py-4 px-5 rounded-[16px] bg-[#5B0E14] hover:bg-[#75131b] text-[#FFF9E8] border border-[#F1E194]/25 text-xs font-semibold tracking-[0.14em] uppercase transition-colors cursor-pointer"
+                className="w-full py-3.5 px-3 rounded-[16px] bg-[#5B0E14] hover:bg-[#75131b] text-[#FFF9E8] border border-[#F1E194]/25 text-xs font-semibold tracking-[0.14em] uppercase transition-colors cursor-pointer"
               >
-                {tr('SEARCH SALONS', 'सैलून खोजें')}
+                {tr('DISCOVER', 'सैलून खोजें')}
               </button>
             </div>
           </form>
@@ -558,21 +626,79 @@ export const HomePage: React.FC<HomePageProps> = ({
         </section>
       )}
 
-      {/* 6. NEARBY BARBER SHOPS */}
-      {filteredShops.length > 0 && (
-        <section
-          id="nearby-shops-section"
-          className="max-w-[1360px] mx-auto px-5 sm:px-8 py-14 border-t border-[#5B0E14]/12"
-        >
-          <div className="mb-10">
+      {/* 6. NEARBY BARBER SHOPS (LOCATION FILTERED) */}
+      <section
+        id="nearby-shops-section"
+        className="max-w-[1360px] mx-auto px-5 sm:px-8 py-14 border-t border-[#5B0E14]/12"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10">
+          <div>
             <p className="text-xs font-semibold tracking-[0.2em] uppercase text-[#5B0E14] mb-2">
               {tr('VERIFIED PARTNER SALONS', 'सत्यापित पार्टनर सैलून')}
             </p>
             <h2 className="font-display text-4xl sm:text-5xl font-bold text-[#111113]">
-              {tr('Partner Barber Shops', 'पार्टनर बार्बर शॉप्स')}
+              {selectedCityId !== 'all'
+                ? `${DEFAULT_CITIES.find((c) => c.id === selectedCityId)?.name || ''} ${tr('Salons', 'सैलून')}`
+                : selectedStateId !== 'all'
+                ? `${DEFAULT_STATES.find((s) => s.id === selectedStateId)?.name || ''} ${tr('Salons', 'सैलून')}`
+                : tr('Partner Barber Shops', 'पार्टनर बार्बर शॉप्स')}
             </h2>
           </div>
+          {(selectedStateId !== 'all' || selectedCityId !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedStateId('all');
+                setSelectedCityId('all');
+                setSearchQuery('');
+              }}
+              className="text-xs font-semibold text-[#5B0E14] underline hover:text-[#73121a] cursor-pointer"
+            >
+              {tr('Clear Location Filter', 'फ़िल्टर हटाएं')}
+            </button>
+          )}
+        </div>
 
+        {filteredShops.length === 0 ? (
+          <div className="rounded-[24px] bg-[#E9D9B8]/40 border border-[#5B0E14]/15 p-8 sm:p-12 text-center space-y-4">
+            <Store className="w-10 h-10 text-[#5B0E14] mx-auto opacity-75" />
+            <h3 className="font-display text-2xl font-bold text-[#111113]">
+              {tr(
+                'No verified salons found in this location.',
+                'इस स्थान पर कोई सत्यापित सैलून नहीं मिला।'
+              )}
+            </h3>
+            <p className="text-xs sm:text-sm text-[#8A8178] max-w-lg mx-auto">
+              {tr(
+                'No partner barbershops match your selected state/city or search filters. Try switching city or exploring all registered partner salons.',
+                'आपके चुने गए स्थान या खोज फ़िल्टर से कोई सैलून मेल नहीं खाता। कृपया दूसरा शहर चुनें या सभी सैलून देखें।'
+              )}
+            </p>
+            <div className="flex flex-wrap justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedStateId('all');
+                  setSelectedCityId('all');
+                  setSearchQuery('');
+                }}
+                className="px-5 py-2.5 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+              >
+                {tr('SHOW ALL SALONS', 'सभी सैलून देखें')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedStateId('st-pb');
+                  setSelectedCityId('all');
+                }}
+                className="px-5 py-2.5 rounded-[14px] bg-[#241719] text-[#F1E194] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+              >
+                {tr('EXPLORE PUNJAB SALONS', 'पंजाब के सैलून देखें')}
+              </button>
+            </div>
+          </div>
+        ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
             {filteredShops.map((shop: any) => {
               const fav = isFavorited('shop', shop.id);
@@ -591,7 +717,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                       <div className="absolute inset-0 bg-gradient-to-t from-[#241719] via-transparent to-transparent" />
                       <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
                         <span className="px-3 py-1 rounded-[10px] bg-[#111113]/85 backdrop-blur-md text-xs font-semibold text-[#F1E194] border border-[#F1E194]/25">
-                          {translateCity(shop.district)}
+                          {translateCity(shop.district || shop.city)}
                         </span>
                         <div className="flex items-center gap-2">
                           <span className="px-3 py-1 rounded-[10px] bg-[#111113]/85 backdrop-blur-md text-xs font-mono-num text-[#FFF9E8]">
@@ -670,8 +796,8 @@ export const HomePage: React.FC<HomePageProps> = ({
               );
             })}
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
       {/* 7. TOP RATED BARBERS */}
       {filteredBarbers.length > 0 && (

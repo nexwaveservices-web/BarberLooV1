@@ -24,6 +24,11 @@ import {
   evaluateAppointmentSla,
   calculatePlatformSlaSummary,
 } from '../lib/sla';
+import {
+  DEFAULT_STATES,
+  DEFAULT_CITIES,
+  getCitiesForState,
+} from '../lib/locations';
 
 interface BarberDashboardProps {
   appointments: AppointmentItem[];
@@ -181,7 +186,9 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
 
   // New Shop registration form
   const [newShopName, setNewShopName] = useState('');
-  const [newShopDistrict, setNewShopDistrict] = useState('Bandra West, Mumbai');
+  const [newShopStateId, setNewShopStateId] = useState('st-pb');
+  const [newShopCityId, setNewShopCityId] = useState('ct-jal');
+  const [newShopDistrict, setNewShopDistrict] = useState('Jalandhar, Punjab');
   const [newShopAddress, setNewShopAddress] = useState('');
   const [newShopPhone, setNewShopPhone] = useState(
     currentUserProfile?.phone || '+91 '
@@ -191,6 +198,14 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
     'Luxury Grooming & Bespoke Appointments'
   );
   const [newShopAbout, setNewShopAbout] = useState('');
+
+  const handleNewShopStateChange = (stId: string) => {
+    setNewShopStateId(stId);
+    const validCities = getCitiesForState(stId);
+    if (validCities.length > 0) {
+      setNewShopCityId(validCities[0].id);
+    }
+  };
 
   // Internal customer note state
   const [noteAptId, setNoteAptId] = useState<string | null>(null);
@@ -350,10 +365,18 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   const handleCreateShopSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newShopName.trim() || !onCreateShop) return;
+    const stateObj = DEFAULT_STATES.find((s) => s.id === newShopStateId);
+    const validCities = getCitiesForState(newShopStateId);
+    const cityObj =
+      validCities.find((c) => c.id === newShopCityId) || validCities[0];
+
     await onCreateShop({
       name: newShopName.trim(),
-      district: newShopDistrict.trim(),
-      city: newShopDistrict.split(',')[1]?.trim() || newShopDistrict.trim(),
+      stateId: newShopStateId,
+      cityId: cityObj?.id || 'ct-jal',
+      state: stateObj?.name || 'Punjab',
+      city: cityObj?.name || 'Jalandhar',
+      district: `${cityObj?.name || 'Jalandhar'}, ${stateObj?.name || 'Punjab'}`,
       address: newShopAddress.trim(),
       phone: newShopPhone.trim(),
       minPrice: Number(newShopMinPrice) || 500,
@@ -2345,18 +2368,39 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                     className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs text-[#8A8178] mb-1">
-                    {tr('Neighborhood & City', 'क्षेत्र और शहर')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newShopDistrict}
-                    onChange={(e) => setNewShopDistrict(e.target.value)}
-                    placeholder="Bandra West, Mumbai"
-                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-[#8A8178] mb-1">
+                      {tr('State', 'राज्य')}
+                    </label>
+                    <select
+                      value={newShopStateId}
+                      onChange={(e) => handleNewShopStateChange(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8] cursor-pointer"
+                    >
+                      {DEFAULT_STATES.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#8A8178] mb-1">
+                      {tr('City', 'शहर')}
+                    </label>
+                    <select
+                      value={newShopCityId}
+                      onChange={(e) => setNewShopCityId(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8] cursor-pointer"
+                    >
+                      {getCitiesForState(newShopStateId).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs text-[#8A8178] mb-1">

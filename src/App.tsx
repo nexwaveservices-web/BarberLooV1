@@ -114,6 +114,11 @@ export default function App() {
               const matched = data.shops.find((s: any) => s.id === prev.id);
               if (matched) return matched;
             }
+            const pathname = typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '';
+            const isBooking = pathname.includes('booking') || params.get('page') === 'booking';
+            if (isBooking) {
+              return null;
+            }
             return data.shops[0];
           });
         }
@@ -161,6 +166,21 @@ export default function App() {
         setCurrentPage('booking');
       } else if (params.get('page') === 'shop' || params.get('shop')) {
         setCurrentPage('shop');
+      } else if (
+        pathname.includes('admin') ||
+        params.get('page') === 'admin-dashboard'
+      ) {
+        setCurrentPage('admin-dashboard');
+      } else if (
+        pathname.includes('barber') ||
+        params.get('page') === 'barber-dashboard'
+      ) {
+        setCurrentPage('barber-dashboard');
+      } else if (
+        pathname.includes('account') ||
+        params.get('page') === 'customer-dashboard'
+      ) {
+        setCurrentPage('customer-dashboard');
       }
     };
 

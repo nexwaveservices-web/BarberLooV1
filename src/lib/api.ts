@@ -7,6 +7,7 @@ import {
   connectSupabaseRealtime,
 } from './supabase';
 import { ASSETS, OPENING_HOURS } from '../data/barberlooData';
+import { DEFAULT_STATES, DEFAULT_CITIES } from './locations';
 
 async function safeBackendRequest<T>(
   path: string,
@@ -44,12 +45,37 @@ async function safeBackendRequest<T>(
 }
 
 function mapSupabaseShop(sh: any) {
+  const rawCity = String(sh.city || sh.district || 'Jalandhar');
+  const matchedCity = DEFAULT_CITIES.find(
+    (c) =>
+      c.id === sh.city_id ||
+      c.id === sh.cityId ||
+      c.name.toLowerCase() === rawCity.toLowerCase() ||
+      rawCity.toLowerCase().includes(c.name.toLowerCase())
+  );
+  const stateId =
+    sh.state_id ||
+    sh.stateId ||
+    (matchedCity ? matchedCity.stateId : 'st-pb');
+  const cityId =
+    sh.city_id ||
+    sh.cityId ||
+    (matchedCity ? matchedCity.id : 'ct-jal');
+  const cityName = matchedCity ? matchedCity.name : rawCity;
+  const stateName =
+    DEFAULT_STATES.find((s) => s.id === stateId)?.name || 'Punjab';
+
   return {
     id: sh.id,
     ownerUid: sh.owner_uid ?? sh.ownerUid ?? '',
     name: sh.name,
-    district: sh.district || 'Mumbai',
-    city: sh.city || 'Mumbai',
+    stateId,
+    cityId,
+    state_id: stateId,
+    city_id: cityId,
+    state: stateName,
+    city: cityName,
+    district: sh.district || `${cityName}, ${stateName}`,
     address: sh.address || '',
     phone: sh.phone || '+91',
     distance: sh.distance || '1.0 km away',
@@ -67,8 +93,8 @@ function mapSupabaseShop(sh: any) {
     tagline: sh.tagline || 'Bespoke Grooming & Reserved Appointments',
     about: sh.about || '',
     qrCodeSlug: sh.qr_code_slug ?? sh.qrCodeSlug ?? sh.id,
-    qrCodeUrl: `${window.location.origin}/?shop=${encodeURIComponent(
-      sh.qr_code_slug ?? sh.qrCodeSlug ?? sh.id
+    qrCodeUrl: `${typeof window !== 'undefined' ? window.location.origin : ''}/booking.html?shop_id=${encodeURIComponent(
+      sh.id
     )}`,
   };
 }
@@ -202,6 +228,10 @@ function mapSupabaseProfile(p: any) {
     phone: p.phone || '',
     avatarUrl: p.avatar_url ?? p.avatarUrl ?? '',
     role: email === OWNER_ADMIN_EMAIL ? 'admin' : p.role || 'customer',
+    stateId: p.state_id ?? p.stateId ?? 'st-pb',
+    cityId: p.city_id ?? p.cityId ?? 'ct-jal',
+    state: p.state ?? 'Punjab',
+    city: p.city ?? 'Jalandhar',
     tier:
       email === OWNER_ADMIN_EMAIL
         ? 'Founder & Platform Admin'
@@ -441,6 +471,12 @@ export const apiSyncAuthUser = async (payload: {
   name?: string;
   role?: 'customer' | 'barber' | 'admin';
   phone?: string;
+  stateId?: string;
+  state_id?: string;
+  cityId?: string;
+  city_id?: string;
+  state?: string;
+  city?: string;
 }) => {
   const cleanEmail = payload.email.trim().toLowerCase();
   const displayName = payload.name?.trim() || cleanEmail.split('@')[0];
@@ -490,6 +526,10 @@ export const apiSyncAuthUser = async (payload: {
     preferred_notes: existingProfileRow?.preferred_notes || '',
     reward_balance: existingReward,
     status: existingProfileRow?.status || 'active',
+    state_id: payload.stateId || payload.state_id || existingProfileRow?.state_id || 'st-pb',
+    city_id: payload.cityId || payload.city_id || existingProfileRow?.city_id || 'ct-jal',
+    state: payload.state || existingProfileRow?.state || 'Punjab',
+    city: payload.city || existingProfileRow?.city || 'Jalandhar',
   };
   if (existingProfileRow?.assigned_barber_id) {
     profileRecord.assigned_barber_id = existingProfileRow.assigned_barber_id;
@@ -526,6 +566,10 @@ export const apiUpdateProfile = async (
     avatarUrl?: string;
     role?: string;
     status?: string;
+    stateId?: string;
+    cityId?: string;
+    state?: string;
+    city?: string;
   }
 ) => {
   try {
@@ -539,6 +583,10 @@ export const apiUpdateProfile = async (
       supaUpdates.avatar_url = updates.avatarUrl;
     if (updates.role !== undefined) supaUpdates.role = updates.role;
     if (updates.status !== undefined) supaUpdates.status = updates.status;
+    if (updates.stateId !== undefined) supaUpdates.state_id = updates.stateId;
+    if (updates.cityId !== undefined) supaUpdates.city_id = updates.cityId;
+    if (updates.state !== undefined) supaUpdates.state = updates.state;
+    if (updates.city !== undefined) supaUpdates.city = updates.city;
     if (Object.keys(supaUpdates).length > 0) {
       await supabase.from('profiles').update(supaUpdates).eq('uid', uid);
     }
@@ -1051,8 +1099,13 @@ export const apiCreateShop = async (payload: any) => {
     id,
     owner_uid: payload.ownerUid || '',
     name: payload.name,
-    district: payload.district || 'Mumbai',
-    city: payload.city || 'Mumbai',
+    state_id: payload.stateId || payload.state_id || 'st-pb',
+    city_id: payload.cityId || payload.city_id || 'ct-jal',
+    state: payload.state || 'Punjab',
+    city: payload.city || 'Jalandhar',
+    district:
+      payload.district ||
+      `${payload.city || 'Jalandhar'}, ${payload.state || 'Punjab'}`,
     address: payload.address || '',
     phone: payload.phone || '+91',
     distance: '1.0 km away',
@@ -1085,6 +1138,9 @@ export const apiUpdateShop = async (id: string, updates: any) => {
   try {
     const supaUpdates: Record<string, any> = {};
     if (updates.name !== undefined) supaUpdates.name = updates.name;
+    if (updates.stateId !== undefined) supaUpdates.state_id = updates.stateId;
+    if (updates.cityId !== undefined) supaUpdates.city_id = updates.cityId;
+    if (updates.state !== undefined) supaUpdates.state = updates.state;
     if (updates.district !== undefined) supaUpdates.district = updates.district;
     if (updates.city !== undefined) supaUpdates.city = updates.city;
     if (updates.address !== undefined) supaUpdates.address = updates.address;

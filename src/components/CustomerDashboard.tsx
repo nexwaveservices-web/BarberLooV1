@@ -38,6 +38,12 @@ import {
   setBrowserAlertsEnabledPreference,
   sendBrowserNotification,
 } from '../lib/browserNotifications';
+import {
+  DEFAULT_STATES,
+  DEFAULT_CITIES,
+  getCitiesForState,
+  validateCityBelongsToState,
+} from '../lib/locations';
 
 interface CustomerDashboardProps {
   appointments: AppointmentItem[];
@@ -121,6 +127,20 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [profileNotes, setProfileNotes] = useState(
     currentUserProfile?.preferredNotes || ''
   );
+  const [profileStateId, setProfileStateId] = useState(
+    currentUserProfile?.stateId || currentUserProfile?.state_id || 'st-pb'
+  );
+  const [profileCityId, setProfileCityId] = useState(
+    currentUserProfile?.cityId || currentUserProfile?.city_id || 'ct-jal'
+  );
+
+  const handleProfileStateChange = (stId: string) => {
+    setProfileStateId(stId);
+    const validCities = getCitiesForState(stId);
+    if (validCities.length > 0) {
+      setProfileCityId(validCities[0].id);
+    }
+  };
   const [statusToast, setStatusToast] = useState('');
   const [reviewingAptId, setReviewingAptId] = useState<string | null>(null);
   const [reviewRating, setReviewRating] = useState<number>(5);
@@ -239,12 +259,31 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (onUpdateProfile) {
+      const validCities = getCitiesForState(profileStateId);
+      const cityValid = validateCityBelongsToState(profileCityId, profileStateId);
+      if (!cityValid) {
+        setStatusToast(
+          tr(
+            'Please select a valid city belonging to the selected state.',
+            'कृपया चुने गए राज्य के लिए एक मान्य शहर चुनें।'
+          )
+        );
+        return;
+      }
+      const stateObj = DEFAULT_STATES.find((s) => s.id === profileStateId);
+      const cityObj =
+        validCities.find((c) => c.id === profileCityId) || validCities[0];
+
       await onUpdateProfile({
         name: profileName,
         phone: profilePhone,
         email: profileEmail,
         avatarUrl: profileAvatar,
         preferredNotes: profileNotes,
+        stateId: profileStateId,
+        cityId: cityObj.id,
+        state: stateObj?.name || 'Punjab',
+        city: cityObj.name || 'Jalandhar',
       });
       setEditingProfile(false);
       setStatusToast(tr('✓ Profile saved.', '✓ प्रोफ़ाइल सहेजी गई।'));
@@ -456,6 +495,40 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       }}
                     />
                   </label>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#241719] mb-1">
+                    {tr('Home State', 'गृह राज्य')}
+                  </label>
+                  <select
+                    value={profileStateId}
+                    onChange={(e) => handleProfileStateChange(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113] cursor-pointer"
+                  >
+                    {DEFAULT_STATES.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#241719] mb-1">
+                    {tr('Home City', 'गृह शहर')}
+                  </label>
+                  <select
+                    value={profileCityId}
+                    onChange={(e) => setProfileCityId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113] cursor-pointer"
+                  >
+                    {getCitiesForState(profileStateId).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>

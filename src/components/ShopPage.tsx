@@ -138,18 +138,20 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   const shopServices = services.filter(
     (s: any) =>
       s.active !== false &&
-      (!s.shopId || s.shopId === activeShop.id || shops.length <= 1)
+      s.is_active !== false &&
+      (s.shopId === activeShop.id || s.shop_id === activeShop.id)
   );
   const shopBarbers = barbers.filter(
     (b: any) =>
       b.active !== false &&
+      b.is_active !== false &&
       b.verificationStatus !== 'suspended' &&
-      (!b.shopId || b.shopId === activeShop.id || shops.length <= 1)
+      (b.shopId === activeShop.id || b.shop_id === activeShop.id)
   );
   const shopReviews = reviews.filter(
     (r: any) =>
       r.status !== 'hidden' &&
-      (!r.shopId || r.shopId === activeShop.id || shops.length <= 1)
+      (r.shopId === activeShop.id || r.shop_id === activeShop.id)
   );
   const isShopFav = favorites.some(
     (f) => f.targetType === 'shop' && f.targetId === activeShop.id
@@ -438,8 +440,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               {shopServices.length === 0 ? (
                 <p className="text-sm text-[#8A8178] col-span-2 py-8">
                   {tr(
-                    'No services added for this salon yet.',
-                    'इस सैलून के लिए अभी कोई सेवा नहीं जोड़ी गई है।'
+                    'No services are currently available.',
+                    'इस समय कोई सेवा उपलब्ध नहीं है।'
                   )}
                 </p>
               ) : (
@@ -492,7 +494,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {shopBarbers.length === 0 ? (
                 <p className="text-sm text-[#8A8178] col-span-3 py-8">
-                  {tr('No barbers listed yet.', 'अभी कोई बार्बर सूचीबद्ध नहीं है।')}
+                  {tr('No barbers are currently available.', 'इस समय कोई बार्बर उपलब्ध नहीं है।')}
                 </p>
               ) : (
                 shopBarbers.map((brb: any) => {

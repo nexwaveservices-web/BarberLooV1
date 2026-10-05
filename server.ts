@@ -7,6 +7,8 @@ import fs from 'fs';
 import { eq } from 'drizzle-orm';
 import { db } from './src/db/index.ts';
 import {
+  states,
+  cities,
   profiles,
   shops,
   barbers,
@@ -253,6 +255,28 @@ async function startServer() {
     }
   });
 
+  // 1b. Location Hierarchy Endpoints (States & Cities)
+  app.get('/api/locations/states', async (_req, res) => {
+    try {
+      const allStates = await db.select().from(states).orderBy(states.name);
+      res.json(allStates);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch states' });
+    }
+  });
+
+  app.get('/api/locations/cities', async (req, res) => {
+    try {
+      const stateId = req.query.state_id as string | undefined;
+      const allCities = stateId
+        ? await db.select().from(cities).where(eq(cities.stateId, stateId)).orderBy(cities.name)
+        : await db.select().from(cities).orderBy(cities.name);
+      res.json(allCities);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch cities' });
+    }
+  });
+
   // 2. Auth & Profile Synchronization
   app.post('/api/auth/sync', optionalAuth, async (req: AuthRequest, res) => {
     try {
@@ -264,7 +288,11 @@ async function startServer() {
       const name = req.body.name || req.user?.name || email.split('@')[0];
       const requestedRole = req.body.role;
       const phone = req.body.phone;
-      await getOrCreateUser(uid, email, name, requestedRole, phone);
+      const stateId = req.body.stateId || req.body.state_id;
+      const cityId = req.body.cityId || req.body.city_id;
+      const stateName = req.body.state;
+      const cityName = req.body.city;
+      await getOrCreateUser(uid, email, name, requestedRole, phone, stateId, cityId, stateName, cityName);
 
       const profs = await db
         .select()
@@ -276,7 +304,7 @@ async function startServer() {
     }
   });
 
-  // 3. Update Profile / User Management (Role, Status, Details)
+  // 3. Update Profile / User Management (Role, Status, Details, State, City)
   app.patch('/api/profiles/:uid', optionalAuth, async (req: AuthRequest, res) => {
     try {
       const { uid } = req.params;
@@ -286,7 +314,7 @@ async function startServer() {
         .where(eq(profiles.uid, uid))
         .limit(1);
 
-      const { name, phone, email, preferredNotes, role, status, avatarUrl } =
+      const { name, phone, email, preferredNotes, role, status, avatarUrl, stateId, cityId, state: stateName, city: cityName } =
         req.body;
       const updateFields: Record<string, unknown> = {};
       if (name !== undefined) updateFields.name = name;
@@ -304,6 +332,10 @@ async function startServer() {
       }
       if (status !== undefined) updateFields.status = status;
       if (avatarUrl !== undefined) updateFields.avatarUrl = avatarUrl;
+      if (stateId !== undefined) updateFields.stateId = stateId;
+      if (cityId !== undefined) updateFields.cityId = cityId;
+      if (stateName !== undefined) updateFields.state = stateName;
+      if (cityName !== undefined) updateFields.city = cityName;
 
       const [updated] = await db
         .update(profiles)
@@ -559,8 +591,13 @@ async function startServer() {
           id,
           ownerUid: req.user?.uid || req.body.ownerUid || '',
           name: req.body.name,
-          district: req.body.district || 'Mumbai',
-          city: req.body.city || 'Mumbai',
+          stateId: req.body.stateId || req.body.state_id || 'st-pb',
+          cityId: req.body.cityId || req.body.city_id || 'ct-jal',
+          state: req.body.state || 'Punjab',
+          city: req.body.city || 'Jalandhar',
+          district:
+            req.body.district ||
+            `${req.body.city || 'Jalandhar'}, ${req.body.state || 'Punjab'}`,
           address: req.body.address || '',
           phone: req.body.phone || '+91',
           distance: req.body.distance || '1.0 km away',
@@ -597,6 +634,9 @@ async function startServer() {
         'name',
         'district',
         'city',
+        'state',
+        'stateId',
+        'cityId',
         'address',
         'phone',
         'isOpen',
@@ -606,8 +646,13 @@ async function startServer() {
         'tagline',
         'about',
         'priceTier',
+        'minPrice',
+        'image',
+        'logoUrl',
       ]) {
-        if (req.body[k] !== undefined) updateData[k] = req.body[k];
+        if (req.body[k] !== undefined) {
+          updateData[k] = req.body[k];
+        }
       }
 
       const [updated] = await db
@@ -1098,7 +1143,97 @@ async function startServer() {
   const PORT = 3000;
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`BarberLoo Full-Stack Server listening on http://0.0.0.0:${PORT}`);
+    // Sync Supabase shops and services to Postgres on boot
+    syncSupabaseWithPostgres().catch((e) => console.warn('[Sync Error]', e));
   });
+}
+
+async function syncSupabaseWithPostgres() {
+  try {
+    const supaUrl = process.env.VITE_SUPABASE_URL || 'https://ddusvfylhifoniobzmcq.supabase.co';
+    const supaKey = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_bUpxVfRsVPz_d0qg1QrrNA_m7zM66t6';
+    const res = await fetch(`${supaUrl}/rest/v1/shops?select=*`, {
+      headers: {
+        apikey: supaKey,
+        Authorization: `Bearer ${supaKey}`,
+      },
+    });
+    if (res.ok) {
+      const remoteShops: any[] = await res.json();
+      if (Array.isArray(remoteShops)) {
+        for (const s of remoteShops) {
+          const rawCity = s.city || 'Ludhiana';
+          const cityId = rawCity.toLowerCase().includes('ludhiana') ? 'ct-lud' : 'ct-jal';
+          const stateId = 'st-pb';
+
+          await db
+            .insert(shops)
+            .values({
+              id: s.id,
+              ownerUid: s.owner_uid || '',
+              name: s.name,
+              stateId,
+              cityId,
+              state: 'Punjab',
+              district: s.district || 'Ludhiana, Punjab',
+              city: 'Ludhiana',
+              address: s.address || 'Civil Lines, Ludhiana, Punjab',
+              phone: s.phone || '+91 98765 43210',
+              distance: s.distance || '1.2 km away',
+              distanceMilesTenths: 12,
+              rating: String(s.rating || '5.0'),
+              reviewCount: s.review_count || 0,
+              isOpen: s.is_open ?? true,
+              closesAt: s.closes_at || '21:30',
+              priceTier: s.price_tier || '₹60 – ₹150',
+              minPrice: Number(s.min_price || 60),
+              verified: s.verified ?? true,
+              approvalStatus: s.approval_status || 'approved',
+              logoUrl: s.logo_url || '',
+              image: s.image || '',
+              tagline: s.tagline || 'Luxury Grooming & Bespoke Appointments',
+              about:
+                s.about ||
+                'Premier barbershop offering precision fades, hair sculpting and luxury grooming in Ludhiana.',
+              qrCodeSlug: s.qr_code_slug || s.id,
+            })
+            .onConflictDoNothing();
+        }
+      }
+    }
+
+    const srvRes = await fetch(`${supaUrl}/rest/v1/services?select=*`, {
+      headers: {
+        apikey: supaKey,
+        Authorization: `Bearer ${supaKey}`,
+      },
+    });
+    if (srvRes.ok) {
+      const remoteServices: any[] = await srvRes.json();
+      if (Array.isArray(remoteServices)) {
+        for (const srv of remoteServices) {
+          await db
+            .insert(services)
+            .values({
+              id: srv.id,
+              shopId: srv.shop_id,
+              indexCode: srv.index_code || '01',
+              name: srv.name,
+              category: srv.category || 'Precision Haircuts',
+              durationMin: Number(srv.duration_min || 30),
+              price: Number(srv.price || 100),
+              description: srv.description || 'Bespoke grooming haircut service.',
+              popular: srv.popular ?? true,
+              active: srv.active ?? true,
+              image: srv.image || '',
+            })
+            .onConflictDoNothing();
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Sync] Background sync exception:', err);
+  }
 }
 
 startServer();

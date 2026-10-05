@@ -19,6 +19,12 @@ export interface SupabaseAuthUserSession {
   name: string;
   phone: string;
   role: 'customer' | 'barber' | 'admin';
+  state_id?: string;
+  city_id?: string;
+  state?: string;
+  city?: string;
+  stateId?: string;
+  cityId?: string;
 }
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -149,6 +155,10 @@ export async function supabaseSignUpUser(
     name: string;
     phone?: string;
     role: 'customer' | 'barber' | 'admin';
+    state_id?: string;
+    city_id?: string;
+    state?: string;
+    city?: string;
   }
 ): Promise<SupabaseAuthUserSession> {
   const cleanEmail = email.trim().toLowerCase();
@@ -236,6 +246,10 @@ export async function supabaseSignUpUser(
     status: 'active',
     assigned_shop_id: existingProfile?.assigned_shop_id || 'shop-1',
     assigned_barber_id: `pw:${pwHash}`,
+    state_id: metadata.state_id || existingProfile?.state_id || 'st-pb',
+    city_id: metadata.city_id || existingProfile?.city_id || 'ct-jal',
+    state: metadata.state || existingProfile?.state || 'Punjab',
+    city: metadata.city || existingProfile?.city || 'Jalandhar',
   };
 
   await supabase.from('profiles').upsert(profileRecord, { onConflict: 'uid' });
@@ -246,6 +260,12 @@ export async function supabaseSignUpUser(
     name: displayName,
     phone: cleanPhone,
     role: resolvedRole,
+    state_id: profileRecord.state_id,
+    city_id: profileRecord.city_id,
+    state: profileRecord.state,
+    city: profileRecord.city,
+    stateId: profileRecord.state_id,
+    cityId: profileRecord.city_id,
   };
   setPersistedSupabaseUser(sessionObj);
   return sessionObj;
@@ -419,11 +439,22 @@ export async function supabaseSignOut() {
 export async function safeSupabaseUpsert(
   table: string,
   record: Record<string, any>
-) {
+): Promise<void> {
   try {
-    await supabase.from(table).upsert(record);
-  } catch {
-    // silently continue
+    const { error } = await supabase.from(table).upsert(record);
+    if (error) {
+      if (error.code === '42703' && error.message) {
+        const match = error.message.match(/column (?:[a-zA-Z0-9_]+\.)?([a-zA-Z0-9_]+) does not exist/);
+        if (match && match[1] && record[match[1]] !== undefined) {
+          const stripped = { ...record };
+          delete stripped[match[1]];
+          return safeSupabaseUpsert(table, stripped);
+        }
+      }
+      console.warn(`[Supabase upsert warning] table: ${table}:`, error.message);
+    }
+  } catch (err: any) {
+    console.warn(`[Supabase upsert error] table: ${table}:`, err?.message || err);
   }
 }
 

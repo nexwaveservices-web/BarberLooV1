@@ -271,6 +271,9 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     id: sh.id,
     ownerUid: sh.ownerUid,
     name: sh.name,
+    stateId: sh.stateId,
+    cityId: sh.cityId,
+    state: sh.state,
     district: sh.district,
     city: sh.city,
     address: sh.address,
@@ -353,6 +356,8 @@ export async function getBootstrapState(activeCustomerUid?: string) {
   }));
 
   return {
+    states: stateRows,
+    cities: cityRows,
     shops: mappedShops,
     barbers: mappedBarbers,
     services: mappedServices,
@@ -396,24 +401,70 @@ export async function createBookingInDb(payload: {
   addOns?: any[];
   addOnsTotal?: number;
 }) {
-  if (payload.barberId) {
-    const conflicts = await db
+  // 1. Server-side validation of Service
+  if (payload.serviceId) {
+    const [dbService] = await db
+      .select()
+      .from(services)
+      .where(eq(services.id, payload.serviceId));
+    if (dbService) {
+      if (payload.shopId && dbService.shopId && dbService.shopId !== payload.shopId) {
+        throw new Error('Service does not belong to the selected shop.');
+      }
+      if (dbService.active === false) {
+        throw new Error('Selected service is currently inactive.');
+      }
+      // Never trust client price or duration: enforce verified database values
+      payload.price = dbService.price;
+      payload.durationMin = dbService.durationMin;
+      payload.serviceName = dbService.name;
+    }
+  }
+
+  // 2. Server-side validation of Barber
+  if (payload.barberId && payload.barberId.startsWith('brb-') && !payload.barberId.includes('master')) {
+    const [dbBarber] = await db
+      .select()
+      .from(barbers)
+      .where(eq(barbers.id, payload.barberId));
+    if (dbBarber) {
+      if (payload.shopId && dbBarber.shopId && dbBarber.shopId !== payload.shopId) {
+        throw new Error('Barber does not belong to the selected shop.');
+      }
+      if (dbBarber.active === false || dbBarber.verificationStatus === 'suspended') {
+        throw new Error('Selected barber is currently unavailable.');
+      }
+      payload.barberName = dbBarber.name;
+    }
+  }
+
+  // 3. Dynamic overlap double-booking check
+  if (payload.barberId && payload.date && payload.time) {
+    const existingApts = await db
       .select()
       .from(appointments)
       .where(
         and(
           eq(appointments.barberId, payload.barberId),
-          eq(appointments.date, payload.date),
-          eq(appointments.time, payload.time)
+          eq(appointments.date, payload.date)
         )
       );
 
-    const activeConflict = conflicts.find(
-      (c) => c.status !== 'cancelled' && c.status !== 'no_show'
-    );
+    const [nh, nm] = payload.time.split(':').map(Number);
+    const newStartMin = nh * 60 + nm;
+    const newEndMin = newStartMin + Number(payload.durationMin || 45);
+
+    const activeConflict = existingApts.find((c) => {
+      if (c.status === 'cancelled' || c.status === 'no_show') return false;
+      const [ch, cm] = (c.time || '00:00').split(':').map(Number);
+      const curStartMin = ch * 60 + cm;
+      const curEndMin = curStartMin + Number(c.durationMin || 45);
+      return newStartMin < curEndMin && newEndMin > curStartMin;
+    });
+
     if (activeConflict) {
       throw new Error(
-        `Double-booking prevented: ${payload.barberName} is already booked on ${payload.date} at ${payload.time} IST.`
+        `Double-booking prevented: ${payload.barberName} is already booked on ${payload.date} around ${activeConflict.time} IST.`
       );
     }
   }

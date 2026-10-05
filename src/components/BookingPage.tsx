@@ -300,21 +300,21 @@ export const BookingPage: React.FC<BookingPageProps> = ({
             {tr('BARBERLOO INDIA • SALON SELECTION', 'बारबरलू इंडिया • सैलून चयन')}
           </p>
           <h1 className="font-display text-3xl sm:text-4xl font-bold">
-            {tr('No Barber Shop Selected', 'कोई सैलून चयनित नहीं है')}
+            {tr('Please select a shop before booking.', 'कृपया बुकिंग करने से पहले एक सैलून चुनें।')}
           </h1>
           <p className="text-xs text-[#8A8178] leading-relaxed">
             {tr(
-              'No shop was selected. Please choose a partner salon to view services and book an appointment.',
-              'कोई सैलून चयनित नहीं है। सेवाएं देखने और अपनी अपॉइंटमेंट बुक करने के लिए कृपया एक सैलून चुनें।'
+              'No shop was selected. Please discover a partner salon to view real services, barbers, and book an appointment.',
+              'कोई सैलून चयनित नहीं है। सेवाएं देखने और अपनी अपॉइंटमेंट बुक करने के लिए कृपया एक सैलून खोजें।'
             )}
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
             <button
               type="button"
               onClick={() => onNavigate('shop')}
-              className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
+              className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer hover:bg-[#FFE57F] transition-colors"
             >
-              {tr('Explore Partner Salons', 'पार्टनर सैलून देखें')}
+              {tr('Discover Shops', 'सैलून खोजें')}
             </button>
             <button
               type="button"
@@ -383,8 +383,8 @@ export const BookingPage: React.FC<BookingPageProps> = ({
           </p>
           <h1 className="font-display text-3xl sm:text-4xl font-bold">
             {tr(
-              "This shop hasn't added any services yet.",
-              'इस दुकान ने अभी तक कोई सेवा नहीं जोड़ी है।'
+              'No services are currently available.',
+              'इस समय कोई सेवा उपलब्ध नहीं है।'
             )}
           </h1>
           <p className="text-xs text-[#8A8178] leading-relaxed">
@@ -457,38 +457,99 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   }, [selectedDate, workingHours, currentBarber]);
 
   const isSlotOutsideSchedule = (timeStr: string): string | null => {
+    const srvDuration = Number(
+      currentService?.durationMins || currentService?.durationMin || 45
+    );
+    const [h, m] = timeStr.split(':').map(Number);
+    const slotStartMin = h * 60 + m;
+    const slotEndMin = slotStartMin + srvDuration;
+
+    // 1. Cannot book past slots today
+    const todayIso = istDates[0]?.isoDate;
+    if (selectedDate === todayIso) {
+      const nowIST = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date());
+      if (timeStr <= nowIST) {
+        return tr('Past', 'बीत चुका');
+      }
+    }
+
+    // 2. Day off / leave
     if (selectedDaySchedule?.isDayOff) {
       return selectedDaySchedule.holidayNote || tr('Day Off', 'अवकाश');
     }
+
     const start = selectedDaySchedule?.startTime || '09:00';
     const end = selectedDaySchedule?.endTime || '21:30';
-    const bStart = selectedDaySchedule?.breakStart || '';
-    const bEnd = selectedDaySchedule?.breakEnd || '';
-    if (timeStr < start || timeStr > end) {
+    const [eh, em] = end.split(':').map(Number);
+    const endMin = eh * 60 + em;
+
+    // 3. Must fit completely inside working hours
+    if (timeStr < start || slotEndMin > endMin) {
       return tr('Closed', 'बंद');
     }
-    if (bStart && bEnd && timeStr >= bStart && timeStr < bEnd) {
-      return tr('Break', 'ब्रेक');
+
+    // 4. Breaks
+    const bStart = selectedDaySchedule?.breakStart || '';
+    const bEnd = selectedDaySchedule?.breakEnd || '';
+    if (bStart && bEnd) {
+      const [bsh, bsm] = bStart.split(':').map(Number);
+      const [beh, bem] = bEnd.split(':').map(Number);
+      const breakStartMin = bsh * 60 + bsm;
+      const breakEndMin = beh * 60 + bem;
+      if (slotStartMin < breakEndMin && slotEndMin > breakStartMin) {
+        return tr('Break', 'ब्रेक');
+      }
     }
+
+    // 5. Chair break
     if (
       currentBarber?.chairBreakActive &&
-      selectedDate === istDates[0]?.isoDate
+      selectedDate === todayIso
     ) {
       return tr('On Break', 'चेयर ब्रेक');
     }
     return null;
   };
 
-  const isSlotReserved = (timeStr: string) =>
-    appointments.some(
-      (a: any) =>
-        a.barberId === currentBarber.id &&
-        a.date === selectedDate &&
-        a.time === timeStr &&
-        a.status !== 'cancelled' &&
-        a.status !== 'Cancelled' &&
-        a.status !== 'no_show'
+  const isSlotReserved = (timeStr: string) => {
+    const srvDuration = Number(
+      currentService?.durationMins || currentService?.durationMin || 45
     );
+    const [h, m] = timeStr.split(':').map(Number);
+    const slotStartMin = h * 60 + m;
+    const slotEndMin = slotStartMin + srvDuration;
+
+    return appointments.some((a: any) => {
+      const matchesBarber =
+        a.barberId === currentBarber.id ||
+        a.barber_id === currentBarber.id ||
+        (!a.barberId && a.shopId === currentShop?.id);
+      if (!matchesBarber) return false;
+      if (a.date !== selectedDate) return false;
+      if (
+        a.status === 'cancelled' ||
+        a.status === 'Cancelled' ||
+        a.status === 'no_show'
+      ) {
+        return false;
+      }
+
+      const [ah, am] = (a.time || '00:00').split(':').map(Number);
+      const aptStartMin = ah * 60 + am;
+      const aptDuration = Number(
+        a.duration_min || a.durationMins || a.duration || 45
+      );
+      const aptEndMin = aptStartMin + aptDuration;
+
+      // Overlap: slot starts before appointment ends AND slot ends after appointment starts
+      return slotStartMin < aptEndMin && slotEndMin > aptStartMin;
+    });
+  };
 
   const handleApplyCoupon = () => {
     const code = couponInput.trim().toUpperCase();
