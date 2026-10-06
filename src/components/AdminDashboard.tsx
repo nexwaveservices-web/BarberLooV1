@@ -16,7 +16,6 @@ import {
   Check,
 } from 'lucide-react';
 import { useLanguage, getCurrentISTDisplay, formatISTDateString } from '../lib/i18n';
-import { OWNER_ADMIN_EMAIL } from '../lib/firebase';
 import { SUPABASE_URL, SUPABASE_SQL_SCHEMA } from '../lib/supabase';
 import { apiClaimSlaCompensation } from '../lib/api';
 import {
@@ -294,8 +293,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <ShieldCheck className="w-4 h-4" />
               <span>
                 {tr(
-                  `FOUNDER ADMIN CONSOLE • ${OWNER_ADMIN_EMAIL}`,
-                  `फाउंडर एडमिन कंसोल • ${OWNER_ADMIN_EMAIL}`
+                  'PLATFORM ADMINISTRATION CONSOLE',
+                  'प्लेटफ़ॉर्म एडमिनिस्ट्रेशन कंसोल'
                 )}
               </span>
             </div>
@@ -607,7 +606,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         >
                           {tr('Message User', 'संदेश भेजें')}
                         </button>
-                        {onUpdateProfile && u.email !== OWNER_ADMIN_EMAIL && (
+                        {onUpdateProfile && u.role !== 'admin' && (
                           <button
                             type="button"
                             onClick={() =>
@@ -1587,12 +1586,12 @@ git push -u origin main`}
                                     : 'bg-emerald-950 text-emerald-200 border border-emerald-400/30'
                                 }`}
                               >
-                                🛡️ {lang === 'hi' ? sla.badgeTextHi : sla.badgeText}
+                                🛡️ {sla.badgeText}
                               </span>
                             </div>
                             <p className="text-[11px] text-[#8A8178] mt-1">
                               {formatISTDateString(apt.date, lang)} · {apt.time} IST ·{' '}
-                              {lang === 'hi' ? sla.detailTextHi : sla.detailText}
+                              {sla.detailText}
                             </p>
                           </div>
 

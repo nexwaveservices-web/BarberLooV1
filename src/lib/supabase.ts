@@ -9,7 +9,14 @@ export const SUPABASE_ANON_KEY =
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
   'sb_publishable_bUpxVfRsVPz_d0qg1QrrNA_m7zM66t6';
 
-export const OWNER_ADMIN_EMAIL = 'nexwaveservices@gmail.com';
+export const getAuthToken = async (): Promise<string | null> => {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token || null;
+  } catch {
+    return null;
+  }
+};
 
 const SESSION_STORAGE_KEY = 'barberloo_supabase_session_v1';
 
@@ -39,43 +46,12 @@ if (typeof window !== 'undefined') {
   (window as any).barberLooSupabase = supabase;
 }
 
-async function hashPassword(password: string): Promise<string> {
-  const input = `barberloo-india-v1:${password}`;
-  try {
-    if (typeof crypto !== 'undefined' && crypto.subtle) {
-      const msgBuffer = new TextEncoder().encode(input);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-    }
-  } catch {
-    // fallback below
-  }
-  let h1 = 0xdeadbeef ^ input.length;
-  let h2 = 0x41c6ce57 ^ input.length;
-  for (let i = 0, ch; i < input.length; i++) {
-    ch = input.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 =
-    Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^
-    Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 =
-    Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^
-    Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
-}
-
 export function getPersistedSupabaseUser(): SupabaseAuthUserSession | null {
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && parsed.uid && parsed.email) {
-      if (String(parsed.email).toLowerCase() === OWNER_ADMIN_EMAIL) {
-        parsed.role = 'admin';
-      }
       return parsed;
     }
     return null;
@@ -169,87 +145,63 @@ export async function supabaseSignUpUser(
     throw new Error('Password must be at least 6 characters long.');
   }
 
-  const pwHash = await hashPassword(password);
-  const resolvedRole: 'customer' | 'barber' | 'admin' =
-    cleanEmail === OWNER_ADMIN_EMAIL
-      ? 'admin'
-      : metadata.role === 'barber'
-      ? 'barber'
-      : 'customer';
+  const assignedRole = metadata.role || 'customer';
 
-  // 1. Check if this email already exists in public.profiles in Supabase
-  const { data: existingRows } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('email', cleanEmail);
-  const existingProfile = existingRows?.[0] || null;
+  // 1. Supabase Auth registration
+  let uid = '';
+  const { data: authData, error: authErr } = await supabase.auth.signUp({
+    email: cleanEmail,
+    password,
+    options: {
+      data: {
+        full_name: metadata.name.trim() || cleanEmail.split('@')[0],
+        phone: metadata.phone?.trim() || '',
+        role: assignedRole,
+      },
+    },
+  });
 
-  if (existingProfile) {
-    const storedVerifier = String(existingProfile.assigned_barber_id || '');
-    if (storedVerifier.startsWith('pw:') && storedVerifier !== `pw:${pwHash}`) {
+  if (authErr) {
+    // If user already registered, provide friendly message
+    if (authErr.message?.toLowerCase().includes('already registered')) {
       const err: any = new Error(
-        'This email is already registered. Please switch to the Login tab and enter your password.'
+        'This email is already registered. Please switch to the Sign In tab.'
       );
       err.code = 'email-already-in-use';
       throw err;
     }
+    throw authErr;
   }
 
-  // 2. Attempt Supabase Auth user registration (non-fatal if rate limit or autoconfirm off)
-  let uid =
-    existingProfile?.uid ||
-    `usr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-  try {
-    const { data } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password,
-      options: {
-        data: {
-          full_name: metadata.name.trim() || cleanEmail.split('@')[0],
-          phone: metadata.phone?.trim() || '',
-          role: resolvedRole,
-        },
-      },
-    });
-    if (data?.user?.id) {
-      uid = data.user.id;
-    }
-  } catch {
-    // Continue with direct Supabase public.profiles persistence
-  }
+  uid = authData?.user?.id || `usr-${Date.now()}`;
 
   const displayName =
-    metadata.name.trim() ||
-    existingProfile?.name ||
-    (cleanEmail === OWNER_ADMIN_EMAIL
-      ? 'Founder Admin'
-      : cleanEmail.split('@')[0]);
-  const cleanPhone = metadata.phone?.trim() || existingProfile?.phone || '';
+    metadata.name.trim() || cleanEmail.split('@')[0];
+  const cleanPhone = metadata.phone?.trim() || '';
 
   const profileRecord = {
-    id: existingProfile?.id || `prof-${uid}`,
+    id: `prof-${uid}`,
     uid,
     email: cleanEmail,
     name: displayName,
     phone: cleanPhone,
-    avatar_url: existingProfile?.avatar_url || '',
-    role: resolvedRole,
+    avatar_url: '',
+    role: assignedRole,
     tier:
-      resolvedRole === 'admin'
-        ? 'Founder & Platform Admin'
-        : resolvedRole === 'barber'
+      assignedRole === 'admin'
+        ? 'Platform Admin'
+        : assignedRole === 'barber'
         ? 'Verified Barber Partner'
         : 'Member',
-    preferred_notes: existingProfile?.preferred_notes || '',
-    reward_balance: Number(existingProfile?.reward_balance ?? 0),
+    preferred_notes: '',
+    reward_balance: 0,
     status: 'active',
-    assigned_shop_id: existingProfile?.assigned_shop_id || 'shop-1',
-    assigned_barber_id: `pw:${pwHash}`,
-    state_id: metadata.state_id || existingProfile?.state_id || 'st-pb',
-    city_id: metadata.city_id || existingProfile?.city_id || 'ct-jal',
-    state: metadata.state || existingProfile?.state || 'Punjab',
-    city: metadata.city || existingProfile?.city || 'Jalandhar',
+    assigned_shop_id: 'shop-1',
+    assigned_barber_id: '',
+    state_id: metadata.state_id || 'st-pb',
+    city_id: metadata.city_id || 'ct-jal',
+    state: metadata.state || 'Punjab',
+    city: metadata.city || 'Jalandhar',
   };
 
   await supabase.from('profiles').upsert(profileRecord, { onConflict: 'uid' });
@@ -259,7 +211,7 @@ export async function supabaseSignUpUser(
     email: cleanEmail,
     name: displayName,
     phone: cleanPhone,
-    role: resolvedRole,
+    role: assignedRole,
     state_id: profileRecord.state_id,
     city_id: profileRecord.city_id,
     state: profileRecord.state,
@@ -280,150 +232,66 @@ export async function supabaseSignInUser(
     throw new Error('Please enter your email and password.');
   }
 
-  const pwHash = await hashPassword(password);
-
-  // 1. Check public.profiles in Supabase first
-  const { data: existingRows } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('email', cleanEmail);
-  const existingProfile = existingRows?.[0] || null;
-
-  // 2. Also attempt Supabase Auth signInWithPassword
-  let supaAuthUser: any = null;
-  try {
-    const { data } = await supabase.auth.signInWithPassword({
+  // 1. Supabase Auth sign in
+  const { data: authData, error: authErr } =
+    await supabase.auth.signInWithPassword({
       email: cleanEmail,
       password,
     });
-    if (data?.user) {
-      supaAuthUser = data.user;
-    }
-  } catch {
-    // Handled via public.profiles verification below
+
+  if (authErr) {
+    throw authErr;
   }
 
-  if (existingProfile) {
-    const storedVerifier = String(existingProfile.assigned_barber_id || '');
-    if (storedVerifier.startsWith('pw:')) {
-      if (storedVerifier !== `pw:${pwHash}` && !supaAuthUser) {
-        const err: any = new Error(
-          'Incorrect email or password. Please check your password or use Forgot Pass.'
-        );
-        err.code = 'invalid-credential';
-        throw err;
-      }
-    } else {
-      // Bind password verifier for existing profile
-      await supabase
-        .from('profiles')
-        .update({ assigned_barber_id: `pw:${pwHash}` })
-        .eq('uid', existingProfile.uid);
-    }
+  const supaUser = authData.user;
+  const uid = supaUser.id;
 
-    const resolvedRole: 'customer' | 'barber' | 'admin' =
-      cleanEmail === OWNER_ADMIN_EMAIL
-        ? 'admin'
-        : existingProfile.role === 'barber' ||
-          existingProfile.role === 'shop_owner'
-        ? 'barber'
-        : 'customer';
+  // 2. Fetch user's profile from database
+  const { data: existingRows } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('uid', uid);
+  let userProfile = existingRows?.[0] || null;
 
-    if (cleanEmail === OWNER_ADMIN_EMAIL && existingProfile.role !== 'admin') {
-      await supabase
-        .from('profiles')
-        .update({
-          role: 'admin',
-          tier: 'Founder & Platform Admin',
-        })
-        .eq('uid', existingProfile.uid);
-    }
-
-    const sessionObj: SupabaseAuthUserSession = {
-      uid: existingProfile.uid,
-      email: cleanEmail,
-      name: existingProfile.name || cleanEmail.split('@')[0],
-      phone: existingProfile.phone || '',
-      role: resolvedRole,
-    };
-    setPersistedSupabaseUser(sessionObj);
-    return sessionObj;
+  if (!userProfile) {
+    const { data: emailRows } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', cleanEmail);
+    userProfile = emailRows?.[0] || null;
   }
 
-  // 3. If Supabase Auth succeeded but profile wasn't in public.profiles yet
-  if (supaAuthUser) {
-    const resolvedRole: 'customer' | 'barber' | 'admin' =
-      cleanEmail === OWNER_ADMIN_EMAIL
-        ? 'admin'
-        : supaAuthUser.user_metadata?.role === 'barber'
-        ? 'barber'
-        : 'customer';
+  const resolvedRole = userProfile?.role || supaUser.user_metadata?.role || 'customer';
 
-    const sessionObj = await supabaseSignUpUser(cleanEmail, password, {
-      name:
-        supaAuthUser.user_metadata?.full_name || cleanEmail.split('@')[0],
-      phone: supaAuthUser.user_metadata?.phone || '',
-      role: resolvedRole,
-    });
-    return sessionObj;
-  }
+  const sessionObj: SupabaseAuthUserSession = {
+    uid,
+    email: cleanEmail,
+    name:
+      userProfile?.name ||
+      supaUser.user_metadata?.full_name ||
+      cleanEmail.split('@')[0],
+    phone: userProfile?.phone || supaUser.user_metadata?.phone || '',
+    role: resolvedRole,
+    state_id: userProfile?.state_id,
+    city_id: userProfile?.city_id,
+    state: userProfile?.state,
+    city: userProfile?.city,
+    stateId: userProfile?.state_id,
+    cityId: userProfile?.city_id,
+  };
 
-  // 4. Special case: Platform Owner (nexwaveservices@gmail.com) signing in for the first time
-  if (cleanEmail === OWNER_ADMIN_EMAIL) {
-    return supabaseSignUpUser(cleanEmail, password, {
-      name: 'Founder Admin',
-      phone: '+91',
-      role: 'admin',
-    });
-  }
-
-  // 5. Unregistered Customer or Barber trying to log in before signing up
-  const notFoundErr: any = new Error(
-    'No account found for this email yet. Please select Customer or Barber below and click Create Account.'
-  );
-  notFoundErr.code = 'user-not-found';
-  throw notFoundErr;
+  setPersistedSupabaseUser(sessionObj);
+  return sessionObj;
 }
 
-export async function supabaseResetPassword(
-  email: string,
-  newPassword?: string
-) {
+export async function supabaseResetPassword(email: string) {
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail) {
     throw new Error('Please enter your email address.');
   }
-
-  const { data: existingRows } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('email', cleanEmail);
-  const existingProfile = existingRows?.[0] || null;
-
-  if (newPassword && newPassword.length >= 6) {
-    const pwHash = await hashPassword(newPassword);
-    if (existingProfile) {
-      await supabase
-        .from('profiles')
-        .update({ assigned_barber_id: `pw:${pwHash}` })
-        .eq('uid', existingProfile.uid);
-    } else if (cleanEmail === OWNER_ADMIN_EMAIL) {
-      await supabaseSignUpUser(cleanEmail, newPassword, {
-        name: 'Founder Admin',
-        phone: '+91',
-        role: 'admin',
-      });
-    } else {
-      throw new Error(
-        'No account found with this email. Please switch to Sign Up to create a new account.'
-      );
-    }
-  }
-
-  try {
-    await supabase.auth.resetPasswordForEmail(cleanEmail);
-  } catch {
-    // Ignore Supabase email rate limit if password was already updated in public.profiles
+  const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+  if (error) {
+    throw error;
   }
 }
 

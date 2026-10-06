@@ -6,13 +6,11 @@ import {
   LogIn,
   LogOut,
   KeyRound,
-  Languages,
   User,
   Scissors,
   ShieldCheck,
 } from 'lucide-react';
 import {
-  OWNER_ADMIN_EMAIL,
   supabaseSignUpUser,
   supabaseSignInUser,
   supabaseResetPassword,
@@ -43,7 +41,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   authModalOpenExternal,
   onSetAuthModalOpenExternal,
 }) => {
-  const { lang, setLang, tr } = useLanguage();
+  const { tr } = useLanguage();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [internalAuthOpen, setInternalAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'reset'>('login');
@@ -83,9 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     currentPage === 'admin-dashboard';
 
   const userRole = currentUserProfile?.role || null;
-  const isOwnerAdmin =
-    currentUserProfile?.email?.toLowerCase() === OWNER_ADMIN_EMAIL ||
-    userRole === 'admin';
+  const isOwnerAdmin = userRole === 'admin';
 
   // Strictly role-gated navigation items
   const navItems: { id: PageView; label: string }[] = [
@@ -134,17 +130,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (authMode === 'reset') {
       setAuthBusy(true);
       try {
-        await supabaseResetPassword(cleanEmail, passwordInput || undefined);
+        await supabaseResetPassword(cleanEmail);
         setAuthMessage(
-          passwordInput && passwordInput.length >= 6
-            ? tr(
-                `Password updated for ${cleanEmail}. Switching to Login...`,
-                `${cleanEmail} के लिए पासवर्ड अपडेट हो गया है। अब लॉगिन करें।`
-              )
-            : tr(
-                `Password reset instructions sent to ${cleanEmail}.`,
-                `पासवर्ड रीसेट लिंक ${cleanEmail} पर भेज दिया गया है।`
-              )
+          tr(
+            `Password reset instructions sent to ${cleanEmail}. Please check your inbox.`,
+            `पासवर्ड रीसेट लिंक ${cleanEmail} पर भेज दिया गया है। कृपया अपना इनबॉक्स देखें।`
+          )
         );
         if (passwordInput && passwordInput.length >= 6) {
           setTimeout(() => {
@@ -165,8 +156,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     setAuthBusy(true);
     try {
       if (authMode === 'signup') {
-        const assignedRole =
-          cleanEmail === OWNER_ADMIN_EMAIL ? 'admin' : signupAccountType;
+        const assignedRole = signupAccountType;
 
         const validCities = getCitiesForState(selectedStateId);
         const cityValid = validateCityBelongsToState(selectedCityId, selectedStateId);
@@ -185,11 +175,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         const cityObj = validCities.find((c) => c.id === selectedCityId) || validCities[0];
 
         const supaUser = await supabaseSignUpUser(cleanEmail, passwordInput, {
-          name:
-            nameInput.trim() ||
-            (cleanEmail === OWNER_ADMIN_EMAIL
-              ? 'Founder Admin'
-              : cleanEmail.split('@')[0]),
+          name: nameInput.trim() || cleanEmail.split('@')[0],
           phone: phoneInput.trim() || '+91',
           role: assignedRole,
           state_id: selectedStateId,
@@ -204,7 +190,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             email: supaUser.email,
             name: supaUser.name,
             phone: supaUser.phone,
-            role: assignedRole,
+            role: supaUser.role,
             stateId: selectedStateId,
             cityId: cityObj.id,
             state: stateObj?.name || 'Punjab',
@@ -219,7 +205,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             email: supaUser.email,
             name: supaUser.name,
             phone: supaUser.phone,
-            role: cleanEmail === OWNER_ADMIN_EMAIL ? 'admin' : supaUser.role,
+            role: supaUser.role,
           });
         }
       }
@@ -339,46 +325,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Zone 3: Language Toggle + Real Auth Account Status */}
+          {/* Zone 3: Real Auth Account Status & Book Now */}
           <div className="flex items-center gap-2.5 sm:gap-3">
-            {/* Hindi / English Language Toggle */}
-            <div
-              role="group"
-              aria-label="Language switcher"
-              className={`inline-flex items-center p-0.5 rounded-[14px] border text-xs font-semibold transition-colors ${
-                isDarkTheme
-                  ? 'bg-[#241719] border-[#F1E194]/25 text-[#FFF9E8]'
-                  : 'bg-[#E9D9B8]/45 border-[#5B0E14]/20 text-[#241719]'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setLang('en')}
-                className={`px-2.5 py-1.5 rounded-[11px] transition-all cursor-pointer ${
-                  lang === 'en'
-                    ? isDarkTheme
-                      ? 'bg-[#F1E194] text-[#111113] shadow-xs'
-                      : 'bg-[#5B0E14] text-[#FFF9E8] shadow-xs'
-                    : 'opacity-70 hover:opacity-100'
-                }`}
-              >
-                EN
-              </button>
-              <button
-                type="button"
-                onClick={() => setLang('hi')}
-                className={`px-2.5 py-1.5 rounded-[11px] transition-all cursor-pointer ${
-                  lang === 'hi'
-                    ? isDarkTheme
-                      ? 'bg-[#F1E194] text-[#111113] shadow-xs'
-                      : 'bg-[#5B0E14] text-[#FFF9E8] shadow-xs'
-                    : 'opacity-70 hover:opacity-100'
-                }`}
-              >
-                हिंदी
-              </button>
-            </div>
-
             {currentUserProfile ? (
               <div className="hidden sm:flex items-center gap-2">
                 <button
@@ -473,37 +421,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 : 'bg-[#FAF6EA] border-[#5B0E14]/15 text-[#111113]'
             }`}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-[#8A8178]/20">
-              <span className="text-xs font-semibold text-[#8A8178] inline-flex items-center gap-1.5">
-                <Languages className="w-3.5 h-3.5" />
-                {tr('Language • INR (₹) • IST', 'भाषा • भारतीय रुपया (₹) • IST')}
-              </span>
-              <div className="inline-flex gap-1">
-                <button
-                  type="button"
-                  onClick={() => setLang('en')}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-                    lang === 'en'
-                      ? 'bg-[#5B0E14] text-[#FFF9E8]'
-                      : 'bg-[#E9D9B8]/40 text-[#8A8178]'
-                  }`}
-                >
-                  English
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLang('hi')}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-                    lang === 'hi'
-                      ? 'bg-[#5B0E14] text-[#FFF9E8]'
-                      : 'bg-[#E9D9B8]/40 text-[#8A8178]'
-                  }`}
-                >
-                  हिंदी
-                </button>
-              </div>
-            </div>
-
             <div className="grid grid-cols-2 gap-2">
               {navItems.map((item) => (
                 <button
@@ -609,10 +526,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               ))}
             </div>
 
-            {/* Account Type Selector on Sign Up (ONLY Customer or Barber; Admin is owner email) */}
-            {authMode === 'signup' &&
-              emailInput.trim().toLowerCase() !== OWNER_ADMIN_EMAIL && (
-                <div>
+            {/* Account Type Selector on Sign Up */}
+            {authMode === 'signup' && (
+              <div>
                   <label className="block text-xs text-[#8A8178] mb-2">
                     {tr('I am joining BarberLoo as a:', 'मैं बारबरलू से जुड़ रहा हूँ:')}
                   </label>
@@ -783,12 +699,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                     : authMode === 'login'
                     ? tr('SIGN IN', 'साइन इन करें')
                     : authMode === 'signup'
-                    ? emailInput.trim().toLowerCase() === OWNER_ADMIN_EMAIL
-                      ? tr('ACTIVATE ADMIN ACCOUNT', 'एडमिन खाता सक्रिय करें')
-                      : tr(
-                          `CREATE ${signupAccountType.toUpperCase()} ACCOUNT`,
-                          'नया खाता बनाएं'
-                        )
+                    ? tr(
+                        `CREATE ${signupAccountType.toUpperCase()} ACCOUNT`,
+                        'नया खाता बनाएं'
+                      )
                     : tr('UPDATE PASSWORD', 'पासवर्ड अपडेट करें')}
                 </span>
               </button>

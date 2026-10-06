@@ -298,13 +298,4 @@ export const reports = pgTable('reports', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// Legacy queue table preserved for database schema parity (Queue feature disabled in BarberLoo)
-export const queue = pgTable('queue', {
-  id: text('id').primaryKey(),
-  shopId: text('shop_id').notNull().default('shop-1'),
-  customerUid: text('customer_uid').notNull(),
-  clientName: text('client_name').notNull(),
-  status: text('status').notNull().default('waiting'),
-  createdAt: timestamp('created_at').defaultNow(),
-});
 

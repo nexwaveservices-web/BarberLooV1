@@ -36,10 +36,10 @@ if (file_exists($theme_dir . '/wp-assets/assets/barberloo.js')) {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BarberLoo — Luxury Barber Booking &amp; Live Queue | barberloo.in</title>
-    <meta name="description" content="Discover trusted master barbers, book bespoke grooming appointments, or join the real-time live queue. BOOK • QUEUE • CUT • REPEAT." />
-    <meta property="og:title" content="BarberLoo — Luxury Barber Booking &amp; Live Queue" />
-    <meta property="og:description" content="Discover trusted master barbers, book bespoke grooming appointments, or join the real-time live queue." />
+    <title>BarberLoo — Luxury Barber Discovery &amp; Appointment Booking | barberloo.in</title>
+    <meta name="description" content="Discover trusted master barbers, browse bespoke grooming services, and book confirmed appointments with real-time availability." />
+    <meta property="og:title" content="BarberLoo — Luxury Barber Discovery &amp; Appointment Booking" />
+    <meta property="og:description" content="Discover trusted master barbers, browse bespoke grooming services, and book confirmed appointments with real-time availability." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://barberloo.in" />
     <link rel="canonical" href="https://barberloo.in" />

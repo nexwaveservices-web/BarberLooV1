@@ -32,7 +32,7 @@ self.addEventListener('message', (event) => {
 self.addEventListener('push', (event) => {
   let payload = {
     title: 'BarberLoo Update',
-    body: 'You have a new queue or appointment alert.',
+    body: 'You have a new appointment update or reminder.',
     tag: `barberloo-push-${Date.now()}`,
     requireInteraction: false,
     url: '/',

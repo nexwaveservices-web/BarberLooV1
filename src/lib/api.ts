@@ -1,6 +1,6 @@
-import { getAuthToken, OWNER_ADMIN_EMAIL } from './firebase';
 import {
   supabase,
+  getAuthToken,
   safeSupabaseUpsert,
   safeSupabaseDelete,
   broadcastSupabaseEvent,
@@ -227,15 +227,12 @@ function mapSupabaseProfile(p: any) {
     name: p.name || email.split('@')[0] || 'User',
     phone: p.phone || '',
     avatarUrl: p.avatar_url ?? p.avatarUrl ?? '',
-    role: email === OWNER_ADMIN_EMAIL ? 'admin' : p.role || 'customer',
+    role: p.role || 'customer',
     stateId: p.state_id ?? p.stateId ?? 'st-pb',
     cityId: p.city_id ?? p.cityId ?? 'ct-jal',
     state: p.state ?? 'Punjab',
     city: p.city ?? 'Jalandhar',
-    tier:
-      email === OWNER_ADMIN_EMAIL
-        ? 'Founder & Platform Admin'
-        : p.tier || 'Member',
+    tier: p.tier || (p.role === 'admin' ? 'Platform Admin' : 'Member'),
     preferredNotes: p.preferred_notes ?? p.preferredNotes ?? '',
     rewardBalance: Number(p.reward_balance ?? p.rewardBalance ?? 0),
     status: p.status || 'active',
@@ -500,7 +497,7 @@ export const apiSyncAuthUser = async (payload: {
   }
 
   const finalRole =
-    cleanEmail === OWNER_ADMIN_EMAIL
+    existingRole === 'admin' || payload.role === 'admin'
       ? 'admin'
       : existingRole === 'barber' || existingRole === 'shop_owner'
       ? 'barber'

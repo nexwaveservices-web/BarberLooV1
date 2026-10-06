@@ -28,10 +28,15 @@ import {
   getBootstrapState,
   createBookingInDb,
   updateAppointmentInDb,
-  OWNER_ADMIN_EMAIL,
   resolveAllowedRole,
 } from './src/db/users.ts';
-import { optionalAuth, AuthRequest } from './src/middleware/auth.ts';
+import {
+  requireAuth,
+  requireBarberOrAdmin,
+  requireAdmin,
+  optionalAuth,
+  AuthRequest,
+} from './src/middleware/auth.ts';
 import { ASSETS } from './src/data/barberlooData.ts';
 
 async function startServer() {
@@ -39,7 +44,7 @@ async function startServer() {
   const httpServer = createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
-  // Allow cross-origin requests from https://barberloo.in and WordPress WP Pusher bridge
+  // CORS: Allow verified domains
   app.use((req, res, next) => {
     const origin = req.headers.origin || '';
     if (
@@ -67,11 +72,11 @@ async function startServer() {
     next();
   });
 
-  // Support large JSON payloads (e.g. photos, base64 avatars, gallery, salon media)
+  // Support JSON payloads
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-  // Gracefully handle any PayloadTooLargeError (HTTP 413) or malformed body
+  // Gracefully handle PayloadTooLargeError (HTTP 413) or malformed body
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err?.type === 'entity.too.large' || err?.status === 413) {
       return res.status(413).json({
@@ -82,7 +87,7 @@ async function startServer() {
     next(err);
   });
 
-  // WP Pusher & GitHub (nexwaveservices-web/BarberLooV1) status & webhook endpoints
+  // WP Pusher & GitHub status & webhook endpoints
   app.get('/api/wppusher/status', async (_req, res) => {
     let githubHasThemeFiles = false;
     try {
@@ -110,8 +115,8 @@ async function startServer() {
     });
   });
 
-  // Push WordPress Theme & Plugin files directly to GitHub repo nexwaveservices-web/BarberLooV1
-  app.post('/api/wppusher/push-to-github', async (req, res) => {
+  // Push WordPress Theme & Plugin files directly to GitHub repo (Admin Only)
+  app.post('/api/wppusher/push-to-github', requireAdmin, async (req: AuthRequest, res) => {
     try {
       const token = String(req.body?.githubToken || '').trim();
       const repo = String(
@@ -122,7 +127,7 @@ async function startServer() {
       if (!token) {
         return res.status(400).json({
           error:
-            'Please enter a GitHub Personal Access Token (with repo permission), or use the Export to GitHub button in the top menu.',
+            'Please enter a GitHub Personal Access Token (with repo permission).',
         });
       }
 
@@ -145,7 +150,6 @@ async function startServer() {
         if (!fs.existsSync(absPath)) continue;
         const contentBase64 = fs.readFileSync(absPath).toString('base64');
 
-        // Check if file already exists on GitHub to include its SHA
         let existingSha: string | undefined;
         const checkRes = await fetch(
           `https://api.github.com/repos/${repo}/contents/${relPath}?ref=${branch}`,
@@ -173,7 +177,7 @@ async function startServer() {
               'User-Agent': 'BarberLoo-WP-Pusher-Sync',
             },
             body: JSON.stringify({
-              message: `chore(wppusher): add ${relPath} for WP Pusher Theme & Plugin install on barberloo.in`,
+              message: `chore(wppusher): update ${relPath} for BarberLoo WordPress theme`,
               content: contentBase64,
               branch,
               ...(existingSha ? { sha: existingSha } : {}),
@@ -193,7 +197,7 @@ async function startServer() {
       res.json({
         ok: true,
         pushedFiles,
-        message: `✓ Successfully pushed ${pushedFiles.length} WordPress Theme & Plugin files (${pushedFiles.join(', ')}) to ${repo} (${branch})! You can now click Install Theme in WP Pusher.`,
+        message: `✓ Successfully pushed ${pushedFiles.length} WordPress Theme & Plugin files (${pushedFiles.join(', ')}) to ${repo} (${branch})!`,
       });
     } catch (err: any) {
       res.status(500).json({
@@ -234,10 +238,12 @@ async function startServer() {
     );
   });
 
-  // 1. Bootstrap full state from PostgreSQL
+  // 1. Bootstrap State (Role-scoped data filtering)
   app.get('/api/bootstrap', optionalAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = (req.query.uid as string) || req.user?.uid || '';
+      const activeUid = req.user?.uid || (req.query.uid as string) || '';
+      const userRole = req.user?.role || 'customer';
+
       if (req.user?.uid && req.user?.email) {
         await getOrCreateUser(
           req.user.uid,
@@ -245,7 +251,8 @@ async function startServer() {
           req.user.name || req.user.email.split('@')[0]
         );
       }
-      const data = await getBootstrapState(uid || undefined);
+
+      const data = await getBootstrapState(activeUid || undefined, req.user ? userRole : undefined);
       res.json(data);
     } catch (error: any) {
       console.error('GET /api/bootstrap error:', error);
@@ -277,14 +284,15 @@ async function startServer() {
     }
   });
 
-  // 2. Auth & Profile Synchronization
-  app.post('/api/auth/sync', optionalAuth, async (req: AuthRequest, res) => {
+  // 2. Auth & Profile Synchronization (Requires Verified Session)
+  app.post('/api/auth/sync', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const uid = req.user?.uid || req.body.uid;
-      const email = req.user?.email || req.body.email;
-      if (!uid || !email) {
-        return res.status(400).json({ error: 'Valid user UID and email required' });
+      const uid = req.user!.uid;
+      const email = req.user!.email || req.body.email;
+      if (!email) {
+        return res.status(400).json({ error: 'Valid email required' });
       }
+
       const name = req.body.name || req.user?.name || email.split('@')[0];
       const requestedRole = req.body.role;
       const phone = req.body.phone;
@@ -292,6 +300,7 @@ async function startServer() {
       const cityId = req.body.cityId || req.body.city_id;
       const stateName = req.body.state;
       const cityName = req.body.city;
+
       await getOrCreateUser(uid, email, name, requestedRole, phone, stateId, cityId, stateName, cityName);
 
       const profs = await db
@@ -304,38 +313,61 @@ async function startServer() {
     }
   });
 
-  // 3. Update Profile / User Management (Role, Status, Details, State, City)
-  app.patch('/api/profiles/:uid', optionalAuth, async (req: AuthRequest, res) => {
+  // 3. Update Profile / User Management (Ownership or Admin Authorization Required)
+  app.patch('/api/profiles/:uid', requireAuth, async (req: AuthRequest, res) => {
     try {
       const { uid } = req.params;
+      const requester = req.user!;
+
+      // Ownership enforcement: regular users can only edit their own profile
+      if (requester.uid !== uid && requester.role !== 'admin') {
+        return res.status(403).json({
+          error: 'Forbidden: You do not have permission to modify another user profile.',
+        });
+      }
+
       const existing = await db
         .select()
         .from(profiles)
         .where(eq(profiles.uid, uid))
         .limit(1);
 
-      const { name, phone, email, preferredNotes, role, status, avatarUrl, stateId, cityId, state: stateName, city: cityName } =
-        req.body;
-      const updateFields: Record<string, unknown> = {};
-      if (name !== undefined) updateFields.name = name;
-      if (phone !== undefined) updateFields.phone = phone;
-      if (email !== undefined) updateFields.email = email;
-      if (preferredNotes !== undefined)
-        updateFields.preferredNotes = preferredNotes;
-      if (role !== undefined) {
-        const targetEmail = (email || existing[0]?.email || '').toLowerCase();
-        updateFields.role = resolveAllowedRole(
-          targetEmail,
-          role,
-          existing[0]?.role
-        );
+      if (existing.length === 0) {
+        return res.status(404).json({ error: 'Profile not found' });
       }
-      if (status !== undefined) updateFields.status = status;
+
+      const {
+        name,
+        phone,
+        preferredNotes,
+        role,
+        status,
+        avatarUrl,
+        stateId,
+        cityId,
+        state: stateName,
+        city: cityName,
+      } = req.body;
+
+      const updateFields: Record<string, unknown> = {};
+      if (name !== undefined) updateFields.name = String(name).trim();
+      if (phone !== undefined) updateFields.phone = String(phone).trim();
+      if (preferredNotes !== undefined) updateFields.preferredNotes = preferredNotes;
       if (avatarUrl !== undefined) updateFields.avatarUrl = avatarUrl;
       if (stateId !== undefined) updateFields.stateId = stateId;
       if (cityId !== undefined) updateFields.cityId = cityId;
       if (stateName !== undefined) updateFields.state = stateName;
       if (cityName !== undefined) updateFields.city = cityName;
+
+      // Only admins can alter account status or role
+      if (requester.role === 'admin') {
+        if (role !== undefined) {
+          updateFields.role = resolveAllowedRole(role, existing[0]?.role);
+        }
+        if (status !== undefined) {
+          updateFields.status = status;
+        }
+      }
 
       const [updated] = await db
         .update(profiles)
@@ -352,26 +384,40 @@ async function startServer() {
     }
   });
 
-  // 4. Create Appointment (with Double-Booking Prevention & Payment Verification)
-  app.post('/api/appointments', optionalAuth, async (req: AuthRequest, res) => {
+  // 4. Create Appointment (Require Verified Auth Session)
+  app.post('/api/appointments', requireAuth, async (req: AuthRequest, res) => {
     try {
+      const requester = req.user!;
+      const aptId = req.body.id || `apt-${Date.now()}`;
+
+      // Retrieve customer profile for verified details
+      const [userProf] = await db
+        .select()
+        .from(profiles)
+        .where(eq(profiles.uid, requester.uid))
+        .limit(1);
+
+      const clientName =
+        userProf?.name || requester.name || req.body.clientName || 'Valued Client';
+      const clientPhone =
+        userProf?.phone || req.body.clientPhone || '+91';
+
       const created = await createBookingInDb({
-        id: req.body.id || `apt-${Math.floor(1000 + Math.random() * 9000)}`,
-        customerUid: req.user?.uid || req.body.customerUid || 'cust-alexander',
-        clientName: req.body.clientName || 'Arjun Mehta',
-        clientPhone: req.body.clientPhone || '+91 98201 44812',
-        clientTier: req.body.clientTier || 'Sovereign Member',
+        id: aptId,
+        customerUid: requester.uid, // Authoritative verified user ID
+        clientName,
+        clientPhone,
+        clientTier: userProf?.tier || 'Member',
         shopId: req.body.shopId || 'shop-1',
-        shopName: req.body.shopName || 'The Royal Barber',
-        barberId: req.body.barberId || 'brb-1',
-        barberName: req.body.barberName || 'Kabir Singhania',
-        serviceId: req.body.serviceId || 'srv-1',
-        serviceName:
-          req.body.serviceName || 'Signature Bespoke Cut & Ayurvedic Finish',
+        shopName: req.body.shopName || '',
+        barberId: req.body.barberId,
+        barberName: req.body.barberName || '',
+        serviceId: req.body.serviceId,
+        serviceName: req.body.serviceName || '',
         date: req.body.date,
         time: req.body.time,
         durationMin: Number(req.body.durationMin) || 45,
-        price: Number(req.body.price) || 850,
+        price: Number(req.body.price) || 0,
         paymentMethod: req.body.paymentMethod || 'pay_at_shop',
         razorpayPaymentId: req.body.razorpayPaymentId || '',
         razorpayOrderId: req.body.razorpayOrderId || '',
@@ -397,10 +443,14 @@ async function startServer() {
   // 5. Update / Reschedule / Cancel / Complete Appointment
   app.patch(
     '/api/appointments/:id',
-    optionalAuth,
+    requireAuth,
     async (req: AuthRequest, res) => {
       try {
-        const updated = await updateAppointmentInDb(req.params.id, req.body);
+        const updated = await updateAppointmentInDb(
+          req.params.id,
+          req.body,
+          req.user
+        );
         broadcastEvent('state:updated', {
           entity: 'appointments',
           appointment: updated,
@@ -414,8 +464,8 @@ async function startServer() {
     }
   );
 
-  // 6. Services CRUD (Barber / Shop Owner)
-  app.post('/api/services', optionalAuth, async (req: AuthRequest, res) => {
+  // 6. Services CRUD (Barber / Shop Owner / Admin)
+  app.post('/api/services', requireBarberOrAdmin, async (req: AuthRequest, res) => {
     try {
       const allSrv = await db.select().from(services);
       const nextIdx = String(allSrv.length + 1).padStart(2, '0');
@@ -447,7 +497,7 @@ async function startServer() {
     }
   });
 
-  app.patch('/api/services/:id', optionalAuth, async (req: AuthRequest, res) => {
+  app.patch('/api/services/:id', requireBarberOrAdmin, async (req: AuthRequest, res) => {
     try {
       const updateData: Record<string, unknown> = {};
       if (req.body.name !== undefined) updateData.name = req.body.name;
@@ -479,7 +529,7 @@ async function startServer() {
 
   app.delete(
     '/api/services/:id',
-    optionalAuth,
+    requireBarberOrAdmin,
     async (req: AuthRequest, res) => {
       try {
         await db.delete(services).where(eq(services.id, req.params.id));
@@ -493,8 +543,8 @@ async function startServer() {
     }
   );
 
-  // 8. Barbers Team & Profile CRUD
-  app.post('/api/barbers', optionalAuth, async (req: AuthRequest, res) => {
+  // 7. Barbers Team & Profile CRUD
+  app.post('/api/barbers', requireBarberOrAdmin, async (req: AuthRequest, res) => {
     try {
       const [created] = await db
         .insert(barbers)
@@ -504,16 +554,16 @@ async function startServer() {
           shopName: req.body.shopName || 'The Royal Barber',
           name: req.body.name,
           role: req.body.role || 'Senior Master Barber',
-          rating: '4.90',
-          reviewCount: 42,
-          experienceYears: Number(req.body.experienceYears) || 8,
-          specialty: req.body.specialty || 'Scissor Tailoring · Skin Fades',
-          nextAvailable: 'Today, 16:45',
-          priceFrom: Number(req.body.priceFrom) || 800,
+          rating: '5.0',
+          reviewCount: 0,
+          experienceYears: Number(req.body.experienceYears) || 5,
+          specialty: req.body.specialty || 'Master Haircut · Beard Sculpting',
+          nextAvailable: 'Available Today',
+          priceFrom: Number(req.body.priceFrom) || 500,
           image: req.body.image || ASSETS.barberMarcus,
           bio:
             req.body.bio ||
-            'Bespoke grooming specialist trained in traditional European wet shaving and modern fades.',
+            'Bespoke grooming specialist certified in premium styling and hot towel treatments.',
           featured: true,
           active: true,
           verified: true,
@@ -530,7 +580,7 @@ async function startServer() {
     }
   });
 
-  app.patch('/api/barbers/:id', optionalAuth, async (req: AuthRequest, res) => {
+  app.patch('/api/barbers/:id', requireBarberOrAdmin, async (req: AuthRequest, res) => {
     try {
       const updateData: Record<string, unknown> = {};
       for (const k of [
@@ -567,7 +617,7 @@ async function startServer() {
 
   app.delete(
     '/api/barbers/:id',
-    optionalAuth,
+    requireBarberOrAdmin,
     async (req: AuthRequest, res) => {
       try {
         await db.delete(barbers).where(eq(barbers.id, req.params.id));
@@ -581,15 +631,15 @@ async function startServer() {
     }
   );
 
-  // 9. Shops Management & Admin Verification
-  app.post('/api/shops', optionalAuth, async (req: AuthRequest, res) => {
+  // 8. Shops Management
+  app.post('/api/shops', requireAuth, async (req: AuthRequest, res) => {
     try {
       const id = `shop-${Date.now()}`;
       const [created] = await db
         .insert(shops)
         .values({
           id,
-          ownerUid: req.user?.uid || req.body.ownerUid || '',
+          ownerUid: req.user!.uid,
           name: req.body.name,
           stateId: req.body.stateId || req.body.state_id || 'st-pb',
           cityId: req.body.cityId || req.body.city_id || 'ct-jal',
@@ -600,7 +650,7 @@ async function startServer() {
             `${req.body.city || 'Jalandhar'}, ${req.body.state || 'Punjab'}`,
           address: req.body.address || '',
           phone: req.body.phone || '+91',
-          distance: req.body.distance || '1.0 km away',
+          distance: '1.0 km away',
           distanceMilesTenths: 10,
           rating: '5.0',
           reviewCount: 0,
@@ -608,8 +658,8 @@ async function startServer() {
           closesAt: req.body.closesAt || '21:30',
           priceTier: req.body.priceTier || '₹500 – ₹1,500',
           minPrice: Number(req.body.minPrice) || 500,
-          verified: true,
-          approvalStatus: 'approved',
+          verified: req.user!.role === 'admin',
+          approvalStatus: req.user!.role === 'admin' ? 'approved' : 'pending',
           logoUrl: '',
           image: req.body.image || ASSETS.royalInterior,
           tagline: req.body.tagline || 'Bespoke Grooming & Reserved Appointments',
@@ -627,7 +677,7 @@ async function startServer() {
     }
   });
 
-  app.patch('/api/shops/:id', optionalAuth, async (req: AuthRequest, res) => {
+  app.patch('/api/shops/:id', requireBarberOrAdmin, async (req: AuthRequest, res) => {
     try {
       const updateData: Record<string, unknown> = {};
       for (const k of [
@@ -668,10 +718,10 @@ async function startServer() {
     }
   });
 
-  // 10. Working Hours / Barber Schedule
+  // 9. Working Hours / Salon Schedule
   app.patch(
     '/api/working-hours/:id',
-    optionalAuth,
+    requireBarberOrAdmin,
     async (req: AuthRequest, res) => {
       try {
         const updateData: Record<string, unknown> = {};
@@ -701,11 +751,12 @@ async function startServer() {
     }
   );
 
-  // 11. Reviews (Completed-Appointment Gated + Edit + Admin Moderation)
-  app.post('/api/reviews', optionalAuth, async (req: AuthRequest, res) => {
+  // 10. Reviews (Completed Appointment Verification Enforced)
+  app.post('/api/reviews', requireAuth, async (req: AuthRequest, res) => {
     try {
-      const customerUid =
-        req.user?.uid || req.body.customerUid || 'cust-alexander';
+      const customerUid = req.user!.uid;
+
+      // Verify that the user has at least one completed appointment
       const userApts = await db
         .select()
         .from(appointments)
@@ -714,32 +765,44 @@ async function startServer() {
       if (!hasCompleted) {
         return res.status(403).json({
           error:
-            'Only clients with at least one completed appointment may submit a verified review.',
+            'Only clients with a completed appointment may submit a verified review.',
         });
+      }
+
+      // Prevent duplicate review for the same appointment
+      if (req.body.appointmentId) {
+        const existingRev = await db
+          .select()
+          .from(reviews)
+          .where(eq(reviews.appointmentId, req.body.appointmentId));
+        if (existingRev.length > 0) {
+          return res.status(400).json({
+            error: 'A review has already been submitted for this appointment.',
+          });
+        }
       }
 
       const [created] = await db
         .insert(reviews)
         .values({
           id: `rev-${Date.now()}`,
-          appointmentId: req.body.appointmentId || 'apt-884',
+          appointmentId: req.body.appointmentId || '',
           customerUid,
-          author: req.body.author || 'Arjun Mehta',
-          role: req.body.role || 'Private Client',
-          organization: req.body.organization || 'Sovereign Member Mumbai',
+          author: req.user!.name || req.body.author || 'Private Client',
+          role: 'Verified Client',
+          organization: 'Member',
           shopId: req.body.shopId || 'shop-1',
           barberId: req.body.barberId || 'brb-1',
-          barberName: req.body.barberName || 'Kabir Singhania',
-          serviceName:
-            req.body.serviceName || 'Signature Bespoke Cut & Ayurvedic Finish',
+          barberName: req.body.barberName || '',
+          serviceName: req.body.serviceName || '',
           rating: Math.min(5, Math.max(1, Number(req.body.rating) || 5)),
           date: new Date().toLocaleDateString('en-US', {
             month: 'long',
             day: 'numeric',
             year: 'numeric',
           }),
-          comment: req.body.comment,
-          outcome: req.body.outcome || 'Verified Flagship Visit',
+          comment: String(req.body.comment || '').trim(),
+          outcome: 'Verified Salon Visit',
           status: 'published',
         })
         .returning();
@@ -753,15 +816,36 @@ async function startServer() {
     }
   });
 
-  app.patch('/api/reviews/:id', optionalAuth, async (req: AuthRequest, res) => {
+  app.patch('/api/reviews/:id', requireAuth, async (req: AuthRequest, res) => {
     try {
+      const requester = req.user!;
+      const [existing] = await db
+        .select()
+        .from(reviews)
+        .where(eq(reviews.id, req.params.id));
+
+      if (!existing) {
+        return res.status(404).json({ error: 'Review not found' });
+      }
+
+      // Only author or admin can modify
+      if (existing.customerUid !== requester.uid && requester.role !== 'admin') {
+        return res.status(403).json({
+          error: 'Forbidden: You may only modify your own reviews.',
+        });
+      }
+
       const updateData: Record<string, unknown> = {};
       if (req.body.comment !== undefined) updateData.comment = req.body.comment;
       if (req.body.rating !== undefined)
         updateData.rating = Number(req.body.rating);
-      if (req.body.status !== undefined) updateData.status = req.body.status;
-      if (req.body.moderationNote !== undefined)
-        updateData.moderationNote = req.body.moderationNote;
+
+      // Only admin can modify moderation status and note
+      if (requester.role === 'admin') {
+        if (req.body.status !== undefined) updateData.status = req.body.status;
+        if (req.body.moderationNote !== undefined)
+          updateData.moderationNote = req.body.moderationNote;
+      }
 
       const [updated] = await db
         .update(reviews)
@@ -778,15 +862,15 @@ async function startServer() {
     }
   });
 
-  // 12. Favorites Toggle
+  // 11. Favorites Toggle (Requires Auth)
   app.post(
     '/api/favorites/toggle',
-    optionalAuth,
+    requireAuth,
     async (req: AuthRequest, res) => {
       try {
-        const customerUid =
-          req.user?.uid || req.body.customerUid || 'cust-alexander';
+        const customerUid = req.user!.uid;
         const { targetType, targetId } = req.body;
+
         const existing = await db
           .select()
           .from(favorites)
@@ -821,16 +905,15 @@ async function startServer() {
     }
   );
 
-  // 13. Loyalty Rewards Redemption
+  // 12. Loyalty Rewards Redemption (Requires Auth)
   app.post(
     '/api/rewards/redeem',
-    optionalAuth,
+    requireAuth,
     async (req: AuthRequest, res) => {
       try {
-        const customerUid =
-          req.user?.uid || req.body.customerUid || 'cust-alexander';
+        const customerUid = req.user!.uid;
         const cost = Number(req.body.cost) || 300;
-        const label = req.body.label || 'Sovereign Chair Upgrade';
+        const label = req.body.label || 'Reward Redemption';
 
         const profList = await db
           .select()
@@ -840,7 +923,7 @@ async function startServer() {
         if (!prof || prof.rewardBalance < cost) {
           return res
             .status(400)
-            .json({ error: 'Insufficient Sovereign reward points.' });
+            .json({ error: 'Insufficient reward points balance.' });
         }
 
         const newBalance = prof.rewardBalance - cost;
@@ -862,7 +945,7 @@ async function startServer() {
           recipientUid: customerUid,
           type: 'reward_redeemed',
           title: `Redeemed ${cost} PTS for ${label}`,
-          timeLabel: 'Just now · Sovereign Loyalty',
+          timeLabel: 'Just now · Loyalty Desk',
           unread: true,
         });
 
@@ -876,14 +959,13 @@ async function startServer() {
     }
   );
 
-  // 14. Mark Notifications Read
+  // 13. Mark Notifications Read (Requires Auth)
   app.post(
     '/api/notifications/read',
-    optionalAuth,
+    requireAuth,
     async (req: AuthRequest, res) => {
       try {
-        const customerUid =
-          req.user?.uid || req.body.customerUid || 'cust-alexander';
+        const customerUid = req.user!.uid;
         await db
           .update(notifications)
           .set({ unread: false })
@@ -898,8 +980,8 @@ async function startServer() {
     }
   );
 
-  // 15. Coupons / Shop Offers CRUD
-  app.post('/api/coupons', optionalAuth, async (req: AuthRequest, res) => {
+  // 14. Coupons CRUD (Barber / Shop Owner / Admin)
+  app.post('/api/coupons', requireBarberOrAdmin, async (req: AuthRequest, res) => {
     try {
       const pct = Math.min(50, Math.max(5, Number(req.body.discountPercent) || 15));
       const [created] = await db
@@ -909,9 +991,9 @@ async function startServer() {
           shopId: req.body.shopId || 'shop-1',
           code: String(req.body.code).trim().toUpperCase(),
           discountText:
-            req.body.discountText || `${pct}% Off Bespoke Grooming Ritual`,
+            req.body.discountText || `${pct}% Off Salon Services`,
           discountPercent: pct,
-          minSpend: Number(req.body.minSpend) || 600,
+          minSpend: Number(req.body.minSpend) || 500,
           usesCount: 0,
           maxUses: Number(req.body.maxUses) || 250,
           status: 'Active',
@@ -928,7 +1010,7 @@ async function startServer() {
     }
   });
 
-  app.patch('/api/coupons/:id', optionalAuth, async (req: AuthRequest, res) => {
+  app.patch('/api/coupons/:id', requireBarberOrAdmin, async (req: AuthRequest, res) => {
     try {
       const updateData: Record<string, unknown> = {};
       if (req.body.status !== undefined) updateData.status = req.body.status;
@@ -954,20 +1036,19 @@ async function startServer() {
     }
   });
 
-  // 16. Reports & Moderation System
-  app.post('/api/reports', optionalAuth, async (req: AuthRequest, res) => {
+  // 15. Reports & Moderation
+  app.post('/api/reports', requireAuth, async (req: AuthRequest, res) => {
     try {
       const [created] = await db
         .insert(reports)
         .values({
           id: `rep-${Date.now()}`,
-          reporterUid:
-            req.user?.uid || req.body.reporterUid || 'cust-alexander',
-          reporterName: req.body.reporterName || 'Arjun Mehta',
+          reporterUid: req.user!.uid,
+          reporterName: req.user!.name || 'Client',
           targetType: req.body.targetType || 'shop',
           targetId: req.body.targetId || 'shop-1',
-          targetLabel: req.body.targetLabel || 'The Royal Barber',
-          reason: req.body.reason || 'Service Quality Inquiry',
+          targetLabel: req.body.targetLabel || 'Salon Report',
+          reason: req.body.reason || 'General Report',
           details: req.body.details || '',
           status: 'open',
         })
@@ -982,7 +1063,7 @@ async function startServer() {
     }
   });
 
-  app.patch('/api/reports/:id', optionalAuth, async (req: AuthRequest, res) => {
+  app.patch('/api/reports/:id', requireAdmin, async (req: AuthRequest, res) => {
     try {
       const updateData: Record<string, unknown> = {};
       if (req.body.status !== undefined) updateData.status = req.body.status;
@@ -1004,10 +1085,10 @@ async function startServer() {
     }
   });
 
-  // 17. Payments Refund / Settlement Update
+  // 16. Payments Settlement / Refund Update (Admin Only)
   app.patch(
     '/api/payments/:id',
-    optionalAuth,
+    requireAdmin,
     async (req: AuthRequest, res) => {
       try {
         const [updated] = await db
@@ -1026,10 +1107,10 @@ async function startServer() {
     }
   );
 
-  // 18. Razorpay Create Order API
+  // 17. Razorpay Order Creation (Requires Auth)
   app.post(
     '/api/payments/razorpay/create-order',
-    optionalAuth,
+    requireAuth,
     async (req: AuthRequest, res) => {
       try {
         const { amount, currency = 'INR', receipt, notes } = req.body;
@@ -1060,7 +1141,7 @@ async function startServer() {
           });
         }
 
-        // Test Mode order fallback
+        // Test Mode order fallback for local evaluation
         const simulatedOrderId = `order_${Date.now().toString(36)}${Math.random()
           .toString(36)
           .substring(2, 6)}`;
@@ -1080,10 +1161,10 @@ async function startServer() {
     }
   );
 
-  // 19. Razorpay Verify Signature API
+  // 18. Razorpay Verify Signature API (Requires Auth)
   app.post(
     '/api/payments/razorpay/verify',
-    optionalAuth,
+    requireAuth,
     async (req: AuthRequest, res) => {
       try {
         const {
@@ -1094,7 +1175,6 @@ async function startServer() {
         const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
         if (!keySecret || keySecret.includes('YOUR_RAZORPAY_SECRET')) {
-          // Test mode verification
           return res.json({
             verified: true,
             paymentId: razorpay_payment_id,
@@ -1143,7 +1223,6 @@ async function startServer() {
   const PORT = 3000;
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`BarberLoo Full-Stack Server listening on http://0.0.0.0:${PORT}`);
-    // Sync Supabase shops and services to Postgres on boot
     syncSupabaseWithPostgres().catch((e) => console.warn('[Sync Error]', e));
   });
 }

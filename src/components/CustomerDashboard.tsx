@@ -663,10 +663,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       >
                         <div>
                           <span className="font-mono-num font-bold uppercase tracking-wider">
-                            🛡️ {lang === 'hi' ? sla.badgeTextHi : sla.badgeText}
+                            🛡️ {sla.badgeText}
                           </span>
                           <p className="text-[11px] opacity-85 mt-0.5">
-                            {lang === 'hi' ? sla.detailTextHi : sla.detailText}
+                            {sla.detailText}
                           </p>
                         </div>
                         {sla.status === 'BREACHED' && !alreadyClaimed && (
@@ -904,7 +904,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                       : 'bg-emerald-950 text-emerald-200'
                                   }`}
                                 >
-                                  🛡️ {lang === 'hi' ? sla.badgeTextHi : sla.badgeText}
+                                  🛡️ {sla.badgeText}
                                 </span>
                               );
                             })()}

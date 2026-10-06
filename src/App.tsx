@@ -51,7 +51,6 @@ import {
 } from './lib/api';
 import {
   supabase,
-  OWNER_ADMIN_EMAIL,
   getPersistedSupabaseUser,
 } from './lib/supabase';
 import { LanguageProvider } from './lib/i18n';
@@ -265,10 +264,7 @@ export default function App() {
             name:
               supaUser.user_metadata?.full_name ||
               supaUser.email.split('@')[0],
-            role:
-              supaUser.email.toLowerCase() === OWNER_ADMIN_EMAIL
-                ? 'admin'
-                : supaUser.user_metadata?.role,
+            role: supaUser.user_metadata?.role,
             phone: supaUser.user_metadata?.phone,
           })
             .then((synced) => {
@@ -295,10 +291,7 @@ export default function App() {
               name:
                 supaUser.user_metadata?.full_name ||
                 supaUser.email.split('@')[0],
-              role:
-                supaUser.email.toLowerCase() === OWNER_ADMIN_EMAIL
-                  ? 'admin'
-                  : supaUser.user_metadata?.role,
+              role: supaUser.user_metadata?.role,
               phone: supaUser.user_metadata?.phone,
             });
             setActiveUserUid(supaUser.id);
@@ -355,10 +348,7 @@ export default function App() {
 
         if (isCurrentlyInBooking) {
           setCurrentPage('booking');
-        } else if (
-          profile.email?.toLowerCase() === OWNER_ADMIN_EMAIL ||
-          profile.role === 'admin'
-        ) {
+        } else if (profile.role === 'admin') {
           setCurrentPage('admin-dashboard');
         } else if (
           profile.role === 'barber' ||
@@ -576,9 +566,7 @@ export default function App() {
   };
 
   const userRole = currentUserProfile?.role || null;
-  const isOwnerAdmin =
-    currentUserProfile?.email?.toLowerCase() === OWNER_ADMIN_EMAIL ||
-    userRole === 'admin';
+  const isOwnerAdmin = userRole === 'admin';
   const canAccessBarberConsole =
     isOwnerAdmin || userRole === 'barber' || userRole === 'shop_owner';
   const canAccessCustomerPortal = Boolean(currentUserProfile);
@@ -794,8 +782,8 @@ export default function App() {
               />
             ) : (
               renderRoleGuard(
-                'Founder Admin Access Only',
-                `The Platform Admin Console is restricted exclusively to the platform owner account (${OWNER_ADMIN_EMAIL}).`
+                'Admin Access Only',
+                'The Platform Admin Console is restricted exclusively to authorized administrators.'
               )
             ))}
         </main>

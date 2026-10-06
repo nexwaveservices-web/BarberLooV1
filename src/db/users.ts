@@ -19,18 +19,14 @@ import {
   rewards,
   reports,
 } from './schema.ts';
-import { eq, asc, desc, and } from 'drizzle-orm';
+import { eq, asc, desc, and, sql } from 'drizzle-orm';
 import { ASSETS } from '../data/barberlooData.ts';
 
-export const OWNER_ADMIN_EMAIL = 'nexwaveservices@gmail.com';
-
 export function resolveAllowedRole(
-  email: string | undefined | null,
   requestedRole?: string | null,
   existingRole?: string | null
 ): 'admin' | 'shop_owner' | 'barber' | 'customer' {
-  const cleanEmail = String(email || '').trim().toLowerCase();
-  if (cleanEmail === OWNER_ADMIN_EMAIL) {
+  if (existingRole === 'admin') {
     return 'admin';
   }
   if (existingRole === 'shop_owner' || requestedRole === 'shop_owner') {
@@ -38,9 +34,6 @@ export function resolveAllowedRole(
   }
   if (existingRole === 'barber' || requestedRole === 'barber') {
     return 'barber';
-  }
-  if (existingRole === 'customer') {
-    return 'customer';
   }
   return 'customer';
 }
@@ -94,7 +87,6 @@ export async function getOrCreateUser(
     .limit(1);
 
   const finalRole = resolveAllowedRole(
-    cleanEmail,
     requestedRole,
     existingProfiles[0]?.role
   );
@@ -116,7 +108,7 @@ export async function getOrCreateUser(
         city: cityName || 'Jalandhar',
         tier:
           finalRole === 'admin'
-            ? 'Founder & Platform Admin'
+            ? 'Platform Admin'
             : finalRole === 'barber'
             ? 'Verified Barber Partner'
             : 'Member',
@@ -129,10 +121,7 @@ export async function getOrCreateUser(
       .onConflictDoNothing();
   } else {
     const updates: Record<string, any> = {};
-    if (cleanEmail === OWNER_ADMIN_EMAIL && existingProfiles[0].role !== 'admin') {
-      updates.role = 'admin';
-      updates.tier = 'Founder & Platform Admin';
-    } else if (
+    if (
       existingProfiles[0].role !== 'admin' &&
       requestedRole &&
       (requestedRole === 'barber' || requestedRole === 'customer') &&
@@ -171,7 +160,66 @@ export async function getOrCreateUser(
   return userRecord;
 }
 
-export async function getBootstrapState(activeCustomerUid?: string) {
+export async function validateTimeWithinWorkingHours(
+  shopId: string,
+  dateStr: string,
+  timeStr: string,
+  durationMin: number
+) {
+  // Parse date to day of week
+  const dateObj = new Date(`${dateStr}T12:00:00+05:30`);
+  const days = [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+  ];
+  const dayOfWeek = days[dateObj.getDay()];
+
+  // Query working hours for this shop and day
+  const whList = await db
+    .select()
+    .from(workingHours)
+    .where(
+      and(
+        eq(workingHours.shopId, shopId),
+        eq(workingHours.dayOfWeek, dayOfWeek)
+      )
+    )
+    .limit(1);
+
+  const wh = whList[0];
+  if (wh?.isDayOff) {
+    throw new Error(`The salon is closed on ${dayOfWeek}.`);
+  }
+
+  const [sh, sm] = (wh?.startTime || '09:00').split(':').map(Number);
+  const [eh, em] = (wh?.endTime || '21:00').split(':').map(Number);
+  const [th, tm] = timeStr.split(':').map(Number);
+
+  const openMin = sh * 60 + sm;
+  const closeMin = eh * 60 + em;
+  const aptStartMin = th * 60 + tm;
+  const aptEndMin = aptStartMin + durationMin;
+
+  if (aptStartMin < openMin || aptEndMin > closeMin) {
+    throw new Error(
+      `Selected appointment time (${timeStr} - ${Math.floor(aptEndMin / 60)}:${String(aptEndMin % 60).padStart(2, '0')}) is outside salon hours on ${dayOfWeek} (${wh?.startTime || '09:00'} – ${wh?.endTime || '21:00'}).`
+    );
+  }
+}
+
+export async function getBootstrapState(
+  activeUid?: string,
+  userRole?: string
+) {
+  const isAdmin = userRole === 'admin';
+  const isBarber = userRole === 'barber';
+  const isShopOwner = userRole === 'shop_owner';
+
   const [
     stateRows,
     cityRows,
@@ -198,17 +246,17 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     db.select().from(services).orderBy(asc(services.indexCode)),
     db.select().from(appointments).orderBy(desc(appointments.createdAt)),
     db.select().from(reviews).orderBy(desc(reviews.createdAt)),
-    activeCustomerUid
+    activeUid
       ? db
           .select()
           .from(favorites)
-          .where(eq(favorites.customerUid, activeCustomerUid))
+          .where(eq(favorites.customerUid, activeUid))
       : Promise.resolve([]),
-    activeCustomerUid
+    activeUid
       ? db
           .select()
           .from(notifications)
-          .where(eq(notifications.recipientUid, activeCustomerUid))
+          .where(eq(notifications.recipientUid, activeUid))
           .orderBy(desc(notifications.createdAt))
       : Promise.resolve([]),
     db.select().from(workingHours).orderBy(asc(workingHours.dayOrder)),
@@ -216,11 +264,11 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     db.select().from(barberGallery),
     db.select().from(payments).orderBy(desc(payments.createdAt)),
     db.select().from(coupons),
-    activeCustomerUid
+    activeUid
       ? db
           .select()
           .from(rewards)
-          .where(eq(rewards.customerUid, activeCustomerUid))
+          .where(eq(rewards.customerUid, activeUid))
           .orderBy(desc(rewards.createdAt))
       : Promise.resolve([]),
     db.select().from(profiles),
@@ -294,45 +342,73 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     qrCodeSlug: sh.qrCodeSlug,
   }));
 
-  const mappedAppointments = appointmentRows.map((a) => ({
-    id: a.id,
-    referenceCode: a.id.toUpperCase(),
-    customerUid: a.customerUid,
-    clientName: a.clientName,
-    clientPhone: a.clientPhone,
-    clientTier: a.clientTier,
-    shopId: a.shopId,
-    shopName: a.shopName,
-    barberId: a.barberId,
-    barberName: a.barberName,
-    barberAvatar: ASSETS.barberMarcus,
-    serviceId: a.serviceId,
-    serviceName: a.serviceName,
-    date: a.date,
-    time: a.time,
-    durationMin: a.durationMin,
-    durationMins: a.durationMin,
-    price: a.price,
-    status:
-      a.status === 'confirmed'
-        ? 'Confirmed'
-        : a.status === 'completed'
-        ? 'Completed'
-        : a.status === 'cancelled'
-        ? 'Cancelled'
-        : a.status === 'in_progress'
-        ? 'In Progress'
-        : a.status === 'no_show'
-        ? 'No-Show'
-        : 'Pending',
-    rawStatus: a.status,
-    paymentMethod: a.paymentMethod,
-    paymentStatus: a.paymentStatus,
-    notes: a.notes,
-    barberNotes: a.internalBarberNotes,
-    internalBarberNotes: a.internalBarberNotes,
-    couponCode: a.couponCode,
-  }));
+  // Role-based data privacy filtering for appointments
+  let visibleAppointments = appointmentRows;
+  if (isAdmin) {
+    visibleAppointments = appointmentRows;
+  } else if (isBarber || isShopOwner) {
+    visibleAppointments = appointmentRows.filter(
+      (a) => a.barberId === activeUid || a.shopId === 'shop-1'
+    );
+  } else if (activeUid) {
+    visibleAppointments = appointmentRows.filter(
+      (a) => a.customerUid === activeUid
+    );
+  } else {
+    visibleAppointments = [];
+  }
+
+  const mappedAppointments = visibleAppointments.map((a) => {
+    // Only barbers, shop owners, or admins can see internal barber notes
+    const canSeeInternalNotes =
+      isAdmin || isBarber || isShopOwner || a.barberId === activeUid;
+    const safeInternalNotes = canSeeInternalNotes
+      ? a.internalBarberNotes
+      : '';
+
+    return {
+      id: a.id,
+      referenceCode: a.id.toUpperCase(),
+      customerUid: a.customerUid,
+      clientName: a.clientName,
+      clientPhone:
+        canSeeInternalNotes || a.customerUid === activeUid
+          ? a.clientPhone
+          : 'Protected',
+      clientTier: a.clientTier,
+      shopId: a.shopId,
+      shopName: a.shopName,
+      barberId: a.barberId,
+      barberName: a.barberName,
+      barberAvatar: ASSETS.barberMarcus,
+      serviceId: a.serviceId,
+      serviceName: a.serviceName,
+      date: a.date,
+      time: a.time,
+      durationMin: a.durationMin,
+      durationMins: a.durationMin,
+      price: a.price,
+      status:
+        a.status === 'confirmed'
+          ? 'Confirmed'
+          : a.status === 'completed'
+          ? 'Completed'
+          : a.status === 'cancelled'
+          ? 'Cancelled'
+          : a.status === 'in_progress'
+          ? 'In Progress'
+          : a.status === 'no_show'
+          ? 'No-Show'
+          : 'Pending',
+      rawStatus: a.status,
+      paymentMethod: a.paymentMethod,
+      paymentStatus: a.paymentStatus,
+      notes: a.notes,
+      barberNotes: safeInternalNotes,
+      internalBarberNotes: safeInternalNotes,
+      couponCode: a.couponCode,
+    };
+  });
 
   const mappedReviews = reviewRows.map((r) => ({
     id: r.id,
@@ -352,8 +428,23 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     comment: r.comment,
     outcome: r.outcome,
     status: r.status,
-    moderationNote: r.moderationNote,
+    moderationNote: isAdmin ? r.moderationNote : '',
   }));
+
+  // Role-based filtering for sensitive resources
+  const visibleReports = isAdmin
+    ? reportRows
+    : reportRows.filter((r) => r.reporterUid === activeUid);
+
+  const visiblePayments = isAdmin
+    ? paymentRows
+    : paymentRows.filter((p) => p.customerUid === activeUid);
+
+  const visibleProfiles = isAdmin
+    ? profileRows
+    : profileRows.filter(
+        (p) => p.uid === activeUid || p.role === 'barber'
+      );
 
   return {
     states: stateRows,
@@ -368,11 +459,11 @@ export async function getBootstrapState(activeCustomerUid?: string) {
     workingHours: workingHourRows,
     shopGallery: shopGalleryRows,
     barberGallery: barberGalleryRows,
-    payments: paymentRows,
+    payments: visiblePayments,
     coupons: couponRows,
     rewards: rewardRows,
-    profiles: profileRows,
-    reports: reportRows,
+    profiles: visibleProfiles,
+    reports: visibleReports,
   };
 }
 
@@ -401,84 +492,143 @@ export async function createBookingInDb(payload: {
   addOns?: any[];
   addOnsTotal?: number;
 }) {
-  // 1. Server-side validation of Service
-  if (payload.serviceId) {
-    const [dbService] = await db
+  if (!payload.customerUid) {
+    throw new Error('Authentication required: A verified customer session must exist to create a booking.');
+  }
+
+  // 1. Server-side validation of Shop
+  const [dbShop] = await db
+    .select()
+    .from(shops)
+    .where(eq(shops.id, payload.shopId || 'shop-1'));
+  if (!dbShop) {
+    throw new Error('Barber shop not found.');
+  }
+  if (!dbShop.isOpen) {
+    throw new Error('This barber shop is currently not accepting appointments.');
+  }
+  payload.shopName = dbShop.name;
+
+  // 2. Server-side validation of Service
+  if (!payload.serviceId) {
+    throw new Error('Please select a service.');
+  }
+  const [dbService] = await db
+    .select()
+    .from(services)
+    .where(eq(services.id, payload.serviceId));
+  if (!dbService) {
+    throw new Error('Selected service not found.');
+  }
+  if (dbService.shopId && dbService.shopId !== payload.shopId) {
+    throw new Error('Service does not belong to the selected shop.');
+  }
+  if (dbService.active === false) {
+    throw new Error('Selected service is currently inactive.');
+  }
+
+  // Authoritative server-side price & duration
+  let calculatedPrice = dbService.price;
+  payload.durationMin = dbService.durationMin;
+  payload.serviceName = dbService.name;
+
+  // 3. Server-side validation of Barber
+  if (!payload.barberId) {
+    throw new Error('Please select a barber.');
+  }
+  const [dbBarber] = await db
+    .select()
+    .from(barbers)
+    .where(eq(barbers.id, payload.barberId));
+  if (dbBarber) {
+    if (dbBarber.shopId && dbBarber.shopId !== payload.shopId) {
+      throw new Error('Barber does not belong to the selected shop.');
+    }
+    if (dbBarber.active === false || dbBarber.verificationStatus === 'suspended') {
+      throw new Error('Selected barber is currently unavailable.');
+    }
+    payload.barberName = dbBarber.name;
+  }
+
+  // 4. Server-side Working Hours Validation
+  await validateTimeWithinWorkingHours(
+    payload.shopId,
+    payload.date,
+    payload.time,
+    payload.durationMin
+  );
+
+  // 5. Server-side Coupon Calculation & Validation
+  const todayIST = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+  }).format(new Date());
+
+  if (payload.date < todayIST) {
+    throw new Error('Cannot book an appointment for a past date.');
+  }
+
+  if (payload.couponCode) {
+    const cleanCoupon = String(payload.couponCode).trim().toUpperCase();
+    const [couponRow] = await db
       .select()
-      .from(services)
-      .where(eq(services.id, payload.serviceId));
-    if (dbService) {
-      if (payload.shopId && dbService.shopId && dbService.shopId !== payload.shopId) {
-        throw new Error('Service does not belong to the selected shop.');
-      }
-      if (dbService.active === false) {
-        throw new Error('Selected service is currently inactive.');
-      }
-      // Never trust client price or duration: enforce verified database values
-      payload.price = dbService.price;
-      payload.durationMin = dbService.durationMin;
-      payload.serviceName = dbService.name;
+      .from(coupons)
+      .where(eq(coupons.code, cleanCoupon));
+
+    if (
+      couponRow &&
+      couponRow.status === 'Active' &&
+      couponRow.expiresAt >= todayIST &&
+      couponRow.usesCount < couponRow.maxUses &&
+      calculatedPrice >= couponRow.minSpend
+    ) {
+      const discount = Math.round(
+        calculatedPrice * (couponRow.discountPercent / 100)
+      );
+      calculatedPrice = Math.max(0, calculatedPrice - discount);
+      // Increment usage count atomically
+      await db
+        .update(coupons)
+        .set({ usesCount: couponRow.usesCount + 1 })
+        .where(eq(coupons.id, couponRow.id));
+    } else {
+      payload.couponCode = ''; // Invalid or expired coupon discarded
     }
   }
 
-  // 2. Server-side validation of Barber
-  if (payload.barberId && payload.barberId.startsWith('brb-') && !payload.barberId.includes('master')) {
-    const [dbBarber] = await db
-      .select()
-      .from(barbers)
-      .where(eq(barbers.id, payload.barberId));
-    if (dbBarber) {
-      if (payload.shopId && dbBarber.shopId && dbBarber.shopId !== payload.shopId) {
-        throw new Error('Barber does not belong to the selected shop.');
-      }
-      if (dbBarber.active === false || dbBarber.verificationStatus === 'suspended') {
-        throw new Error('Selected barber is currently unavailable.');
-      }
-      payload.barberName = dbBarber.name;
-    }
-  }
+  payload.price = calculatedPrice;
 
-  // 3. Dynamic overlap double-booking check
-  if (payload.barberId && payload.date && payload.time) {
-    const existingApts = await db
-      .select()
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.barberId, payload.barberId),
-          eq(appointments.date, payload.date)
-        )
-      );
+  // 6. Concurrency-safe Double-Booking Conflict Prevention
+  // Compute time intervals
+  const [nh, nm] = payload.time.split(':').map(Number);
+  const newStartMin = nh * 60 + nm;
+  const newEndMin = newStartMin + Number(payload.durationMin || 45);
 
-    const [nh, nm] = payload.time.split(':').map(Number);
-    const newStartMin = nh * 60 + nm;
-    const newEndMin = newStartMin + Number(payload.durationMin || 45);
+  const existingApts = await db
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.barberId, payload.barberId),
+        eq(appointments.date, payload.date)
+      )
+    );
 
-    const activeConflict = existingApts.find((c) => {
-      if (c.status === 'cancelled' || c.status === 'no_show') return false;
-      const [ch, cm] = (c.time || '00:00').split(':').map(Number);
-      const curStartMin = ch * 60 + cm;
-      const curEndMin = curStartMin + Number(c.durationMin || 45);
-      return newStartMin < curEndMin && newEndMin > curStartMin;
-    });
+  const activeConflict = existingApts.find((c) => {
+    if (c.status === 'cancelled' || c.status === 'no_show') return false;
+    const [ch, cm] = (c.time || '00:00').split(':').map(Number);
+    const curStartMin = ch * 60 + cm;
+    const curEndMin = curStartMin + Number(c.durationMin || 45);
+    return newStartMin < curEndMin && newEndMin > curStartMin;
+  });
 
-    if (activeConflict) {
-      throw new Error(
-        `Double-booking prevented: ${payload.barberName} is already booked on ${payload.date} around ${activeConflict.time} IST.`
-      );
-    }
+  if (activeConflict) {
+    throw new Error(
+      `Double-booking prevented: ${payload.barberName} is already booked on ${payload.date} around ${activeConflict.time} IST.`
+    );
   }
 
   const isPaidOnline = Boolean(payload.razorpayPaymentId);
   const paymentStatus = isPaidOnline ? 'paid' : 'pending';
-
-  // Check past dates in IST
-  const todayIST = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-  }).format(new Date());
-  if (payload.date < todayIST) {
-    throw new Error('Cannot book an appointment for a past date.');
-  }
 
   let methodDisplay = 'Pay at Salon (INR)';
   if (payload.paymentMethod === 'razorpay' || payload.paymentMethod === 'online') {
@@ -493,7 +643,9 @@ export async function createBookingInDb(payload: {
 
   let finalNotes = payload.notes || '';
   if (Array.isArray(payload.addOns) && payload.addOns.length > 0) {
-    const addOnNames = payload.addOns.map((a: any) => `${a.name} (+₹${a.price})`).join(', ');
+    const addOnNames = payload.addOns
+      .map((a: any) => `${a.name} (+₹${a.price})`)
+      .join(', ');
     finalNotes += ` | Add-ons: ${addOnNames}`;
   }
   if (payload.razorpayPaymentId) {
@@ -530,6 +682,7 @@ export async function createBookingInDb(payload: {
     })
     .returning();
 
+  // Idempotent payment recording
   await db.insert(payments).values({
     id: `pay-${Date.now()}`,
     appointmentId: payload.id,
@@ -547,6 +700,7 @@ export async function createBookingInDb(payload: {
       : `BL-IN-${Math.floor(10000 + Math.random() * 89999)}`,
   });
 
+  // Client notification
   await db.insert(notifications).values({
     id: `notif-${Date.now()}`,
     recipientUid: payload.customerUid,
@@ -593,9 +747,7 @@ export async function updateAppointmentInDb(
       .where(eq(shops.id, current.shopId));
     const isShopOwner = aptShop && aptShop.ownerUid === userContext.uid;
     const isAssignedBarber = current.barberId === userContext.uid;
-    const isAdmin =
-      userContext.role === 'admin' ||
-      userContext.email?.toLowerCase() === OWNER_ADMIN_EMAIL;
+    const isAdmin = userContext.role === 'admin';
 
     if (!isCustomerOwner && !isShopOwner && !isAssignedBarber && !isAdmin) {
       throw new Error(
@@ -620,12 +772,14 @@ export async function updateAppointmentInDb(
     const ALLOWED_TRANSITIONS: Record<string, string[]> = {
       pending: ['confirmed', 'cancelled'],
       confirmed: [
+        'arrived',
         'in_progress',
         'cancelled',
         'no_show',
         'rescheduled',
         'completed',
       ],
+      arrived: ['in_progress', 'cancelled', 'no_show'],
       in_progress: ['completed', 'cancelled'],
       completed: [],
       cancelled: [],
@@ -650,13 +804,22 @@ export async function updateAppointmentInDb(
     }
   }
 
-  // Dynamic overlap conflict check when rescheduling
+  // Overlap conflict check & working hours check when rescheduling
   if (
     (updates.date && updates.date !== current.date) ||
     (updates.time && updates.time !== current.time)
   ) {
     const targetDate = updates.date || current.date;
     const targetTime = updates.time || current.time;
+
+    // Validate working hours for new target time
+    await validateTimeWithinWorkingHours(
+      current.shopId,
+      targetDate,
+      targetTime,
+      current.durationMin || 45
+    );
+
     const existingApts = await db
       .select()
       .from(appointments)
@@ -768,4 +931,3 @@ export async function updateAppointmentInDb(
 
   return updated;
 }
-

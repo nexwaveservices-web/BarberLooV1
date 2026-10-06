@@ -1,6 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { db } from '../db/index.ts';
+import { profiles } from '../db/schema.ts';
+import { eq } from 'drizzle-orm';
 
 const SUPABASE_URL =
   process.env.VITE_SUPABASE_URL ||
@@ -11,8 +14,6 @@ const SUPABASE_ANON_KEY =
   process.env.VITE_SUPABASE_ANON_KEY ||
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
   'sb_publishable_bUpxVfRsVPz_d0qg1QrrNA_m7zM66t6';
-
-export const OWNER_ADMIN_EMAIL = 'nexwaveservices@gmail.com';
 
 const supaAuthVerifier = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -27,7 +28,7 @@ export interface DecodedUserToken {
   uid: string;
   email?: string;
   name?: string;
-  role?: 'customer' | 'barber' | 'shop_owner' | 'admin';
+  role: 'customer' | 'barber' | 'shop_owner' | 'admin';
 }
 
 export interface AuthRequest extends Request {
@@ -41,11 +42,6 @@ export function createSignedToken(payload: {
   name?: string;
 }): string {
   const cleanEmail = String(payload.email || '').trim().toLowerCase();
-  const resolvedRole =
-    cleanEmail === OWNER_ADMIN_EMAIL
-      ? 'admin'
-      : (payload.role as any) || 'customer';
-
   const header = Buffer.from(
     JSON.stringify({ alg: 'HS256', typ: 'JWT' })
   ).toString('base64url');
@@ -54,7 +50,7 @@ export function createSignedToken(payload: {
     JSON.stringify({
       uid: payload.uid,
       email: cleanEmail,
-      role: resolvedRole,
+      role: payload.role || 'customer',
       name: payload.name || cleanEmail.split('@')[0],
       iat: Math.floor(Date.now() / 1000),
       exp,
@@ -74,7 +70,11 @@ export async function verifyAuthToken(
 ): Promise<DecodedUserToken | null> {
   if (!token || typeof token !== 'string') return null;
 
-  // 1. First, attempt verification of server-signed HMAC JWT
+  let verifiedUid: string | null = null;
+  let verifiedEmail: string | undefined;
+  let verifiedName: string | undefined;
+
+  // 1. Check server-signed HMAC JWT
   const parts = token.split('.');
   if (parts.length === 3) {
     const [header, body, sig] = parts;
@@ -88,53 +88,76 @@ export async function verifyAuthToken(
         const payload = JSON.parse(
           Buffer.from(body, 'base64url').toString('utf8')
         );
-        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-          return null; // Expired
+        if (!payload.exp || payload.exp >= Math.floor(Date.now() / 1000)) {
+          verifiedUid = String(payload.uid);
+          verifiedEmail = payload.email
+            ? String(payload.email).toLowerCase()
+            : undefined;
+          verifiedName = payload.name;
         }
-        const cleanEmail = payload.email
-          ? String(payload.email).toLowerCase()
-          : undefined;
-        const role =
-          cleanEmail === OWNER_ADMIN_EMAIL
-            ? 'admin'
-            : payload.role || 'customer';
-        return {
-          uid: String(payload.uid),
-          email: cleanEmail,
-          name: payload.name,
-          role,
-        };
       } catch {
         // Fall through to Supabase check
       }
     }
   }
 
-  // 2. Second, verify token cryptographically via Supabase Auth server
-  try {
-    const { data, error } = await supaAuthVerifier.auth.getUser(token);
-    if (!error && data?.user) {
-      const u = data.user;
-      const cleanEmail = u.email?.toLowerCase();
-      const role =
-        cleanEmail === OWNER_ADMIN_EMAIL
-          ? 'admin'
-          : (u.user_metadata?.role as any) || 'customer';
-      return {
-        uid: u.id,
-        email: cleanEmail,
-        name:
+  // 2. Cryptographically verify token via Supabase Auth server
+  if (!verifiedUid) {
+    try {
+      const { data, error } = await supaAuthVerifier.auth.getUser(token);
+      if (!error && data?.user) {
+        const u = data.user;
+        verifiedUid = u.id;
+        verifiedEmail = u.email?.toLowerCase();
+        verifiedName =
           u.user_metadata?.full_name ||
           u.user_metadata?.name ||
-          cleanEmail?.split('@')[0],
-        role,
-      };
+          verifiedEmail?.split('@')[0];
+      }
+    } catch {
+      // Verification failed
     }
-  } catch {
-    // Verification failed
   }
 
-  return null;
+  if (!verifiedUid) return null;
+
+  // 3. Establish authoritative database profile & role (never trust client claims)
+  try {
+    const existingProfiles = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.uid, verifiedUid))
+      .limit(1);
+
+    const userProfile = existingProfiles[0];
+    if (userProfile) {
+      // Block suspended accounts immediately
+      if (userProfile.status === 'suspended') {
+        return null;
+      }
+      return {
+        uid: verifiedUid,
+        email: verifiedEmail || userProfile.email,
+        name: verifiedName || userProfile.name,
+        role: (userProfile.role as any) || 'customer',
+      };
+    }
+
+    // Default un-synced authenticated user to customer
+    return {
+      uid: verifiedUid,
+      email: verifiedEmail,
+      name: verifiedName,
+      role: 'customer',
+    };
+  } catch {
+    return {
+      uid: verifiedUid,
+      email: verifiedEmail,
+      name: verifiedName,
+      role: 'customer',
+    };
+  }
 }
 
 export const requireAuth = async (
@@ -185,12 +208,44 @@ export const requireBarberOrAdmin = async (
   const isAuthorized =
     verified.role === 'barber' ||
     verified.role === 'shop_owner' ||
-    verified.role === 'admin' ||
-    verified.email?.toLowerCase() === OWNER_ADMIN_EMAIL;
+    verified.role === 'admin';
 
   if (!isAuthorized) {
     return res.status(403).json({
-      error: 'Forbidden: Salon Barber or Shop Owner credentials required',
+      error: 'Forbidden: Salon Barber, Shop Owner, or Admin role required',
+    });
+  }
+  next();
+};
+
+export const requireShopOwnerOrAdmin = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res
+      .status(401)
+      .json({ error: 'Unauthorized: Missing authentication token' });
+  }
+
+  const token = authHeader.split('Bearer ')[1].trim();
+  const verified = await verifyAuthToken(token);
+  if (!verified) {
+    return res
+      .status(401)
+      .json({ error: 'Unauthorized: Invalid authentication token' });
+  }
+
+  req.user = verified;
+  const isAuthorized =
+    verified.role === 'shop_owner' ||
+    verified.role === 'admin';
+
+  if (!isAuthorized) {
+    return res.status(403).json({
+      error: 'Forbidden: Salon Owner or Platform Administrator privileges required',
     });
   }
   next();
@@ -217,14 +272,10 @@ export const requireAdmin = async (
   }
 
   req.user = verified;
-  const isAdmin =
-    verified.role === 'admin' ||
-    verified.email?.toLowerCase() === OWNER_ADMIN_EMAIL;
-
-  if (!isAdmin) {
+  if (verified.role !== 'admin') {
     return res
       .status(403)
-      .json({ error: 'Forbidden: Platform Administrator privileges required' });
+      .json({ error: 'Forbidden: Platform Administrator role required' });
   }
   next();
 };

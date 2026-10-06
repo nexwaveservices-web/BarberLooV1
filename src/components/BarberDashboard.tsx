@@ -590,7 +590,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                                     : 'bg-emerald-950/80 text-emerald-200 border-emerald-400/30'
                                 }`}
                               >
-                                🛡️ {lang === 'hi' ? sla.badgeTextHi : sla.badgeText}
+                                🛡️ {sla.badgeText}
                               </span>
                             );
                           })()}
