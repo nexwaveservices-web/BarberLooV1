@@ -469,11 +469,16 @@ export async function createBookingInDb(payload: {
     }
   }
 
-  const isPaidOnline =
-    payload.paymentMethod === 'razorpay' ||
-    payload.paymentMethod === 'online' ||
-    Boolean(payload.razorpayPaymentId);
+  const isPaidOnline = Boolean(payload.razorpayPaymentId);
   const paymentStatus = isPaidOnline ? 'paid' : 'pending';
+
+  // Check past dates in IST
+  const todayIST = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+  }).format(new Date());
+  if (payload.date < todayIST) {
+    throw new Error('Cannot book an appointment for a past date.');
+  }
 
   let methodDisplay = 'Pay at Salon (INR)';
   if (payload.paymentMethod === 'razorpay' || payload.paymentMethod === 'online') {
@@ -551,26 +556,6 @@ export async function createBookingInDb(payload: {
     unread: true,
   });
 
-  const pointsEarned = payload.price * 2;
-  await db.insert(rewards).values({
-    id: `rew-${Date.now()}`,
-    customerUid: payload.customerUid,
-    pointsDelta: pointsEarned,
-    reason: `Booked ${payload.serviceName}`,
-    type: 'earned',
-  });
-
-  const profs = await db
-    .select()
-    .from(profiles)
-    .where(eq(profiles.uid, payload.customerUid));
-  if (profs.length > 0) {
-    await db
-      .update(profiles)
-      .set({ rewardBalance: (profs[0].rewardBalance || 0) + pointsEarned })
-      .where(eq(profiles.uid, payload.customerUid));
-  }
-
   return created;
 }
 
@@ -583,6 +568,11 @@ export async function updateAppointmentInDb(
     internalBarberNotes?: string;
     barberNotes?: string;
     paymentStatus?: string;
+  },
+  userContext?: {
+    uid: string;
+    email?: string;
+    role?: string;
   }
 ) {
   const existing = await db
@@ -594,29 +584,109 @@ export async function updateAppointmentInDb(
   }
   const current = existing[0];
 
+  // Enforce Authorization
+  if (userContext) {
+    const isCustomerOwner = userContext.uid === current.customerUid;
+    const [aptShop] = await db
+      .select()
+      .from(shops)
+      .where(eq(shops.id, current.shopId));
+    const isShopOwner = aptShop && aptShop.ownerUid === userContext.uid;
+    const isAssignedBarber = current.barberId === userContext.uid;
+    const isAdmin =
+      userContext.role === 'admin' ||
+      userContext.email?.toLowerCase() === OWNER_ADMIN_EMAIL;
+
+    if (!isCustomerOwner && !isShopOwner && !isAssignedBarber && !isAdmin) {
+      throw new Error(
+        'Forbidden: You do not have permission to modify this appointment.'
+      );
+    }
+
+    if (isCustomerOwner && !isShopOwner && !isAdmin) {
+      // Customer can only cancel or reschedule
+      if (updates.status && updates.status.toLowerCase() !== 'cancelled') {
+        throw new Error(
+          'Customers may only cancel or reschedule their appointment.'
+        );
+      }
+    }
+  }
+
+  // Enforce State Transitions
+  if (updates.status) {
+    const fromStatus = current.status.toLowerCase();
+    const toStatus = updates.status.toLowerCase();
+    const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+      pending: ['confirmed', 'cancelled'],
+      confirmed: [
+        'in_progress',
+        'cancelled',
+        'no_show',
+        'rescheduled',
+        'completed',
+      ],
+      in_progress: ['completed', 'cancelled'],
+      completed: [],
+      cancelled: [],
+      no_show: [],
+    };
+
+    if (
+      fromStatus === 'completed' ||
+      fromStatus === 'cancelled' ||
+      fromStatus === 'no_show'
+    ) {
+      if (toStatus !== fromStatus) {
+        throw new Error(`Cannot change status of a ${fromStatus} appointment.`);
+      }
+    } else if (
+      ALLOWED_TRANSITIONS[fromStatus] &&
+      !ALLOWED_TRANSITIONS[fromStatus].includes(toStatus)
+    ) {
+      throw new Error(
+        `Invalid appointment state transition from ${fromStatus} to ${toStatus}.`
+      );
+    }
+  }
+
+  // Dynamic overlap conflict check when rescheduling
   if (
     (updates.date && updates.date !== current.date) ||
     (updates.time && updates.time !== current.time)
   ) {
     const targetDate = updates.date || current.date;
     const targetTime = updates.time || current.time;
-    const conflicts = await db
+    const existingApts = await db
       .select()
       .from(appointments)
       .where(
         and(
           eq(appointments.barberId, current.barberId),
-          eq(appointments.date, targetDate),
-          eq(appointments.time, targetTime)
+          eq(appointments.date, targetDate)
         )
       );
-    const otherConflict = conflicts.find(
-      (c) =>
-        c.id !== id && c.status !== 'cancelled' && c.status !== 'no_show'
-    );
-    if (otherConflict) {
+
+    const [nh, nm] = targetTime.split(':').map(Number);
+    const newStartMin = nh * 60 + nm;
+    const newEndMin = newStartMin + Number(current.durationMin || 45);
+
+    const activeConflict = existingApts.find((c) => {
+      if (
+        c.id === id ||
+        c.status === 'cancelled' ||
+        c.status === 'no_show'
+      )
+        return false;
+      const [ch, cm] = (c.time || '00:00').split(':').map(Number);
+      const curStartMin = ch * 60 + cm;
+      const curEndMin = curStartMin + Number(c.durationMin || 45);
+      return newStartMin < curEndMin && newEndMin > curStartMin;
+    });
+
+    if (activeConflict) {
       throw new Error(
-        `Slot ${targetDate} at ${targetTime} IST is already taken for ${current.barberName}.`
+        `Slot ${targetDate} around ${activeConflict.time} IST is already booked for ${current.barberName}.`
       );
     }
   }
@@ -633,11 +703,41 @@ export async function updateAppointmentInDb(
   }
   if (updates.paymentStatus) updateFields.paymentStatus = updates.paymentStatus;
 
+  // Mark payment paid upon completion if pay_at_shop
+  if (updates.status === 'completed') {
+    updateFields.paymentStatus = 'paid';
+  }
+
   const [updated] = await db
     .update(appointments)
     .set(updateFields)
     .where(eq(appointments.id, id))
     .returning();
+
+  // Award reward points upon completion
+  if (updates.status === 'completed' && current.status !== 'completed') {
+    const pointsEarned = Math.max(
+      50,
+      Math.round(Number(current.price || 500) * 0.15)
+    );
+    await db.insert(rewards).values({
+      id: `rew-${Date.now()}`,
+      customerUid: current.customerUid,
+      pointsDelta: pointsEarned,
+      reason: `Completed: ${current.serviceName} (${current.shopName})`,
+      type: 'earned',
+    });
+    const profs = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.uid, current.customerUid));
+    if (profs.length > 0) {
+      await db
+        .update(profiles)
+        .set({ rewardBalance: (profs[0].rewardBalance || 0) + pointsEarned })
+        .where(eq(profiles.uid, current.customerUid));
+    }
+  }
 
   let notifTitle = '';
   let notifType = 'booking_update';
