@@ -10,6 +10,7 @@ import {
   PageView,
   ServiceItem,
   ShopItem,
+  PlatformSettingsItem,
 } from './data/barberlooData';
 import { Navbar } from './components/Navbar';
 import { HomePage } from './components/HomePage';
@@ -37,7 +38,6 @@ import {
   apiCreateReview,
   apiUpdateReview,
   apiToggleFavorite,
-  apiRedeemReward,
   apiMarkNotificationsRead,
   apiCreateCoupon,
   apiUpdateCoupon,
@@ -47,6 +47,7 @@ import {
   apiCreateShopGalleryItem,
   apiCreateBarberGalleryItem,
   apiBroadcastShopNotification,
+  apiUpdatePlatformFee,
   connectRealtimeSocket,
 } from './lib/api';
 import {
@@ -88,12 +89,21 @@ export default function App() {
   const [reports, setReports] = useState<any[]>([]);
   const [favorites, setFavorites] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [rewards, setRewards] = useState<any[]>([]);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettingsItem>({
+    id: 'default',
+    feeType: 'fixed',
+    feeAmount: 10,
+    minFee: 5,
+    refundPolicy: 'service_only',
+  });
 
   const loadBootstrapState = useCallback(
     async (uidToLoad = activeUserUid) => {
       try {
         const data = await apiFetchBootstrap(uidToLoad);
+        if (data.platformSettings) {
+          setPlatformSettings(data.platformSettings);
+        }
         if (Array.isArray(data.shops)) {
           setShops(data.shops);
           const params = new URLSearchParams(window.location.search);
@@ -113,12 +123,8 @@ export default function App() {
               const matched = data.shops.find((s: any) => s.id === prev.id);
               if (matched) return matched;
             }
-            const pathname = typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '';
-            const isBooking = pathname.includes('booking') || params.get('page') === 'booking';
-            if (isBooking) {
-              return null;
-            }
-            return data.shops[0];
+            // Section 8: Never automatically lock into last viewed or default shop
+            return null;
           });
         }
         if (Array.isArray(data.barbers)) setBarbers(data.barbers);
@@ -144,7 +150,6 @@ export default function App() {
         if (Array.isArray(data.reports)) setReports(data.reports);
         if (Array.isArray(data.favorites)) setFavorites(data.favorites);
         if (Array.isArray(data.notifications)) setNotifications(data.notifications);
-        if (Array.isArray(data.rewards)) setRewards(data.rewards);
       } catch {
         // Resilient fallback on transient network hiccup
       }
@@ -176,7 +181,13 @@ export default function App() {
       ) {
         setCurrentPage('barber-dashboard');
       } else if (
+        pathname.includes('profile') ||
+        params.get('page') === 'profile'
+      ) {
+        setCurrentPage('profile');
+      } else if (
         pathname.includes('account') ||
+        pathname.includes('bookings') ||
         params.get('page') === 'customer-dashboard'
       ) {
         setCurrentPage('customer-dashboard');
@@ -451,12 +462,6 @@ export default function App() {
     await loadBootstrapState(activeUserUid);
   };
 
-  const handleRedeemReward = async (cost: number, label: string) => {
-    if (!activeUserUid) return;
-    await apiRedeemReward(cost, label, activeUserUid);
-    await loadBootstrapState(activeUserUid);
-  };
-
   const handleMarkNotificationsRead = async () => {
     if (!activeUserUid) return;
     await apiMarkNotificationsRead(activeUserUid);
@@ -544,6 +549,20 @@ export default function App() {
     await loadBootstrapState(activeUserUid);
   };
 
+  const handleUpdatePlatformFee = async (payload: {
+    feeType?: string;
+    feeAmount?: number;
+    minFee?: number;
+    refundPolicy?: string;
+  }) => {
+    const updated = await apiUpdatePlatformFee(payload);
+    if (updated) {
+      setPlatformSettings((prev) => ({ ...prev, ...updated }));
+    }
+    await loadBootstrapState(activeUserUid);
+    return updated;
+  };
+
   const handleCreateShopGalleryItem = async (payload: any) => {
     await apiCreateShopGalleryItem(payload);
     await loadBootstrapState(activeUserUid);
@@ -600,22 +619,30 @@ export default function App() {
     </div>
   );
 
+  const handleNavigate = (page: PageView) => {
+    if (page === 'shop') {
+      setSelectedShop(null); // Clicking Shops ALWAYS shows the Shop List! (Section 8)
+    }
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
     <LanguageProvider>
       <div className="min-h-screen flex flex-col bg-[#FAF6EA] text-[#111113]">
         <Navbar
           currentPage={currentPage}
-          onNavigate={setCurrentPage}
+          onNavigate={handleNavigate}
           currentUserProfile={currentUserProfile}
           onAuthChange={handleAuthChange}
           authModalOpenExternal={authModalOpen}
           onSetAuthModalOpenExternal={setAuthModalOpen}
         />
 
-        <main className="flex-1">
+        <main className="flex-1 pb-20 lg:pb-0">
           {currentPage === 'home' && (
             <HomePage
-              onNavigate={setCurrentPage}
+              onNavigate={handleNavigate}
               onSelectServiceForBooking={(srv) => setBookingService(srv)}
               onSelectBarberForBooking={(brb) => setBookingBarber(brb)}
               onSelectShop={(shop) => setSelectedShop(shop)}
@@ -634,7 +661,7 @@ export default function App() {
             <ShopPage
               shop={selectedShop}
               onSelectShop={(shop) => setSelectedShop(shop)}
-              onNavigate={setCurrentPage}
+              onNavigate={handleNavigate}
               onSelectServiceForBooking={(srv) => setBookingService(srv)}
               onSelectBarberForBooking={(brb) => setBookingBarber(brb)}
               shops={shops}
@@ -652,6 +679,7 @@ export default function App() {
               hasCompletedAppointment={hasCompletedAppointment}
               currentUserProfile={currentUserProfile}
               onOpenAuthModal={() => setAuthModalOpen(true)}
+              platformSettings={platformSettings}
             />
           )}
 
@@ -661,18 +689,9 @@ export default function App() {
               initialBarber={bookingBarber}
               initialShop={selectedShop}
               initialShopId={selectedShop?.id}
+              onSelectShop={(shop) => setSelectedShop(shop)}
               onConfirmBooking={handleConfirmBooking}
-              onNavigate={(page) => {
-                if (page === 'home') {
-                  window.history.pushState({}, '', '/');
-                } else if (page === 'shop') {
-                  const targetShopId = selectedShop?.id || (shops.length === 1 ? shops[0]?.id : '');
-                  if (targetShopId) {
-                    window.history.pushState({}, '', `?shop_id=${encodeURIComponent(targetShopId)}&page=shop`);
-                  }
-                }
-                setCurrentPage(page);
-              }}
+              onNavigate={handleNavigate}
               shops={shops}
               services={services}
               barbers={barbers}
@@ -680,13 +699,15 @@ export default function App() {
               appointments={appointments}
               workingHours={workingHours}
               currentUserProfile={currentUserProfile}
+              platformSettings={platformSettings}
               onOpenAuthModal={() => setAuthModalOpen(true)}
             />
           )}
 
-          {currentPage === 'customer-dashboard' &&
+          {(currentPage === 'customer-dashboard' || currentPage === 'profile') &&
             (canAccessCustomerPortal ? (
               <CustomerDashboard
+                initialSection={currentPage === 'profile' ? 'profile' : 'bookings'}
                 appointments={appointments.filter(
                   (a) => a.customerUid === activeUserUid
                 )}
@@ -703,20 +724,18 @@ export default function App() {
                 onToggleFavorite={handleToggleFavorite}
                 notifications={notifications}
                 onMarkNotificationsRead={handleMarkNotificationsRead}
-                rewards={rewards}
-                rewardBalance={currentUserProfile?.rewardBalance ?? 0}
-                onRedeemReward={handleRedeemReward}
                 currentUserProfile={currentUserProfile}
                 onUpdateProfile={handleUpdateCurrentUserProfile}
                 payments={payments}
                 reviews={reviews}
                 onSubmitReview={handleSubmitReview}
                 onUpdateReview={handleUpdateReview}
+                platformSettings={platformSettings}
               />
             ) : (
               renderRoleGuard(
                 'Customer Account Required',
-                'Please sign in or sign up as a Customer to view your appointments, favorites, and loyalty rewards.'
+                'Please sign in or sign up as a Customer to view your appointments and saved favorites.'
               )
             ))}
 
@@ -751,6 +770,7 @@ export default function App() {
                 notifications={notifications}
                 onMarkNotificationsRead={handleMarkNotificationsRead}
                 profiles={profiles}
+                platformSettings={platformSettings}
               />
             ) : (
               renderRoleGuard(
@@ -770,6 +790,8 @@ export default function App() {
                 payments={payments}
                 reviews={reviews}
                 reports={reports}
+                platformSettings={platformSettings}
+                onUpdatePlatformFee={handleUpdatePlatformFee}
                 onUpdateShop={handleUpdateShop}
                 onUpdateBarber={handleUpdateBarber}
                 onUpdateProfile={handleAdminUpdateProfile}

@@ -12,7 +12,6 @@ export interface AppointmentSlaEvaluation {
   detailText: string;
   detailTextHi: string;
   minutesDelta: number; // positive = minutes past scheduled start, negative = minutes until start
-  compensationPoints: number;
   canClaimCompensation: boolean;
 }
 
@@ -30,7 +29,6 @@ export interface PlatformSlaSummary {
 export const SLA_TARGETS = {
   APPOINTMENT_ON_TIME_MINS: 15, // Barber must start cut within 15 mins of scheduled slot
   REPORT_RESOLUTION_HOURS: 2, // Admin/Salon dispute resolution target
-  BREACH_COMPENSATION_POINTS: 100, // +100 Loyalty Points auto-credit for SLA breach
 };
 
 const CLAIMED_SLA_STORAGE_KEY = 'barberloo_claimed_sla_ids_v1';
@@ -97,7 +95,6 @@ export function evaluateAppointmentSla(apt: any): AppointmentSlaEvaluation {
       detailText: 'Cancelled / No-Show appointment is exempt from SLA.',
       detailTextHi: 'रद्द या अनुपस्थित अपॉइंटमेंट SLA से मुक्त है।',
       minutesDelta: 0,
-      compensationPoints: 0,
       canClaimCompensation: false,
     };
   }
@@ -111,7 +108,6 @@ export function evaluateAppointmentSla(apt: any): AppointmentSlaEvaluation {
       detailText: `Chair started within ${SLA_TARGETS.APPOINTMENT_ON_TIME_MINS}-min SLA guarantee.`,
       detailTextHi: `${SLA_TARGETS.APPOINTMENT_ON_TIME_MINS}-मिनट SLA गारंटी के भीतर सेवा शुरू/पूर्ण हुई।`,
       minutesDelta: 0,
-      compensationPoints: 0,
       canClaimCompensation: false,
     };
   }
@@ -126,7 +122,6 @@ export function evaluateAppointmentSla(apt: any): AppointmentSlaEvaluation {
       detailText: '15-minute On-Time Chair Guarantee active.',
       detailTextHi: '15-मिनट समय पर चेयर गारंटी सक्रिय है।',
       minutesDelta: 0,
-      compensationPoints: 0,
       canClaimCompensation: false,
     };
   }
@@ -136,21 +131,15 @@ export function evaluateAppointmentSla(apt: any): AppointmentSlaEvaluation {
 
   // Past scheduled time + 15 minutes and still not started -> SLA BREACHED
   if (diffMins > SLA_TARGETS.APPOINTMENT_ON_TIME_MINS) {
-    const alreadyClaimed =
-      hasCustomerClaimedSla(id) ||
-      String(apt?.notes || '').includes('[SLA_CLAIMED]') ||
-      String(apt?.barberNotes || '').includes('[SLA_CLAIMED]');
-
     return {
       appointmentId: id,
       status: 'BREACHED',
-      badgeText: `SLA Breached (+${diffMins}m Delay)`,
-      badgeTextHi: `SLA उल्लंघन (+${diffMins}m देरी)`,
-      detailText: `Delayed ${diffMins} mins past slot (>15m SLA). Eligible for +${SLA_TARGETS.BREACH_COMPENSATION_POINTS} PTS SLA Guarantee Credit.`,
-      detailTextHi: `निर्धारित समय से ${diffMins} मिनट देरी (>15m SLA)। +${SLA_TARGETS.BREACH_COMPENSATION_POINTS} PTS मुआवजे के पात्र।`,
+      badgeText: `SLA Delayed (+${diffMins}m Delay)`,
+      badgeTextHi: `SLA देरी (+${diffMins}m देरी)`,
+      detailText: `Delayed ${diffMins} mins past slot (>15m SLA). Chair start expedited with salon team.`,
+      detailTextHi: `निर्धारित समय से ${diffMins} मिनट देरी (>15m SLA)। सैलून टीम द्वारा प्राथमिकता दी जा रही है।`,
       minutesDelta: diffMins,
-      compensationPoints: SLA_TARGETS.BREACH_COMPENSATION_POINTS,
-      canClaimCompensation: !alreadyClaimed,
+      canClaimCompensation: false,
     };
   }
 
@@ -165,7 +154,6 @@ export function evaluateAppointmentSla(apt: any): AppointmentSlaEvaluation {
       detailText: `Start service within ${remaining} mins to meet the 15-min On-Time SLA.`,
       detailTextHi: `15-मिनट SLA पूरा करने के लिए ${remaining} मिनट में सेवा शुरू करें।`,
       minutesDelta: diffMins,
-      compensationPoints: 0,
       canClaimCompensation: false,
     };
   }
@@ -181,7 +169,6 @@ export function evaluateAppointmentSla(apt: any): AppointmentSlaEvaluation {
       detailText: `Protected by BarberLoo ${SLA_TARGETS.APPOINTMENT_ON_TIME_MINS}-Min On-Time Chair Guarantee.`,
       detailTextHi: `BarberLoo ${SLA_TARGETS.APPOINTMENT_ON_TIME_MINS}-मिनट ऑन-टाइम चेयर गारंटी द्वारा सुरक्षित।`,
       minutesDelta: diffMins,
-      compensationPoints: 0,
       canClaimCompensation: false,
     };
   }
@@ -194,7 +181,6 @@ export function evaluateAppointmentSla(apt: any): AppointmentSlaEvaluation {
     detailText: `Protected by BarberLoo ${SLA_TARGETS.APPOINTMENT_ON_TIME_MINS}-Min On-Time Chair Guarantee.`,
     detailTextHi: `BarberLoo ${SLA_TARGETS.APPOINTMENT_ON_TIME_MINS}-मिनट ऑन-टाइम चेयर गारंटी द्वारा सुरक्षित।`,
     minutesDelta: diffMins,
-    compensationPoints: 0,
     canClaimCompensation: false,
   };
 }

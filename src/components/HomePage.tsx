@@ -483,8 +483,8 @@ export const HomePage: React.FC<HomePageProps> = ({
               </h2>
               <p className="text-sm text-[#8A8178] max-w-2xl leading-relaxed">
                 {tr(
-                  'All mock data has been removed. Are you a barbershop owner or master barber? Sign up as a Barber Partner to register your salon, publish your ₹ INR service menu, and manage real online bookings. Customers can sign up to book real appointments in IST.',
-                  'सभी डेमो डेटा हटा दिए गए हैं। यदि आप सैलून मालिक या बार्बर हैं, तो बार्बर पार्टनर के रूप में साइन अप करें और अपनी दुकान व सेवाएं (₹ में) जोड़ें। ग्राहक अपॉइंटमेंट बुक करने के लिए ग्राहक खाता बना सकते हैं।'
+                  'Are you a barbershop owner or master barber? Sign up as a Barber Partner to register your salon, publish your ₹ INR service menu, and manage real online bookings. Customers can sign up to book appointments in IST.',
+                  'यदि आप सैलून मालिक या बार्बर हैं, तो बार्बर पार्टनर के रूप में साइन अप करें और अपनी दुकान व सेवाएं (₹ में) जोड़ें। ग्राहक अपॉइंटमेंट बुक करने के लिए ग्राहक खाता बना सकते हैं।'
                 )}
               </p>
             </div>

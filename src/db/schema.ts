@@ -43,9 +43,7 @@ export const profiles = pgTable('profiles', {
   cityId: text('city_id').default('ct-jal'),
   state: text('state').default('Punjab'),
   city: text('city').default('Jalandhar'),
-  tier: text('tier').notNull().default('Sovereign Member'),
   preferredNotes: text('preferred_notes').notNull().default(''),
-  rewardBalance: integer('reward_balance').notNull().default(1450),
   status: text('status').notNull().default('active'), // active | suspended
   assignedShopId: text('assigned_shop_id').default('shop-1'),
   assignedBarberId: text('assigned_barber_id').default('brb-1'),
@@ -130,8 +128,7 @@ export const appointments = pgTable('appointments', {
   id: text('id').primaryKey(),
   customerUid: text('customer_uid').notNull(),
   clientName: text('client_name').notNull(),
-  clientPhone: text('client_phone').notNull().default('+44 7700 900412'),
-  clientTier: text('client_tier').notNull().default('Sovereign Member'),
+  clientPhone: text('client_phone').notNull().default('+91 98765 43210'),
   shopId: text('shop_id').notNull().default('shop-1'),
   shopName: text('shop_name').notNull(),
   barberId: text('barber_id').notNull(),
@@ -142,9 +139,14 @@ export const appointments = pgTable('appointments', {
   time: text('time').notNull(),
   durationMin: integer('duration_min').notNull().default(45),
   price: integer('price').notNull(),
+  servicePrice: integer('service_price').notNull().default(150),
+  platformFee: integer('platform_fee').notNull().default(10),
+  totalPrice: integer('total_price').notNull().default(160),
   status: text('status').notNull().default('confirmed'), // pending | confirmed | in_progress | completed | cancelled | no_show
-  paymentMethod: text('payment_method').notNull().default('pay_at_shop'), // online | pay_at_shop
+  paymentMethod: text('payment_method').notNull().default('online'), // strictly online (Razorpay)
   paymentStatus: text('payment_status').notNull().default('paid'), // pending | paid | refunded
+  razorpayOrderId: text('razorpay_order_id').default(''),
+  razorpayPaymentId: text('razorpay_payment_id').default(''),
   notes: text('notes').notNull().default(''),
   internalBarberNotes: text('internal_barber_notes').notNull().default(''),
   couponCode: text('coupon_code').notNull().default(''),
@@ -239,7 +241,7 @@ export const barberGallery = pgTable('barber_gallery', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// 13. payments
+// 13. payments (Complete online audit record)
 export const payments = pgTable('payments', {
   id: text('id').primaryKey(),
   appointmentId: text('appointment_id').notNull(),
@@ -247,15 +249,33 @@ export const payments = pgTable('payments', {
   clientName: text('client_name').notNull(),
   shopId: text('shop_id').notNull().default('shop-1'),
   shopName: text('shop_name').notNull(),
-  amount: integer('amount').notNull(),
-  platformFee: integer('platform_fee').notNull().default(5),
-  method: text('method').notNull().default('pay_at_shop'), // online | pay_at_shop
+  amount: integer('amount').notNull(), // Total customer payment
+  serviceAmount: integer('service_amount').notNull().default(0), // Barber service price
+  platformFee: integer('platform_fee').notNull().default(10), // BarberLoo platform fee
+  discountAmount: integer('discount_amount').notNull().default(0),
+  totalAmount: integer('total_amount').notNull().default(0),
+  currency: text('currency').notNull().default('INR'),
+  provider: text('provider').notNull().default('razorpay'),
+  providerOrderId: text('provider_order_id').default(''),
+  providerPaymentId: text('provider_payment_id').default(''),
+  method: text('method').notNull().default('online'), // strictly online
   methodDisplay: text('method_display')
     .notNull()
-    .default('Pay at Atelier Lounge'),
-  status: text('status').notNull().default('paid'), // pending | paid | refunded
+    .default('Razorpay Online (UPI / Card / NetBanking)'),
+  status: text('status').notNull().default('paid'), // created | pending | paid | failed | refunded | partially_refunded
   receiptNumber: text('receipt_number').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// 14. platform_settings (Configurable fixed or percentage fee)
+export const platformSettings = pgTable('platform_settings', {
+  id: text('id').primaryKey().default('default'),
+  feeType: text('fee_type').notNull().default('fixed'), // fixed | percentage
+  feeAmount: integer('fee_amount').notNull().default(10), // e.g. ₹10 fixed or 5 for 5%
+  minFee: integer('min_fee').notNull().default(5),
+  refundPolicy: text('refund_policy').notNull().default('service_only'), // service_only | full
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 // 14. coupons
@@ -273,17 +293,7 @@ export const coupons = pgTable('coupons', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// 15. rewards
-export const rewards = pgTable('rewards', {
-  id: text('id').primaryKey(),
-  customerUid: text('customer_uid').notNull(),
-  pointsDelta: integer('points_delta').notNull(),
-  reason: text('reason').notNull(),
-  type: text('type').notNull().default('earned'), // earned | redeemed
-  createdAt: timestamp('created_at').defaultNow(),
-});
-
-// 16. reports
+// 15. reports
 export const reports = pgTable('reports', {
   id: text('id').primaryKey(),
   reporterUid: text('reporter_uid').notNull(),

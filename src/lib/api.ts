@@ -8,17 +8,12 @@ import {
 } from './supabase';
 import { ASSETS, OPENING_HOURS } from '../data/barberlooData';
 import { DEFAULT_STATES, DEFAULT_CITIES } from './locations';
+import { getShopQrDestinationUrl } from './domain';
 
 async function safeBackendRequest<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T | null> {
-  if (
-    typeof window !== 'undefined' &&
-    window.location.hostname.includes('barberloo.in')
-  ) {
-    return null;
-  }
   try {
     const token = await getAuthToken();
     const headers: Record<string, string> = {
@@ -84,18 +79,16 @@ function mapSupabaseShop(sh: any) {
     reviewCount: sh.review_count ?? sh.reviewCount ?? 0,
     isOpen: sh.is_open ?? sh.isOpen ?? true,
     closesAt: sh.closes_at ?? sh.closesAt ?? '21:30',
-    priceTier: sh.price_tier ?? sh.priceTier ?? '₹500 – ₹1,500',
-    minPrice: sh.min_price ?? sh.minPrice ?? 500,
+    priceTier: sh.price_tier ?? sh.priceTier ?? '₹60 – ₹120',
+    minPrice: sh.min_price ?? sh.minPrice ?? 60,
     verified: sh.verified ?? true,
     approvalStatus: sh.approval_status ?? sh.approvalStatus ?? 'approved',
     logoUrl: sh.logo_url ?? sh.logoUrl ?? '',
     image: sh.image || ASSETS.royalInterior,
-    tagline: sh.tagline || 'Bespoke Grooming & Reserved Appointments',
+    tagline: sh.tagline || 'Luxury Grooming & Bespoke Appointments',
     about: sh.about || '',
     qrCodeSlug: sh.qr_code_slug ?? sh.qrCodeSlug ?? sh.id,
-    qrCodeUrl: `${typeof window !== 'undefined' ? window.location.origin : ''}/booking.html?shop_id=${encodeURIComponent(
-      sh.id
-    )}`,
+    qrCodeUrl: getShopQrDestinationUrl(sh.id),
   };
 }
 
@@ -104,7 +97,7 @@ function mapSupabaseBarber(b: any) {
   return {
     id: b.id,
     userUid: b.user_uid ?? b.userUid ?? '',
-    shopId: b.shop_id ?? b.shopId ?? 'shop-1',
+    shopId: b.shop_id ?? b.shopId ?? '',
     name: b.name,
     role: b.role || 'Master Barber',
     rating: parseFloat(b.rating) || 5.0,
@@ -112,9 +105,9 @@ function mapSupabaseBarber(b: any) {
     experience: b.experience || `${expYears} yrs`,
     experienceYears: expYears,
     specialty: b.specialty || 'Haircut & Beard Styling',
-    shopName: b.shop_name ?? b.shopName ?? 'Partner Salon',
+    shopName: b.shop_name ?? b.shopName ?? 'Pawan Hair Saloon',
     nextAvailable: b.next_available ?? b.nextAvailable ?? 'Today · IST',
-    priceFrom: Number(b.price_from ?? b.priceFrom ?? 500),
+    priceFrom: Number(b.price_from ?? b.priceFrom ?? 60),
     image: b.image || b.avatar || ASSETS.barberMarcus,
     avatar: b.avatar || b.image || ASSETS.barberMarcus,
     bio: b.bio || '',
@@ -131,7 +124,7 @@ function mapSupabaseService(s: any) {
   const dur = Number(s.duration_min ?? s.durationMins ?? 45);
   return {
     id: s.id,
-    shopId: s.shop_id ?? s.shopId ?? 'shop-1',
+    shopId: s.shop_id ?? s.shopId ?? '',
     index: s.index_code ?? s.index ?? '01',
     name: s.name,
     category: s.category || 'Precision Haircuts',
@@ -184,12 +177,12 @@ function mapSupabaseAppointment(a: any) {
     clientName: a.client_name ?? a.clientName ?? 'Client',
     clientPhone: a.client_phone ?? a.clientPhone ?? '+91',
     clientTier: a.client_tier ?? a.clientTier ?? 'Member',
-    shopId: a.shop_id ?? a.shopId ?? 'shop-1',
+    shopId: a.shop_id ?? a.shopId ?? '',
     shopName: a.shop_name ?? a.shopName ?? 'Partner Salon',
-    barberId: a.barber_id ?? a.barberId ?? 'brb-1',
+    barberId: a.barber_id ?? a.barberId ?? '',
     barberName: a.barber_name ?? a.barberName ?? 'Barber',
     barberAvatar: a.barberAvatar || ASSETS.barberMarcus,
-    serviceId: a.service_id ?? a.serviceId ?? 'srv-1',
+    serviceId: a.service_id ?? a.serviceId ?? '',
     serviceName: a.service_name ?? a.serviceName ?? 'Grooming Service',
     date: a.date,
     time: a.time,
@@ -232,9 +225,7 @@ function mapSupabaseProfile(p: any) {
     cityId: p.city_id ?? p.cityId ?? 'ct-jal',
     state: p.state ?? 'Punjab',
     city: p.city ?? 'Jalandhar',
-    tier: p.tier || (p.role === 'admin' ? 'Platform Admin' : 'Member'),
     preferredNotes: p.preferred_notes ?? p.preferredNotes ?? '',
-    rewardBalance: Number(p.reward_balance ?? p.rewardBalance ?? 0),
     status: p.status || 'active',
   };
 }
@@ -278,7 +269,6 @@ export const apiFetchBootstrap = async (uid = '') => {
       barberGalleryRes,
       favsRes,
       notifsRes,
-      rewardsRes,
     ] = await Promise.all([
       supabase.from('shops').select('*'),
       supabase.from('barbers').select('*'),
@@ -302,13 +292,6 @@ export const apiFetchBootstrap = async (uid = '') => {
             .eq('recipient_uid', uid)
             .order('created_at', { ascending: false })
         : Promise.resolve({ data: [] }),
-      uid
-        ? supabase
-            .from('rewards')
-            .select('*')
-            .eq('customer_uid', uid)
-            .order('created_at', { ascending: false })
-        : Promise.resolve({ data: [] }),
     ]);
 
     supaData = {
@@ -318,8 +301,8 @@ export const apiFetchBootstrap = async (uid = '') => {
       appointments: (aptsRes.data || []).map(mapSupabaseAppointment),
       reviews: (reviewsRes.data || []).map((r: any) => ({
         id: r.id,
-        shopId: r.shop_id ?? r.shopId ?? 'shop-1',
-        barberId: r.barber_id ?? r.barberId ?? 'brb-1',
+        shopId: r.shop_id ?? r.shopId ?? '',
+        barberId: r.barber_id ?? r.barberId ?? '',
         customerUid: r.customer_uid ?? r.customerUid,
         author: r.author,
         role: r.role,
@@ -334,7 +317,7 @@ export const apiFetchBootstrap = async (uid = '') => {
       profiles: (profilesRes.data || []).map(mapSupabaseProfile),
       coupons: (couponsRes.data || []).map((c: any) => ({
         id: c.id,
-        shopId: c.shop_id ?? c.shopId ?? 'shop-1',
+        shopId: c.shop_id ?? c.shopId ?? '',
         code: c.code,
         discountPercent: c.discount_percent ?? c.discountPercent ?? 15,
         discountText: c.discount_text ?? c.discountText ?? '',
@@ -351,7 +334,7 @@ export const apiFetchBootstrap = async (uid = '') => {
         appointmentId: p.appointment_id ?? p.appointmentId,
         customerUid: p.customer_uid ?? p.customerUid,
         clientName: p.client_name ?? p.clientName,
-        shopId: p.shop_id ?? p.shopId ?? 'shop-1',
+        shopId: p.shop_id ?? p.shopId ?? '',
         shopName: p.shop_name ?? p.shopName,
         amount: Number(p.amount ?? 0),
         platformFee: Number(p.platform_fee ?? p.platformFee ?? 25),
@@ -374,8 +357,8 @@ export const apiFetchBootstrap = async (uid = '') => {
       })),
       workingHours: (workingHoursRes.data || []).map((wh: any) => ({
         id: wh.id,
-        shopId: wh.shop_id ?? wh.shopId ?? 'shop-1',
-        barberId: wh.barber_id ?? wh.barberId ?? 'brb-1',
+        shopId: wh.shop_id ?? wh.shopId ?? '',
+        barberId: wh.barber_id ?? wh.barberId ?? '',
         day: wh.day_of_week ?? wh.day,
         dayOfWeek: wh.day_of_week ?? wh.dayOfWeek ?? wh.day,
         dayOrder: wh.day_order ?? wh.dayOrder ?? 1,
@@ -398,14 +381,14 @@ export const apiFetchBootstrap = async (uid = '') => {
       })),
       shopGallery: (shopGalleryRes.data || []).map((g: any) => ({
         id: g.id,
-        shopId: g.shop_id ?? g.shopId ?? 'shop-1',
+        shopId: g.shop_id ?? g.shopId ?? '',
         imageUrl: g.image_url ?? g.imageUrl,
         title: g.title,
         caption: g.caption || '',
       })),
       barberGallery: (barberGalleryRes.data || []).map((g: any) => ({
         id: g.id,
-        barberId: g.barber_id ?? g.barberId ?? 'brb-1',
+        barberId: g.barber_id ?? g.barberId ?? '',
         imageUrl: g.image_url ?? g.imageUrl,
         title: g.title,
         styleTag: g.style_tag ?? g.styleTag ?? '',
@@ -423,13 +406,6 @@ export const apiFetchBootstrap = async (uid = '') => {
         title: n.title,
         timeLabel: n.time_label ?? n.timeLabel ?? 'Just now',
         unread: n.unread ?? true,
-      })),
-      rewards: (rewardsRes.data || []).map((rw: any) => ({
-        id: rw.id,
-        customerUid: rw.customer_uid ?? rw.customerUid,
-        pointsDelta: Number(rw.points_delta ?? rw.pointsDelta ?? 0),
-        reason: rw.reason,
-        type: rw.type,
       })),
     };
   } catch {
@@ -455,10 +431,89 @@ export const apiFetchBootstrap = async (uid = '') => {
     reports: mergeById(supaData.reports, backendData?.reports),
     favorites: mergeById(supaData.favorites, backendData?.favorites),
     notifications: mergeById(supaData.notifications, backendData?.notifications),
-    rewards: mergeById(supaData.rewards, backendData?.rewards),
     workingHours: mergedWorkingHours.length ? mergedWorkingHours : OPENING_HOURS,
     shopGallery: mergeById(supaData.shopGallery, backendData?.shopGallery),
     barberGallery: mergeById(supaData.barberGallery, backendData?.barberGallery),
+    platformSettings: backendData?.platformSettings || {
+      id: 'default',
+      feeType: 'fixed',
+      feeAmount: 10,
+      minFee: 5,
+    },
+  };
+};
+
+export const apiFetchPlatformFee = async () => {
+  return (
+    (await safeBackendRequest<any>('/api/platform/fee')) || {
+      id: 'default',
+      feeType: 'fixed',
+      feeAmount: 10,
+      minFee: 5,
+      refundPolicy: 'service_only',
+    }
+  );
+};
+
+export const apiUpdatePlatformFee = async (payload: {
+  feeType?: string;
+  feeAmount?: number;
+  minFee?: number;
+  refundPolicy?: string;
+}) => {
+  return await safeBackendRequest<any>('/api/platform/fee', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+};
+
+export const apiCalculatePricing = async (
+  serviceId: string,
+  couponCode?: string
+) => {
+  return await safeBackendRequest<any>('/api/pricing/calculate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serviceId, couponCode }),
+  });
+};
+
+export const apiCreateRazorpayOrder = async (payload: {
+  serviceId?: string;
+  couponCode?: string;
+  amount?: number;
+  currency?: string;
+  receipt?: string;
+  notes?: any;
+}): Promise<{
+  success?: boolean;
+  orderId?: string;
+  amount?: number;
+  currency?: string;
+  keyId?: string;
+  isSimulator?: boolean;
+  [key: string]: any;
+}> => {
+  try {
+    const res = await safeBackendRequest<any>('/api/payments/razorpay/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res?.orderId) {
+      return res;
+    }
+  } catch {
+    // fallback
+  }
+
+  return {
+    success: true,
+    orderId: `order_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 6)}`,
+    amount: Math.round((payload.amount || 150) * 100),
+    currency: payload.currency || 'INR',
+    isSimulator: true,
   };
 };
 
@@ -479,7 +534,6 @@ export const apiSyncAuthUser = async (payload: {
   const displayName = payload.name?.trim() || cleanEmail.split('@')[0];
 
   let existingRole: string | undefined;
-  let existingReward = 0;
   let existingProfileRow: any = null;
   try {
     const { data: existing } = await supabase
@@ -490,7 +544,6 @@ export const apiSyncAuthUser = async (payload: {
     if (existing) {
       existingProfileRow = existing;
       existingRole = existing.role;
-      existingReward = existing.reward_balance || 0;
     }
   } catch {
     // ignore
@@ -514,14 +567,7 @@ export const apiSyncAuthUser = async (payload: {
     name: displayName,
     phone: payload.phone || existingProfileRow?.phone || '',
     role: finalRole,
-    tier:
-      finalRole === 'admin'
-        ? 'Founder & Platform Admin'
-        : finalRole === 'barber'
-        ? 'Verified Barber Partner'
-        : 'Member',
     preferred_notes: existingProfileRow?.preferred_notes || '',
-    reward_balance: existingReward,
     status: existingProfileRow?.status || 'active',
     state_id: payload.stateId || payload.state_id || existingProfileRow?.state_id || 'st-pb',
     city_id: payload.cityId || payload.city_id || existingProfileRow?.city_id || 'ct-jal',
@@ -666,12 +712,12 @@ export const apiCreateAppointment = async (payload: any) => {
     client_name: payload.clientName,
     client_phone: payload.clientPhone || '+91',
     client_tier: 'Member',
-    shop_id: payload.shopId || 'shop-1',
-    shop_name: payload.shopName || 'Partner Salon',
-    barber_id: barberId,
-    barber_name: payload.barberName || 'Barber',
-    service_id: payload.serviceId || 'srv-1',
-    service_name: payload.serviceName || 'Grooming Service',
+    shop_id: payload.shopId || '',
+    shop_name: payload.shopName || '',
+    barber_id: barberId || payload.barberId || '',
+    barber_name: payload.barberName || '',
+    service_id: payload.serviceId || '',
+    service_name: payload.serviceName || '',
     date,
     time,
     duration_min: Number(payload.durationMin || payload.durationMins || 45),
@@ -710,9 +756,9 @@ export const apiCreateAppointment = async (payload: any) => {
     appointment_id: id,
     customer_uid: payload.customerUid,
     client_name: payload.clientName,
-    shop_id: payload.shopId || 'shop-1',
-    shop_name: payload.shopName || 'Partner Salon',
-    amount: Number(payload.price || 500),
+    shop_id: payload.shopId || '',
+    shop_name: payload.shopName || '',
+    amount: Number(payload.price || 0),
     platform_fee: Math.max(25, Math.round(Number(payload.price || 500) * 0.08)),
     method: payload.paymentMethod || 'razorpay',
     method_display: methodDisplay,
@@ -816,38 +862,12 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
 
     await supabase.from('appointments').update(supaUpdates).eq('id', id);
 
-    // Trigger real-time notifications & loyalty rewards in Supabase
+    // Trigger real-time notifications in Supabase
     if (existingApt && existingApt.customer_uid) {
       const custUid = existingApt.customer_uid;
       const newStatus = supaUpdates.status;
 
       if (newStatus === 'completed' && existingApt.status !== 'completed') {
-        const earnedPoints = Math.max(
-          50,
-          Math.round(Number(existingApt.price || 500) * 0.15)
-        );
-        await safeSupabaseUpsert('rewards', {
-          id: `rew-${Date.now()}`,
-          customer_uid: custUid,
-          points_delta: earnedPoints,
-          reason: `Completed: ${existingApt.service_name} (${existingApt.shop_name})`,
-          type: 'earned',
-        });
-
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('reward_balance')
-          .eq('uid', custUid)
-          .maybeSingle();
-        if (prof) {
-          await supabase
-            .from('profiles')
-            .update({
-              reward_balance: Number(prof.reward_balance || 0) + earnedPoints,
-            })
-            .eq('uid', custUid);
-        }
-
         await supabase
           .from('payments')
           .update({ status: 'paid' })
@@ -857,7 +877,7 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
           id: `notif-comp-${Date.now()}`,
           recipient_uid: custUid,
           type: 'service_completed',
-          title: `Service completed with ${existingApt.barber_name}! You earned +${earnedPoints} PTS.`,
+          title: `Service completed with ${existingApt.barber_name}. Thank you for booking with BarberLoo!`,
           time_label: 'Just now · Salon Desk',
           unread: true,
         });
@@ -937,7 +957,7 @@ export const apiCreateService = async (payload: any) => {
   const id = `srv-${Date.now()}`;
   const supaSrv = {
     id,
-    shop_id: payload.shopId || 'shop-1',
+    shop_id: payload.shopId || '',
     index_code: '01',
     name: payload.name,
     category: payload.category || 'Precision Haircuts',
@@ -1006,8 +1026,8 @@ export const apiCreateBarber = async (payload: any) => {
   const supaBrb = {
     id,
     user_uid: payload.userUid || '',
-    shop_id: payload.shopId || 'shop-1',
-    shop_name: payload.shopName || 'Partner Salon',
+    shop_id: payload.shopId || '',
+    shop_name: payload.shopName || '',
     name: payload.name,
     role: payload.role || 'Master Barber',
     specialty: payload.specialty || 'Haircut & Beard Styling',
@@ -1185,8 +1205,8 @@ export const apiUpdateWorkingHours = async (id: string, updates: any) => {
     const defaultDay = OPENING_HOURS.find((d) => d.id === id);
     const record = {
       id,
-      shop_id: updates.shopId || existing?.shop_id || 'shop-1',
-      barber_id: updates.barberId || existing?.barber_id || 'brb-1',
+      shop_id: updates.shopId || existing?.shop_id || '',
+      barber_id: updates.barberId || existing?.barber_id || '',
       day_of_week:
         updates.dayOfWeek ||
         existing?.day_of_week ||
@@ -1264,8 +1284,8 @@ async function recalculateShopAndBarberRating(shopId: string, barberId?: string)
 
 export const apiCreateReview = async (payload: any) => {
   const id = `rev-${Date.now()}`;
-  const shopId = payload.shopId || 'shop-1';
-  const barberId = payload.barberId || 'brb-1';
+  const shopId = payload.shopId || '';
+  const barberId = payload.barberId || '';
 
   await safeSupabaseUpsert('reviews', {
     id,
@@ -1376,59 +1396,6 @@ export const apiToggleFavorite = async (
   return mappedFavs.length > 0 ? mappedFavs : res || [];
 };
 
-export const apiRedeemReward = async (
-  cost: number,
-  label: string,
-  customerUid = ''
-) => {
-  let newBalance = 0;
-  try {
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('reward_balance')
-      .eq('uid', customerUid)
-      .maybeSingle();
-    const currentBalance = Number(prof?.reward_balance ?? 0);
-    if (currentBalance < cost) {
-      throw new Error('Insufficient reward points.');
-    }
-    newBalance = currentBalance - cost;
-    await supabase
-      .from('profiles')
-      .update({ reward_balance: newBalance })
-      .eq('uid', customerUid);
-
-    await safeSupabaseUpsert('rewards', {
-      id: `rew-${Date.now()}`,
-      customer_uid: customerUid,
-      points_delta: -cost,
-      reason: `Redeemed: ${label}`,
-      type: 'redeemed',
-    });
-
-    await safeSupabaseUpsert('notifications', {
-      id: `notif-rew-${Date.now()}`,
-      recipient_uid: customerUid,
-      type: 'reward_redeemed',
-      title: `Redeemed ${cost} PTS for ${label}`,
-      time_label: 'Just now · Loyalty Rewards',
-      unread: true,
-    });
-  } catch {
-    // ignore
-  }
-
-  const backendRes = await safeBackendRequest<{ rewardBalance: number }>(
-    '/api/rewards/redeem',
-    {
-      method: 'POST',
-      body: JSON.stringify({ cost, label, customerUid }),
-    }
-  );
-  broadcastSupabaseEvent('state:updated', { entity: 'rewards' });
-  return backendRes || { rewardBalance: newBalance };
-};
-
 export const apiMarkNotificationsRead = async (customerUid = '') => {
   try {
     await supabase
@@ -1453,7 +1420,7 @@ export const apiCreateCoupon = async (payload: any) => {
   const id = `cpn-${Date.now()}`;
   const supaCoupon = {
     id,
-    shop_id: payload.shopId || 'shop-1',
+    shop_id: payload.shopId || '',
     code: String(payload.code).trim().toUpperCase(),
     discount_text:
       payload.discountText || `${payload.discountPercent}% Off Grooming`,
@@ -1511,8 +1478,8 @@ export const apiCreateReport = async (payload: any) => {
     reporter_uid: payload.reporterUid || '',
     reporter_name: payload.reporterName || 'Verified User',
     target_type: payload.targetType || 'shop',
-    target_id: payload.targetId || 'shop-1',
-    target_label: payload.targetLabel || 'Partner Salon',
+    target_id: payload.targetId || '',
+    target_label: payload.targetLabel || '',
     reason: payload.reason || 'Service Inquiry',
     details: payload.details || '',
     status: 'open',
@@ -1579,8 +1546,8 @@ export const apiCreateShopGalleryItem = async (payload: {
   const id = `sg-${Date.now()}`;
   const item = {
     id,
-    shop_id: payload.shopId || 'shop-1',
-    image_url: payload.imageUrl || ASSETS.royalInterior,
+    shop_id: payload.shopId || '',
+    image_url: payload.imageUrl || '',
     title: payload.title || 'Salon Interior',
     caption: payload.caption || '',
   };
@@ -1683,38 +1650,13 @@ export const apiClaimSlaCompensation = async (payload: {
   appointmentId: string;
   serviceName: string;
   barberName: string;
-  points?: number;
 }) => {
-  const pts = payload.points || 100;
   try {
-    await safeSupabaseUpsert('rewards', {
-      id: `rew-sla-${Date.now()}`,
-      customer_uid: payload.customerUid,
-      points_delta: pts,
-      reason: `SLA On-Time Guarantee Credit (+${pts} PTS): ${payload.serviceName} with ${payload.barberName}`,
-      type: 'earned',
-    });
-
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('reward_balance')
-      .eq('uid', payload.customerUid)
-      .maybeSingle();
-
-    if (prof) {
-      await supabase
-        .from('profiles')
-        .update({
-          reward_balance: Number(prof.reward_balance || 0) + pts,
-        })
-        .eq('uid', payload.customerUid);
-    }
-
     await safeSupabaseUpsert('notifications', {
       id: `notif-sla-${Date.now()}`,
       recipient_uid: payload.customerUid,
       type: 'important_shop_notification',
-      title: `🛡️ SLA Guarantee Credit: +${pts} PTS added to your account for delay on ${payload.serviceName} with ${payload.barberName}.`,
+      title: `🛡️ SLA Delay Notice: Priority attention requested for your ${payload.serviceName} with ${payload.barberName}.`,
       time_label: 'Just now · SLA Engine',
       unread: true,
     });
@@ -1722,8 +1664,8 @@ export const apiClaimSlaCompensation = async (payload: {
     // ignore
   }
 
-  broadcastSupabaseEvent('state:updated', { entity: 'rewards' });
-  return { ok: true, pointsAwarded: pts };
+  broadcastSupabaseEvent('state:updated', { entity: 'notifications' });
+  return { ok: true };
 };
 
 export function connectRealtimeSocket(
@@ -1735,41 +1677,6 @@ export function connectRealtimeSocket(
 // ----------------------------------------------------------------------------
 // Razorpay & WooCommerce Payment Integration APIs
 // ----------------------------------------------------------------------------
-
-export async function apiCreateRazorpayOrder(payload: {
-  amount: number;
-  currency?: string;
-  receipt?: string;
-  notes?: Record<string, any>;
-}): Promise<{
-  success: boolean;
-  orderId: string;
-  amount: number;
-  currency: string;
-  keyId?: string;
-  isSimulator?: boolean;
-}> {
-  try {
-    const res = await safeBackendRequest<any>('/api/payments/razorpay/create-order', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    if (res?.orderId) {
-      return res;
-    }
-  } catch {
-    // fallback
-  }
-
-  // Client-side fallback if server endpoint is unreachable
-  return {
-    success: true,
-    orderId: `order_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 6)}`,
-    amount: Math.round(payload.amount * 100),
-    currency: payload.currency || 'INR',
-    isSimulator: true,
-  };
-}
 
 export async function apiVerifyRazorpayPayment(payload: {
   razorpay_order_id?: string;

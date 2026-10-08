@@ -16,8 +16,8 @@ import {
   barberGallery,
   payments,
   coupons,
-  rewards,
   reports,
+  platformSettings,
 } from './schema.ts';
 import { eq, asc, desc, and, sql } from 'drizzle-orm';
 import { ASSETS } from '../data/barberlooData.ts';
@@ -106,14 +106,7 @@ export async function getOrCreateUser(
         cityId: cityId || 'ct-jal',
         state: stateName || 'Punjab',
         city: cityName || 'Jalandhar',
-        tier:
-          finalRole === 'admin'
-            ? 'Platform Admin'
-            : finalRole === 'barber'
-            ? 'Verified Barber Partner'
-            : 'Member',
         preferredNotes: '',
-        rewardBalance: 0,
         status: 'active',
         assignedShopId: '',
         assignedBarberId: '',
@@ -128,8 +121,6 @@ export async function getOrCreateUser(
       existingProfiles[0].role !== requestedRole
     ) {
       updates.role = requestedRole;
-      updates.tier =
-        requestedRole === 'barber' ? 'Verified Barber Partner' : 'Member';
     }
     if (name && name.trim() && existingProfiles[0].name !== name.trim()) {
       updates.name = name.trim();
@@ -158,6 +149,158 @@ export async function getOrCreateUser(
   }
 
   return userRecord;
+}
+
+let runtimeCustomDomain = process.env.CUSTOM_DOMAIN || 'https://barberloo.in';
+
+export async function getPlatformSettings() {
+  try {
+    const [settings] = await db
+      .select()
+      .from(platformSettings)
+      .where(eq(platformSettings.id, 'default'))
+      .limit(1);
+    return (
+      settings
+        ? {
+            id: 'default',
+            feeType: settings.feeType,
+            feeAmount: settings.feeAmount,
+            minFee: settings.minFee,
+            refundPolicy: (settings as any).refundPolicy || 'service_only',
+            customDomain: runtimeCustomDomain,
+          }
+        : {
+            id: 'default',
+            feeType: 'fixed',
+            feeAmount: 10,
+            minFee: 5,
+            refundPolicy: 'service_only',
+            customDomain: runtimeCustomDomain,
+          }
+    );
+  } catch {
+    return {
+      id: 'default',
+      feeType: 'fixed',
+      feeAmount: 10,
+      minFee: 5,
+      refundPolicy: 'service_only',
+      customDomain: runtimeCustomDomain,
+    };
+  }
+}
+
+export async function updatePlatformSettingsInDb(payload: {
+  feeType?: string;
+  feeAmount?: number;
+  minFee?: number;
+  refundPolicy?: string;
+  customDomain?: string;
+}) {
+  if (payload.customDomain && payload.customDomain.trim()) {
+    const trimmed = payload.customDomain.trim();
+    if (!trimmed.includes('run.app') && !trimmed.includes('localhost')) {
+      runtimeCustomDomain = trimmed;
+    }
+  }
+  const current = await getPlatformSettings();
+  const feeType = payload.feeType === 'percentage' ? 'percentage' : 'fixed';
+  const feeAmount = Number(payload.feeAmount ?? current.feeAmount);
+  const minFee = Number(payload.minFee ?? current.minFee);
+  const refundPolicy =
+    payload.refundPolicy === 'full' ? 'full' : payload.refundPolicy === 'service_only' ? 'service_only' : ((current as any).refundPolicy || 'service_only');
+
+  const [updated] = await db
+    .insert(platformSettings)
+    .values({
+      id: 'default',
+      feeType,
+      feeAmount: Math.max(1, feeAmount),
+      minFee: Math.max(1, minFee),
+      refundPolicy,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: platformSettings.id,
+      set: {
+        feeType,
+        feeAmount: Math.max(1, feeAmount),
+        minFee: Math.max(1, minFee),
+        refundPolicy,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+
+  return updated;
+}
+
+export async function calculateServerBookingPrice(
+  serviceId: string,
+  couponCode?: string
+) {
+  const [dbService] = await db
+    .select()
+    .from(services)
+    .where(eq(services.id, serviceId))
+    .limit(1);
+
+  if (!dbService) {
+    throw new Error('Service not found.');
+  }
+
+  const servicePrice = Number(dbService.price);
+  let discountAmount = 0;
+
+  if (couponCode) {
+    const cleanCoupon = String(couponCode).trim().toUpperCase();
+    const todayIST = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+    }).format(new Date());
+
+    const [c] = await db
+      .select()
+      .from(coupons)
+      .where(eq(coupons.code, cleanCoupon))
+      .limit(1);
+
+    if (
+      c &&
+      c.status === 'Active' &&
+      c.expiresAt >= todayIST &&
+      c.usesCount < c.maxUses &&
+      servicePrice >= c.minSpend
+    ) {
+      discountAmount = Math.round(servicePrice * (c.discountPercent / 100));
+    }
+  }
+
+  const discountedServicePrice = Math.max(0, servicePrice - discountAmount);
+  const settings = await getPlatformSettings();
+
+  let platformFee = Number(settings.feeAmount || 10);
+  if (settings.feeType === 'percentage') {
+    platformFee = Math.max(
+      Number(settings.minFee || 5),
+      Math.round(discountedServicePrice * (Number(settings.feeAmount) / 100))
+    );
+  }
+
+  const totalAmount = discountedServicePrice + platformFee;
+
+  return {
+    serviceId: dbService.id,
+    serviceName: dbService.name,
+    shopId: dbService.shopId,
+    durationMin: dbService.durationMin,
+    servicePrice,
+    discountAmount,
+    discountedServicePrice,
+    platformFee,
+    totalAmount,
+    feeType: settings.feeType,
+  };
 }
 
 export async function validateTimeWithinWorkingHours(
@@ -235,7 +378,6 @@ export async function getBootstrapState(
     barberGalleryRows,
     paymentRows,
     couponRows,
-    rewardRows,
     profileRows,
     reportRows,
   ] = await Promise.all([
@@ -264,13 +406,6 @@ export async function getBootstrapState(
     db.select().from(barberGallery),
     db.select().from(payments).orderBy(desc(payments.createdAt)),
     db.select().from(coupons),
-    activeUid
-      ? db
-          .select()
-          .from(rewards)
-          .where(eq(rewards.customerUid, activeUid))
-          .orderBy(desc(rewards.createdAt))
-      : Promise.resolve([]),
     db.select().from(profiles),
     db.select().from(reports).orderBy(desc(reports.createdAt)),
   ]);
@@ -340,6 +475,7 @@ export async function getBootstrapState(
     tagline: sh.tagline,
     about: sh.about,
     qrCodeSlug: sh.qrCodeSlug,
+    qrCodeUrl: `${runtimeCustomDomain}/booking.html?shop_id=${encodeURIComponent(sh.id)}`,
   }));
 
   // Role-based data privacy filtering for appointments
@@ -347,8 +483,17 @@ export async function getBootstrapState(
   if (isAdmin) {
     visibleAppointments = appointmentRows;
   } else if (isBarber || isShopOwner) {
+    const ownedShopIds = shopRows
+      .filter((s) => s.ownerUid === activeUid)
+      .map((s) => s.id);
+    const assignedBarberIds = barberRows
+      .filter((b) => b.userUid === activeUid || b.id === activeUid)
+      .map((b) => b.id);
     visibleAppointments = appointmentRows.filter(
-      (a) => a.barberId === activeUid || a.shopId === 'shop-1'
+      (a) =>
+        a.barberId === activeUid ||
+        assignedBarberIds.includes(a.barberId) ||
+        ownedShopIds.includes(a.shopId)
     );
   } else if (activeUid) {
     visibleAppointments = appointmentRows.filter(
@@ -375,7 +520,7 @@ export async function getBootstrapState(
         canSeeInternalNotes || a.customerUid === activeUid
           ? a.clientPhone
           : 'Protected',
-      clientTier: a.clientTier,
+      clientTier: 'Client',
       shopId: a.shopId,
       shopName: a.shopName,
       barberId: a.barberId,
@@ -388,6 +533,9 @@ export async function getBootstrapState(
       durationMin: a.durationMin,
       durationMins: a.durationMin,
       price: a.price,
+      servicePrice: a.servicePrice ?? (a.price - (a.platformFee ?? 10)),
+      platformFee: a.platformFee ?? 10,
+      totalPrice: a.totalPrice ?? a.price,
       status:
         a.status === 'confirmed'
           ? 'Confirmed'
@@ -461,9 +609,9 @@ export async function getBootstrapState(
     barberGallery: barberGalleryRows,
     payments: visiblePayments,
     coupons: couponRows,
-    rewards: rewardRows,
     profiles: visibleProfiles,
     reports: visibleReports,
+    platformSettings: await getPlatformSettings(),
   };
 }
 
@@ -472,7 +620,6 @@ export async function createBookingInDb(payload: {
   customerUid: string;
   clientName: string;
   clientPhone: string;
-  clientTier?: string;
   shopId: string;
   shopName: string;
   barberId: string;
@@ -497,10 +644,13 @@ export async function createBookingInDb(payload: {
   }
 
   // 1. Server-side validation of Shop
+  if (!payload.shopId) {
+    throw new Error('Please select a valid barber shop.');
+  }
   const [dbShop] = await db
     .select()
     .from(shops)
-    .where(eq(shops.id, payload.shopId || 'shop-1'));
+    .where(eq(shops.id, payload.shopId));
   if (!dbShop) {
     throw new Error('Barber shop not found.');
   }
@@ -532,22 +682,77 @@ export async function createBookingInDb(payload: {
   payload.durationMin = dbService.durationMin;
   payload.serviceName = dbService.name;
 
-  // 3. Server-side validation of Barber
-  if (!payload.barberId) {
-    throw new Error('Please select a barber.');
-  }
-  const [dbBarber] = await db
-    .select()
-    .from(barbers)
-    .where(eq(barbers.id, payload.barberId));
-  if (dbBarber) {
-    if (dbBarber.shopId && dbBarber.shopId !== payload.shopId) {
-      throw new Error('Barber does not belong to the selected shop.');
+  // 3. Server-side validation of Barber (Supports "ANY AVAILABLE BARBER")
+  const isAnyBarber =
+    !payload.barberId ||
+    payload.barberId === 'any' ||
+    payload.barberId === 'any_available';
+
+  if (isAnyBarber) {
+    const shopBarbers = await db
+      .select()
+      .from(barbers)
+      .where(
+        and(
+          eq(barbers.shopId, payload.shopId),
+          eq(barbers.active, true)
+        )
+      );
+
+    if (shopBarbers.length === 0) {
+      throw new Error('No active barbers found for this shop.');
     }
-    if (dbBarber.active === false || dbBarber.verificationStatus === 'suspended') {
-      throw new Error('Selected barber is currently unavailable.');
+
+    // Find first barber without time conflict
+    let assignedBarber: any = null;
+    const [nh, nm] = payload.time.split(':').map(Number);
+    const newStartMin = nh * 60 + nm;
+    const newEndMin = newStartMin + Number(payload.durationMin || 45);
+
+    for (const b of shopBarbers) {
+      if (b.verificationStatus === 'suspended') continue;
+      const existing = await db
+        .select()
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.barberId, b.id),
+            eq(appointments.date, payload.date)
+          )
+        );
+      const conflict = existing.find((c) => {
+        if (c.status === 'cancelled' || c.status === 'no_show') return false;
+        const [ch, cm] = (c.time || '00:00').split(':').map(Number);
+        const curStart = ch * 60 + cm;
+        const curEnd = curStart + Number(c.durationMin || 45);
+        return newStartMin < curEnd && newEndMin > curStart;
+      });
+      if (!conflict) {
+        assignedBarber = b;
+        break;
+      }
     }
-    payload.barberName = dbBarber.name;
+
+    if (!assignedBarber) {
+      throw new Error('All barbers are fully booked for this time slot. Please choose another time.');
+    }
+
+    payload.barberId = assignedBarber.id;
+    payload.barberName = assignedBarber.name;
+  } else {
+    const [dbBarber] = await db
+      .select()
+      .from(barbers)
+      .where(eq(barbers.id, payload.barberId));
+    if (dbBarber) {
+      if (dbBarber.shopId && dbBarber.shopId !== payload.shopId) {
+        throw new Error('Barber does not belong to the selected shop.');
+      }
+      if (dbBarber.active === false || dbBarber.verificationStatus === 'suspended') {
+        throw new Error('Selected barber is currently unavailable.');
+      }
+      payload.barberName = dbBarber.name;
+    }
   }
 
   // 4. Server-side Working Hours Validation
@@ -558,47 +763,28 @@ export async function createBookingInDb(payload: {
     payload.durationMin
   );
 
-  // 5. Server-side Coupon Calculation & Validation
-  const todayIST = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-  }).format(new Date());
+  // 5. Server-side Authoritative Pricing: Service Price + BarberLoo Platform Fee - Discount
+  const pricing = await calculateServerBookingPrice(
+    payload.serviceId,
+    payload.couponCode
+  );
 
-  if (payload.date < todayIST) {
-    throw new Error('Cannot book an appointment for a past date.');
-  }
+  const servicePrice = pricing.servicePrice;
+  const platformFee = pricing.platformFee;
+  const discountAmount = pricing.discountAmount;
+  const totalPrice = pricing.totalAmount;
 
-  if (payload.couponCode) {
+  if (payload.couponCode && discountAmount > 0) {
     const cleanCoupon = String(payload.couponCode).trim().toUpperCase();
-    const [couponRow] = await db
-      .select()
-      .from(coupons)
+    await db
+      .update(coupons)
+      .set({ usesCount: sql`${coupons.usesCount} + 1` })
       .where(eq(coupons.code, cleanCoupon));
-
-    if (
-      couponRow &&
-      couponRow.status === 'Active' &&
-      couponRow.expiresAt >= todayIST &&
-      couponRow.usesCount < couponRow.maxUses &&
-      calculatedPrice >= couponRow.minSpend
-    ) {
-      const discount = Math.round(
-        calculatedPrice * (couponRow.discountPercent / 100)
-      );
-      calculatedPrice = Math.max(0, calculatedPrice - discount);
-      // Increment usage count atomically
-      await db
-        .update(coupons)
-        .set({ usesCount: couponRow.usesCount + 1 })
-        .where(eq(coupons.id, couponRow.id));
-    } else {
-      payload.couponCode = ''; // Invalid or expired coupon discarded
-    }
   }
 
-  payload.price = calculatedPrice;
+  payload.price = totalPrice;
 
   // 6. Concurrency-safe Double-Booking Conflict Prevention
-  // Compute time intervals
   const [nh, nm] = payload.time.split(':').map(Number);
   const newStartMin = nh * 60 + nm;
   const newEndMin = newStartMin + Number(payload.durationMin || 45);
@@ -627,32 +813,23 @@ export async function createBookingInDb(payload: {
     );
   }
 
-  const isPaidOnline = Boolean(payload.razorpayPaymentId);
-  const paymentStatus = isPaidOnline ? 'paid' : 'pending';
-
-  let methodDisplay = 'Pay at Salon (INR)';
-  if (payload.paymentMethod === 'razorpay' || payload.paymentMethod === 'online') {
-    methodDisplay = payload.razorpayPaymentId
-      ? `Razorpay (${payload.razorpayPaymentId})`
-      : 'Razorpay Instant (UPI / Card)';
-  } else if (payload.paymentMethod === 'woocommerce') {
-    methodDisplay = payload.woocommerceOrderId
-      ? `WooCommerce Order #${payload.woocommerceOrderId}`
-      : 'WooCommerce Checkout';
+  // 7. ONLINE PAYMENT ENFORCEMENT (Zero Pay-at-Shop, Zero Cash)
+  const isPaidOnline = Boolean(payload.razorpayPaymentId || payload.razorpayOrderId);
+  if (!isPaidOnline) {
+    throw new Error('Online payment required. Please complete online payment through Razorpay to confirm your appointment.');
   }
+
+  const paymentStatus = 'paid';
+  const methodDisplay = payload.razorpayPaymentId
+    ? `Razorpay Online (${payload.razorpayPaymentId})`
+    : 'Razorpay Online (UPI / Cards / NetBanking)';
 
   let finalNotes = payload.notes || '';
-  if (Array.isArray(payload.addOns) && payload.addOns.length > 0) {
-    const addOnNames = payload.addOns
-      .map((a: any) => `${a.name} (+₹${a.price})`)
-      .join(', ');
-    finalNotes += ` | Add-ons: ${addOnNames}`;
-  }
   if (payload.razorpayPaymentId) {
     finalNotes += ` | Razorpay Txn: ${payload.razorpayPaymentId}`;
   }
-  if (payload.woocommerceOrderId) {
-    finalNotes += ` | WooCommerce Order: #${payload.woocommerceOrderId}`;
+  if (payload.razorpayOrderId) {
+    finalNotes += ` | Razorpay Order: ${payload.razorpayOrderId}`;
   }
 
   const [created] = await db
@@ -662,7 +839,6 @@ export async function createBookingInDb(payload: {
       customerUid: payload.customerUid,
       clientName: payload.clientName,
       clientPhone: payload.clientPhone,
-      clientTier: payload.clientTier || 'Member',
       shopId: payload.shopId,
       shopName: payload.shopName,
       barberId: payload.barberId,
@@ -672,17 +848,22 @@ export async function createBookingInDb(payload: {
       date: payload.date,
       time: payload.time,
       durationMin: payload.durationMin,
-      price: payload.price,
+      price: totalPrice,
+      servicePrice,
+      platformFee,
+      totalPrice,
       status: 'confirmed',
-      paymentMethod: payload.paymentMethod,
+      paymentMethod: 'online',
       paymentStatus,
+      razorpayOrderId: payload.razorpayOrderId || '',
+      razorpayPaymentId: payload.razorpayPaymentId || '',
       notes: finalNotes,
       internalBarberNotes: '',
       couponCode: payload.couponCode || '',
     })
     .returning();
 
-  // Idempotent payment recording
+  // Complete Payment Ledger Record
   await db.insert(payments).values({
     id: `pay-${Date.now()}`,
     appointmentId: payload.id,
@@ -690,9 +871,16 @@ export async function createBookingInDb(payload: {
     clientName: payload.clientName,
     shopId: payload.shopId,
     shopName: payload.shopName,
-    amount: payload.price,
-    platformFee: Math.max(25, Math.round(payload.price * 0.08)),
-    method: payload.paymentMethod,
+    amount: totalPrice,
+    serviceAmount: pricing.discountedServicePrice,
+    platformFee,
+    discountAmount,
+    totalAmount: totalPrice,
+    currency: 'INR',
+    provider: 'razorpay',
+    providerOrderId: payload.razorpayOrderId || '',
+    providerPaymentId: payload.razorpayPaymentId || '',
+    method: 'online',
     methodDisplay,
     status: paymentStatus,
     receiptNumber: payload.razorpayPaymentId
@@ -871,36 +1059,49 @@ export async function updateAppointmentInDb(
     updateFields.paymentStatus = 'paid';
   }
 
+  // Handle cancellation refund logic according to admin refund policy
+  if (updates.status === 'cancelled' && current.status !== 'cancelled') {
+    updateFields.paymentStatus = 'refunded';
+    const settings = await getPlatformSettings();
+    const policy = (settings as any).refundPolicy || 'service_only';
+    const serviceAmt = current.servicePrice || (current.price - (current.platformFee || 10));
+    const feeAmt = current.platformFee || 10;
+    const refundService = serviceAmt;
+    const refundFee = policy === 'full' ? feeAmt : 0;
+    const totalRefund = refundService + refundFee;
+
+    try {
+      await db.insert(payments).values({
+        id: `ref-${Date.now()}`,
+        appointmentId: current.id,
+        customerUid: current.customerUid,
+        clientName: current.clientName,
+        shopId: current.shopId,
+        shopName: current.shopName,
+        amount: -totalRefund,
+        serviceAmount: -refundService,
+        platformFee: -refundFee,
+        discountAmount: 0,
+        totalAmount: -totalRefund,
+        currency: 'INR',
+        provider: 'razorpay',
+        providerOrderId: current.razorpayOrderId || '',
+        providerPaymentId: current.razorpayPaymentId || '',
+        method: 'online',
+        methodDisplay: `Razorpay Online Refund (${policy === 'full' ? 'Full: Service + Platform Fee' : 'Service Price Only'})`,
+        status: 'refunded',
+        receiptNumber: `REF-${current.id.toUpperCase()}`,
+      });
+    } catch (e) {
+      console.warn('[Refund Ledger Warning]', e);
+    }
+  }
+
   const [updated] = await db
     .update(appointments)
     .set(updateFields)
     .where(eq(appointments.id, id))
     .returning();
-
-  // Award reward points upon completion
-  if (updates.status === 'completed' && current.status !== 'completed') {
-    const pointsEarned = Math.max(
-      50,
-      Math.round(Number(current.price || 500) * 0.15)
-    );
-    await db.insert(rewards).values({
-      id: `rew-${Date.now()}`,
-      customerUid: current.customerUid,
-      pointsDelta: pointsEarned,
-      reason: `Completed: ${current.serviceName} (${current.shopName})`,
-      type: 'earned',
-    });
-    const profs = await db
-      .select()
-      .from(profiles)
-      .where(eq(profiles.uid, current.customerUid));
-    if (profs.length > 0) {
-      await db
-        .update(profiles)
-        .set({ rewardBalance: (profs[0].rewardBalance || 0) + pointsEarned })
-        .where(eq(profiles.uid, current.customerUid));
-    }
-  }
 
   let notifTitle = '';
   let notifType = 'booking_update';

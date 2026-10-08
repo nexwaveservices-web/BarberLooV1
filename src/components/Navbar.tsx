@@ -9,6 +9,9 @@ import {
   User,
   Scissors,
   ShieldCheck,
+  Home,
+  Store,
+  Calendar,
 } from 'lucide-react';
 import {
   supabaseSignUpUser,
@@ -83,11 +86,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   const userRole = currentUserProfile?.role || null;
   const isOwnerAdmin = userRole === 'admin';
 
-  // Strictly role-gated navigation items
+  // Customer navigation strictly matching Section 7:
+  // Desktop: Home, Shops, Book Appointment, My Bookings, Profile
+  // Mobile: Home, Shops, Book, Bookings, Profile
   const navItems: { id: PageView; label: string }[] = [
     { id: 'home', label: tr('Home', 'होम') },
     { id: 'shop', label: tr('Shops', 'सैलून') },
     { id: 'booking', label: tr('Book Appointment', 'अपॉइंटमेंट बुक करें') },
+    { id: 'customer-dashboard', label: tr('My Bookings', 'मेरी बुकिंग') },
+    { id: 'profile', label: tr('Profile', 'प्रोफ़ाइल') },
   ];
 
   if (currentUserProfile) {
@@ -105,15 +112,16 @@ export const Navbar: React.FC<NavbarProps> = ({
         id: 'barber-dashboard',
         label: tr('Barber Console', 'बार्बर कंसोल'),
       });
-    } else {
-      navItems.push({
-        id: 'customer-dashboard',
-        label: tr('My Account', 'मेरा खाता'),
-      });
     }
   }
 
   const handleSelectPage = (page: PageView) => {
+    if ((page === 'customer-dashboard' || page === 'profile') && !currentUserProfile) {
+      setAuthMode('login');
+      setAuthModalOpen(true);
+      setMobileMenuOpen(false);
+      return;
+    }
     onNavigate(page);
     setMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -710,6 +718,89 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
       )}
+
+      {/* Mobile Persistent Bottom Navigation Bar (Section 7) */}
+      <nav
+        aria-label="Mobile Bottom Navigation"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#111113] border-t border-[#F1E194]/25 py-2 px-2 flex justify-around items-center shadow-2xl backdrop-blur-md"
+      >
+        <button
+          type="button"
+          onClick={() => handleSelectPage('home')}
+          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+            currentPage === 'home' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+          }`}
+        >
+          <Home className="w-5 h-5 mb-0.5" />
+          <span>{tr('Home', 'होम')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSelectPage('shop')}
+          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+            currentPage === 'shop' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+          }`}
+        >
+          <Store className="w-5 h-5 mb-0.5" />
+          <span>{tr('Shops', 'सैलून')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSelectPage('booking')}
+          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+            currentPage === 'booking' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+          }`}
+        >
+          <div className="w-8 h-8 rounded-full bg-[#5B0E14] text-[#F1E194] flex items-center justify-center -mt-3 mb-0.5 shadow-md border border-[#F1E194]/40">
+            <Scissors className="w-4 h-4" />
+          </div>
+          <span>{tr('Book', 'बुक')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (!currentUserProfile) {
+              setAuthMode('login');
+              setAuthModalOpen(true);
+            } else {
+              handleSelectPage('customer-dashboard');
+            }
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+            currentPage === 'customer-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+          }`}
+        >
+          <Calendar className="w-5 h-5 mb-0.5" />
+          <span>{tr('Bookings', 'बुकिंग')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (!currentUserProfile) {
+              setAuthMode('login');
+              setAuthModalOpen(true);
+            } else if (isOwnerAdmin) {
+              handleSelectPage('admin-dashboard');
+            } else if (userRole === 'barber' || userRole === 'shop_owner') {
+              handleSelectPage('barber-dashboard');
+            } else {
+              handleSelectPage('profile');
+            }
+          }}
+          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+            currentPage === 'profile' || currentPage === 'admin-dashboard' || currentPage === 'barber-dashboard'
+              ? 'text-[#F1E194]'
+              : 'text-[#8A8178] hover:text-[#FFF9E8]'
+          }`}
+        >
+          <User className="w-5 h-5 mb-0.5" />
+          <span>{tr('Profile', 'प्रोफ़ाइल')}</span>
+        </button>
+      </nav>
     </>
   );
 };

@@ -194,7 +194,6 @@ export async function supabaseSignUpUser(
         ? 'Verified Barber Partner'
         : 'Member',
     preferred_notes: '',
-    reward_balance: 0,
     status: 'active',
     assigned_shop_id: 'shop-1',
     assigned_barber_id: '',
@@ -351,7 +350,6 @@ create table if not exists public.profiles (
   role text not null default 'customer', -- customer | barber | shop_owner | admin
   tier text not null default 'Member',
   preferred_notes text not null default '',
-  reward_balance integer not null default 0,
   status text not null default 'active', -- active | suspended
   assigned_shop_id text default 'shop-1',
   assigned_barber_id text default 'brb-1',
@@ -563,17 +561,7 @@ create table if not exists public.coupons (
   created_at timestamptz default now()
 );
 
--- 15. REWARDS
-create table if not exists public.rewards (
-  id text primary key,
-  customer_uid text not null,
-  points_delta integer not null,
-  reason text not null,
-  type text not null default 'earned', -- earned | redeemed
-  created_at timestamptz default now()
-);
-
--- 16. REPORTS
+-- 15. REPORTS
 create table if not exists public.reports (
   id text primary key,
   reporter_uid text not null,
@@ -675,7 +663,7 @@ begin
   foreach t in array array[
     'profiles','shops','barbers','services','appointments',
     'reviews','favorites','notifications','working_hours','shop_gallery',
-    'barber_gallery','payments','coupons','rewards','reports'
+    'barber_gallery','payments','coupons','reports'
   ]
   loop
     execute format('drop policy if exists "Allow public access on %I" on public.%I', t, t);
@@ -712,7 +700,7 @@ begin
   foreach t in array array[
     'profiles','shops','barbers','services','appointments',
     'reviews','favorites','notifications','working_hours','shop_gallery',
-    'barber_gallery','payments','coupons','rewards','reports'
+    'barber_gallery','payments','coupons','reports'
   ]
   loop
     begin

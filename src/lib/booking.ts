@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { ASSETS, BarberItem, ServiceItem, ShopItem } from '../data/barberlooData';
+import { getShopQrDestinationUrl } from './domain';
 
 export interface BookingLoadResult {
   shop: ShopItem | null;
@@ -23,7 +24,7 @@ export function mapSupabaseServiceRecord(s: any): ServiceItem {
     name: s.name,
     category: s.category || 'Precision Haircuts',
     durationMins: dur,
-    price: Number(s.price ?? 500),
+    price: Number(s.price ?? 60),
     description: s.description || '',
     popular: s.popular ?? true,
     active: s.active !== false && s.is_active !== false,
@@ -40,12 +41,12 @@ export function mapSupabaseBarberRecord(b: any): BarberItem {
     name: b.name,
     role: b.role || 'Master Barber',
     rating: parseFloat(b.rating) || 5.0,
-    reviews: b.review_count ?? b.reviews ?? 0,
+    reviews: b.review_count ?? b.reviews ?? b.reviewCount ?? 0,
     experience: b.experience || `${expYears} yrs`,
     specialty: b.specialty || 'Haircut & Beard Styling',
-    shopName: b.shop_name ?? b.shopName ?? 'Partner Salon',
+    shopName: b.shop_name ?? b.shopName ?? 'Pawan Hair Saloon',
     nextAvailable: b.next_available ?? b.nextAvailable ?? 'Today · IST',
-    priceFrom: Number(b.price_from ?? b.priceFrom ?? 500),
+    priceFrom: Number(b.price_from ?? b.priceFrom ?? 60),
     avatar: b.avatar || b.image || ASSETS.barberMarcus,
     bio: b.bio || '',
     active: b.active !== false,
@@ -58,24 +59,22 @@ export function mapSupabaseShopRecord(sh: any): ShopItem {
     id: sh.id,
     ownerUid: sh.owner_uid ?? sh.ownerUid ?? '',
     name: sh.name,
-    district: sh.district || sh.city || 'Ludhiana',
+    district: sh.district || sh.city || 'Civil Lines, Ludhiana',
     address: sh.address || '',
     phone: sh.phone || '+91',
-    distance: sh.distance || '1.0 km away',
-    distanceMilesTenths: sh.distance_miles_tenths ?? sh.distanceMilesTenths ?? 10,
+    distance: sh.distance || '0.8 km away',
+    distanceMilesTenths: sh.distance_miles_tenths ?? sh.distanceMilesTenths ?? 8,
     rating: parseFloat(sh.rating) || 5.0,
     reviewCount: sh.review_count ?? sh.reviewCount ?? 0,
     isOpen: sh.is_open ?? sh.isOpen ?? true,
-    priceTier: sh.price_tier ?? sh.priceTier ?? '₹500 – ₹1,500',
-    minPrice: sh.min_price ?? sh.minPrice ?? 500,
+    priceTier: sh.price_tier ?? sh.priceTier ?? '₹60 – ₹120',
+    minPrice: sh.min_price ?? sh.minPrice ?? 60,
     verified: sh.verified ?? true,
     approvalStatus: sh.approval_status ?? sh.approvalStatus ?? 'approved',
     image: sh.image || ASSETS.royalInterior,
-    tagline: sh.tagline || 'Bespoke Grooming & Reserved Appointments',
+    tagline: sh.tagline || 'Luxury Grooming & Bespoke Appointments',
     about: sh.about || '',
-    qrCodeUrl: `${typeof window !== 'undefined' ? window.location.origin : ''}/booking.html?shop_id=${encodeURIComponent(
-      sh.id
-    )}`,
+    qrCodeUrl: getShopQrDestinationUrl(sh.id),
   };
 }
 
@@ -109,6 +108,9 @@ export async function loadShopForBooking(
 
   // 1. Load Shop record
   let rawShop: any = null;
+  let apiLoadedServices: any[] = [];
+  let apiLoadedBarbers: any[] = [];
+
   try {
     const { data, error } = await supa
       .from('shops')
@@ -128,6 +130,23 @@ export async function loadShopForBooking(
 
   if (!rawShop) {
     rawShop = fallbackShops.find((s) => s.id === cleanId || s.qrCodeSlug === cleanId);
+  }
+
+  // Resilient fallback to backend /api/shops/:id
+  if (!rawShop) {
+    try {
+      const res = await fetch(`/api/shops/${encodeURIComponent(cleanId)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.shop) {
+          rawShop = json.shop;
+          if (Array.isArray(json.services)) apiLoadedServices = json.services;
+          if (Array.isArray(json.barbers)) apiLoadedBarbers = json.barbers;
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   if (!rawShop) {
@@ -164,10 +183,31 @@ export async function loadShopForBooking(
     console.warn('[BarberLoo] Supabase services fetch exception:', err);
   }
 
+  if (rawServices.length === 0 && apiLoadedServices.length > 0) {
+    rawServices = apiLoadedServices;
+  }
+
   if (rawServices.length === 0) {
     rawServices = fallbackServices.filter(
       (s) => s.shopId === currentShop.id || s.shop_id === currentShop.id
     );
+  }
+
+  if (rawServices.length === 0) {
+    try {
+      const res = await fetch(`/api/shops/${encodeURIComponent(currentShop.id)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json.services) && json.services.length > 0) {
+          rawServices = json.services;
+        }
+        if (Array.isArray(json.barbers) && json.barbers.length > 0 && apiLoadedBarbers.length === 0) {
+          apiLoadedBarbers = json.barbers;
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   const shopServices = rawServices
@@ -190,6 +230,10 @@ export async function loadShopForBooking(
     }
   } catch (err) {
     console.warn('[BarberLoo] Supabase barbers fetch exception:', err);
+  }
+
+  if (rawBarbers.length === 0 && apiLoadedBarbers.length > 0) {
+    rawBarbers = apiLoadedBarbers;
   }
 
   if (rawBarbers.length === 0) {

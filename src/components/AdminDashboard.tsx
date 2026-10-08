@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   AppointmentItem,
 } from '../data/barberlooData';
@@ -14,6 +14,8 @@ import {
   Bell,
   Search,
   Check,
+  QrCode,
+  AlertTriangle,
 } from 'lucide-react';
 import { useLanguage, getCurrentISTDisplay, formatISTDateString } from '../lib/i18n';
 import { SUPABASE_URL, SUPABASE_SQL_SCHEMA } from '../lib/supabase';
@@ -23,6 +25,8 @@ import {
   calculatePlatformSlaSummary,
   SLA_TARGETS,
 } from '../lib/sla';
+import { getShopQrDestinationUrl, getProductionDomain } from '../lib/domain';
+import { SalonQrModal } from './SalonQrModal';
 
 interface AdminDashboardProps {
   appointments: AppointmentItem[];
@@ -33,6 +37,14 @@ interface AdminDashboardProps {
   payments?: any[];
   reviews?: any[];
   reports?: any[];
+  platformSettings?: any;
+  onUpdatePlatformFee?: (payload: {
+    feeType?: string;
+    feeAmount?: number;
+    minFee?: number;
+    refundPolicy?: string;
+    customDomain?: string;
+  }) => Promise<any>;
   onUpdateShop?: (id: string, updates: any) => Promise<void>;
   onUpdateBarber?: (id: string, updates: any) => Promise<void>;
   onUpdateProfile?: (uid: string, updates: any) => Promise<void>;
@@ -58,6 +70,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   payments = [],
   reviews = [],
   reports = [],
+  platformSettings,
+  onUpdatePlatformFee,
   onUpdateShop,
   onUpdateBarber,
   onUpdateProfile,
@@ -73,6 +87,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const [activeSection, setActiveSection] = useState<
     | 'overview'
+    | 'fee_settings'
     | 'sla'
     | 'users'
     | 'shops'
@@ -93,6 +108,76 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [wpPusherTestMsg, setWpPusherTestMsg] = useState('');
   const [githubTokenInput, setGithubTokenInput] = useState('');
   const [isPushingToGithub, setIsPushingToGithub] = useState(false);
+
+  // Platform Fee Configuration Form State
+  const [feeTypeInput, setFeeTypeInput] = useState<'fixed' | 'percentage'>(
+    platformSettings?.feeType || 'fixed'
+  );
+  const [feeAmountInput, setFeeAmountInput] = useState<number>(
+    platformSettings?.feeAmount ?? 10
+  );
+  const [minFeeInput, setMinFeeInput] = useState<number>(
+    platformSettings?.minFee ?? 5
+  );
+  const [refundPolicyInput, setRefundPolicyInput] = useState<'service_only' | 'full'>(
+    platformSettings?.refundPolicy || 'service_only'
+  );
+  const [customDomainInput, setCustomDomainInput] = useState<string>(
+    platformSettings?.customDomain || 'https://barberloo.in'
+  );
+  const [selectedAdminQrShop, setSelectedAdminQrShop] = useState<any | null>(null);
+  const [barberFilter, setBarberFilter] = useState<'all' | 'verified' | 'suspended' | 'pending'>('all');
+  const [isSavingFee, setIsSavingFee] = useState(false);
+  const [feeSaveFeedback, setFeeSaveFeedback] = useState('');
+
+  // Barber Suspension Workflow State
+  const [suspensionModalBarber, setSuspensionModalBarber] = useState<any | null>(null);
+  const [suspensionReason, setSuspensionReason] = useState('Misconduct / Policy Violation');
+  const [suspensionNotes, setSuspensionNotes] = useState('');
+  const [appointmentAction, setAppointmentAction] = useState<'flag' | 'reassign' | 'cancel'>('flag');
+  const [reassignBarberId, setReassignBarberId] = useState('');
+
+  // Sync inputs if platformSettings changes
+  useEffect(() => {
+    if (platformSettings) {
+      if (platformSettings.feeType) setFeeTypeInput(platformSettings.feeType);
+      if (typeof platformSettings.feeAmount === 'number')
+        setFeeAmountInput(platformSettings.feeAmount);
+      if (typeof platformSettings.minFee === 'number')
+        setMinFeeInput(platformSettings.minFee);
+      if (platformSettings.refundPolicy)
+        setRefundPolicyInput(platformSettings.refundPolicy);
+      if (platformSettings.customDomain)
+        setCustomDomainInput(platformSettings.customDomain);
+    }
+  }, [platformSettings]);
+
+  const handleSaveFeeSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onUpdatePlatformFee || isSavingFee) return;
+    setIsSavingFee(true);
+    setFeeSaveFeedback('');
+    try {
+      await onUpdatePlatformFee({
+        feeType: feeTypeInput,
+        feeAmount: Number(feeAmountInput),
+        minFee: Number(minFeeInput),
+        refundPolicy: refundPolicyInput,
+        customDomain: customDomainInput.trim() || 'https://barberloo.in',
+      });
+      setFeeSaveFeedback(
+        tr(
+          '✓ Platform fee & refund policy updated successfully!',
+          '✓ प्लेटफ़ॉर्म शुल्क व रिफ़ंड नीति सफलतापूर्वक सहेजी गई!'
+        )
+      );
+      setTimeout(() => setFeeSaveFeedback(''), 4000);
+    } catch (err: any) {
+      setFeeSaveFeedback(`⚠️ ${err?.message || 'Failed to update fee settings'}`);
+    } finally {
+      setIsSavingFee(false);
+    }
+  };
 
   const handleCopyText = (key: string, value: string) => {
     navigator.clipboard.writeText(value);
@@ -198,21 +283,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ? Math.round((cancelledBookingsCount / appointments.length) * 100)
       : 0;
 
-  const totalGmvINR = payments
-    .filter((p: any) => p.status !== 'refunded')
-    .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+  // Authoritative financial breakdown: Service amount + Platform fee = Customer payment
+  const activeConfirmedApts = appointments.filter(
+    (a: any) => String(a.status || a.rawStatus || '').toLowerCase() !== 'cancelled'
+  );
+
+  const totalServiceAmountINR = activeConfirmedApts.reduce(
+    (sum: number, a: any) =>
+      sum + (Number(a.servicePrice ?? (a.price - (a.platformFee ?? 10))) || 0),
+    0
+  );
+
+  const totalPlatformFeesINR = activeConfirmedApts.reduce(
+    (sum: number, a: any) => sum + (Number(a.platformFee ?? 10) || 0),
+    0
+  );
+
+  const totalCustomerPaymentINR = totalServiceAmountINR + totalPlatformFeesINR;
+
+  const totalRefundsINR = appointments
+    .filter(
+      (a: any) => String(a.status || a.rawStatus || '').toLowerCase() === 'cancelled'
+    )
+    .reduce((sum: number, a: any) => sum + (Number(a.price) || 0), 0);
+
+  const netBarberLooRevenueINR = totalPlatformFeesINR;
+
+  const totalGmvINR = totalCustomerPaymentINR;
 
   const popularServiceName = useMemo(() => {
-    if (appointments.length === 0) return 'Skin Fade & Beard Sculpt';
+    if (appointments.length === 0) return '-';
     const counts: Record<string, number> = {};
     for (const a of appointments) {
-      const s = a.serviceName || 'Haircut';
-      counts[s] = (counts[s] || 0) + 1;
+      if (!a.serviceName) continue;
+      counts[a.serviceName] = (counts[a.serviceName] || 0) + 1;
     }
-    return (
-      Object.entries(counts).sort((x, y) => y[1] - x[1])[0]?.[0] ||
-      'Skin Fade & Beard Sculpt'
-    );
+    const sorted = Object.entries(counts).sort((x, y) => y[1] - x[1]);
+    return sorted[0]?.[0] || '-';
   }, [appointments]);
 
   const filteredProfiles = useMemo(() => {
@@ -370,6 +477,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="flex flex-wrap gap-2">
           {[
             { id: 'overview', label: tr('Bookings & Analytics', 'बुकिंग और एनालिटिक्स') },
+            { id: 'fee_settings', label: tr('Platform Fee & Financials', 'प्लेटफ़ॉर्म शुल्क व राजस्व') },
             { id: 'sla', label: tr(`🛡️ SLA Governance (${platformSla.overallScorePercent}%)`, `🛡️ SLA प्रबंधन (${platformSla.overallScorePercent}%)`) },
             { id: 'users', label: tr('Users & Barber Verification', 'उपयोगकर्ता और बार्बर सत्यापन') },
             { id: 'shops', label: tr('Partner Salons', 'पार्टनर सैलून') },
@@ -398,6 +506,71 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* OVERVIEW: Real Appointments & Platform Analytics */}
         {activeSection === 'overview' && (
           <div className="space-y-6">
+            {/* ADMIN FINANCIAL REVENUE AUDIT */}
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-display text-2xl font-bold text-[#FFF9E8]">
+                    {tr('Financial Revenue Breakdown', 'वित्तीय राजस्व विवरण')}
+                  </h2>
+                  <p className="text-xs text-[#8A8178] mt-0.5">
+                    {tr(
+                      'Simple Price Flow: Barber Service Price + BarberLoo Platform Fee = Total Customer Payment',
+                      'विश्वसनीय धन प्रवाह: बार्बर सेवा मूल्य + प्लेटफ़ॉर्म शुल्क = कुल ग्राहक भुगतान'
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('fee_settings')}
+                  className="px-4 py-2 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold hover:bg-[#FFF9E8] transition-colors cursor-pointer"
+                >
+                  {tr('Configure Platform Fee & Rules →', 'शुल्क व नियम कॉन्फ़िगर करें →')}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-1">
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15">
+                  <span className="text-[11px] text-[#8A8178] block">{tr('Service Amount', 'सेवा राशि')}</span>
+                  <span className="font-mono-num font-bold text-2xl text-[#FFF9E8] mt-1 block">
+                    {formatINR(totalServiceAmountINR)}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] mt-1 block">{tr('Barbers & Salons Earned', 'सैलून पार्टनर्स की कमाई')}</span>
+                </div>
+
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15">
+                  <span className="text-[11px] text-[#8A8178] block">{tr('Platform Fees', 'प्लेटफ़ॉर्म शुल्क')}</span>
+                  <span className="font-mono-num font-bold text-2xl text-[#F1E194] mt-1 block">
+                    {formatINR(totalPlatformFeesINR)}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] mt-1 block">{tr('Collected by BarberLoo', 'BarberLoo द्वारा प्राप्त शुल्क')}</span>
+                </div>
+
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15">
+                  <span className="text-[11px] text-[#8A8178] block">{tr('Total Customer Payment', 'ग्राहक भुगतान')}</span>
+                  <span className="font-mono-num font-bold text-2xl text-[#FFF9E8] mt-1 block">
+                    {formatINR(totalCustomerPaymentINR)}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] mt-1 block">{tr('Total Online (Razorpay)', 'ऑनलाइन कुल प्राप्त राशि')}</span>
+                </div>
+
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15">
+                  <span className="text-[11px] text-[#8A8178] block">{tr('Refunds', 'रिफ़ंड')}</span>
+                  <span className="font-mono-num font-bold text-2xl text-amber-400 mt-1 block">
+                    {formatINR(totalRefundsINR)}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] mt-1 block">{tr('From cancelled bookings', 'रद्द बुकिंग हेतु रिफ़ंड')}</span>
+                </div>
+
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/30 shadow-md">
+                  <span className="text-[11px] text-[#F1E194] font-semibold block">{tr('Net BarberLoo Revenue', 'शुद्ध BarberLoo राजस्व')}</span>
+                  <span className="font-mono-num font-bold text-2xl text-emerald-400 mt-1 block">
+                    {formatINR(netBarberLooRevenueINR)}
+                  </span>
+                  <span className="text-[10px] text-emerald-400/80 mt-1 block">{tr('Net retained revenue', 'कंपनी का शुद्ध राजस्व')}</span>
+                </div>
+              </div>
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
                 <h2 className="font-display text-2xl font-bold">
@@ -531,7 +704,383 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* USERS & BARBER VERIFICATION */}
+        {/* PLATFORM FEE & FINANCIAL REVENUE GOVERNANCE */}
+        {activeSection === 'fee_settings' && (
+          <div className="space-y-6">
+            {/* Header & Financial Metrics */}
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
+              <div>
+                <h2 className="font-display text-2xl font-bold text-[#FFF9E8]">
+                  {tr('BarberLoo Revenue & Financial Ledger', 'BarberLoo राजस्व और वित्तीय खाता')}
+                </h2>
+                <p className="text-xs text-[#8A8178] mt-0.5">
+                  {tr(
+                    'Transparent Money Flow: BARBER SERVICE PRICE + BARBERLOO PLATFORM FEE = TOTAL CUSTOMER PAYMENT',
+                    'पारदर्शी धन प्रवाह: बार्बर सेवा मूल्य + BarberLoo प्लेटफ़ॉर्म शुल्क = कुल ग्राहक ऑनलाइन भुगतान'
+                  )}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-2">
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15">
+                  <span className="text-[11px] text-[#8A8178] block">
+                    {tr('1. Service Amount', '1. सेवा मूल्य (सैलून हिस्सा)')}
+                  </span>
+                  <span className="font-mono-num font-bold text-2xl text-[#FFF9E8] mt-1 block">
+                    {formatINR(totalServiceAmountINR)}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] mt-1 block">
+                    {tr('Total value for partner barbers', 'पार्टनर बार्बर्स का सकल हिस्सा')}
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15">
+                  <span className="text-[11px] text-[#8A8178] block">
+                    {tr('2. Platform Fees', '2. प्लेटफ़ॉर्म शुल्क')}
+                  </span>
+                  <span className="font-mono-num font-bold text-2xl text-[#F1E194] mt-1 block">
+                    {formatINR(totalPlatformFeesINR)}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] mt-1 block">
+                    {tr('BarberLoo platform fee revenue', 'BarberLoo कंपनी का शुल्क हिस्सा')}
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15">
+                  <span className="text-[11px] text-[#8A8178] block">
+                    {tr('3. Total Customer Payments', '3. कुल ग्राहक भुगतान')}
+                  </span>
+                  <span className="font-mono-num font-bold text-2xl text-[#FFF9E8] mt-1 block">
+                    {formatINR(totalCustomerPaymentINR)}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] mt-1 block">
+                    {tr('All processed online via Razorpay', 'रेज़रपे द्वारा कुल ऑनलाइन भुगतान')}
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/15">
+                  <span className="text-[11px] text-[#8A8178] block">
+                    {tr('4. Refunds Processed', '4. कुल रिफ़ंड')}
+                  </span>
+                  <span className="font-mono-num font-bold text-2xl text-amber-400 mt-1 block">
+                    {formatINR(totalRefundsINR)}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] mt-1 block">
+                    {tr('For cancelled reservations', 'रद्द नियुक्तियों का रिफ़ंड')}
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/30 shadow-md">
+                  <span className="text-[11px] text-[#F1E194] font-semibold block">
+                    {tr('5. Net BarberLoo Revenue', '5. शुद्ध BarberLoo राजस्व')}
+                  </span>
+                  <span className="font-mono-num font-bold text-2xl text-emerald-400 mt-1 block">
+                    {formatINR(netBarberLooRevenueINR)}
+                  </span>
+                  <span className="text-[10px] text-emerald-400/80 mt-1 block">
+                    {tr('Net retained platform fees', 'कंपनी का शुद्ध संधारित राजस्व')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Platform Fee & Refund Policy Configuration Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left 7 Cols: Configuration Form */}
+              <div className="lg:col-span-7 rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 sm:p-7 space-y-6">
+                <div>
+                  <h3 className="font-display text-xl font-bold text-[#FFF9E8]">
+                    {tr('Platform Fee Rules & Business Model', 'प्लेटफ़ॉर्म शुल्क नियम व व्यवसाय मॉडल')}
+                  </h3>
+                  <p className="text-xs text-[#8A8178] mt-1">
+                    {tr(
+                      'Admin controls the platform fee policy. Never hard-coded. Changes instantly apply to all server price calculations.',
+                      'प्लेटफ़ॉर्म शुल्क व्यवस्थापक द्वारा नियंत्रित है। सर्वर पर तत्काल प्रभावी होता है।'
+                    )}
+                  </p>
+                </div>
+
+                <form onSubmit={handleSaveFeeSettings} className="space-y-5">
+                  {/* Fee Type Selection */}
+                  <div>
+                    <label className="block text-xs font-semibold text-[#FFF9E8] mb-2">
+                      {tr('Fee Calculation Model', 'शुल्क गणना मॉडल')}
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setFeeTypeInput('fixed')}
+                        className={`p-3.5 rounded-[14px] border text-left cursor-pointer transition-all ${
+                          feeTypeInput === 'fixed'
+                            ? 'bg-[#111113] text-[#F1E194] border-[#F1E194]'
+                            : 'bg-[#241719] text-[#FFF9E8]/70 border-[#F1E194]/15 hover:border-[#F1E194]/30'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">{tr('Fixed Fee (₹)', 'निश्चित शुल्क (₹)')}</p>
+                        <p className="text-[10px] text-[#8A8178] mt-0.5">
+                          {tr('Flat INR per booking (e.g. ₹10)', 'प्रति बुकिंग निश्चित राशि (उदा. ₹10)')}
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFeeTypeInput('percentage')}
+                        className={`p-3.5 rounded-[14px] border text-left cursor-pointer transition-all ${
+                          feeTypeInput === 'percentage'
+                            ? 'bg-[#111113] text-[#F1E194] border-[#F1E194]'
+                            : 'bg-[#241719] text-[#FFF9E8]/70 border-[#F1E194]/15 hover:border-[#F1E194]/30'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">{tr('Percentage Fee (%)', 'प्रतिशत शुल्क (%)')}</p>
+                        <p className="text-[10px] text-[#8A8178] mt-0.5">
+                          {tr('Calculated on service price (e.g. 5%)', 'सेवा मूल्य पर प्रतिशत (उदा. 5%)')}
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Fee Amount Input */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#FFF9E8] mb-1.5">
+                        {feeTypeInput === 'fixed'
+                          ? tr('Fixed Fee Amount (₹ INR)', 'निश्चित शुल्क राशि (₹ INR)')
+                          : tr('Percentage Fee Rate (%)', 'प्रतिशत दर (%)')}
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="500"
+                        required
+                        value={feeAmountInput}
+                        onChange={(e) => setFeeAmountInput(Number(e.target.value) || 1)}
+                        className="w-full px-4 py-3 rounded-[14px] bg-[#111113] border border-[#F1E194]/20 text-sm text-[#FFF9E8] font-mono-num font-bold"
+                      />
+                      <span className="text-[10px] text-[#8A8178] mt-1 block">
+                        {feeTypeInput === 'fixed'
+                          ? tr('Example: ₹10 added to every customer payment', 'उदा. प्रत्येक भुगतान में ₹10 जोड़ा जाएगा')
+                          : tr('Example: 5% of service price added to payment', 'उदा. सेवा मूल्य का 5% जोड़ा जाएगा')}
+                      </span>
+                    </div>
+
+                    {feeTypeInput === 'percentage' && (
+                      <div>
+                        <label className="block text-xs font-semibold text-[#FFF9E8] mb-1.5">
+                          {tr('Minimum Fee Floor (₹ INR)', 'न्यूनतम शुल्क सीमा (₹ INR)')}
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          required
+                          value={minFeeInput}
+                          onChange={(e) => setMinFeeInput(Number(e.target.value) || 1)}
+                          className="w-full px-4 py-3 rounded-[14px] bg-[#111113] border border-[#F1E194]/20 text-sm text-[#FFF9E8] font-mono-num font-bold"
+                        />
+                        <span className="text-[10px] text-[#8A8178] mt-1 block">
+                          {tr('Ensures platform fee never falls below this floor', 'न्यूनतम शुल्क इससे कम नहीं होगा')}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Refund Policy Configuration */}
+                  <div className="pt-2 border-t border-[#F1E194]/15">
+                    <label className="block text-xs font-semibold text-[#FFF9E8] mb-1.5">
+                      {tr('Cancellation Refund Policy', 'रद्दीकरण रिफ़ंड नीति')}
+                    </label>
+                    <p className="text-[11px] text-[#8A8178] mb-3">
+                      {tr(
+                        'Do not automatically promise full platform fee back on every cancellation. Configure policy below:',
+                        'रद्दीकरण पर नीति चुनें:'
+                      )}
+                    </p>
+                    <div className="space-y-2.5">
+                      <label className="flex items-start gap-3 p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/15 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="refundPolicy"
+                          value="service_only"
+                          checked={refundPolicyInput === 'service_only'}
+                          onChange={() => setRefundPolicyInput('service_only')}
+                          className="mt-0.5 accent-[#F1E194]"
+                        />
+                        <div>
+                          <p className="text-xs font-semibold text-[#FFF9E8]">
+                            {tr('Service Price Only (Recommended)', 'केवल सेवा मूल्य रिफ़ंड (अनुशंसित)')}
+                          </p>
+                          <p className="text-[11px] text-[#8A8178] mt-0.5">
+                            {tr(
+                              'Customer receives 100% of the barber service price. BarberLoo platform fee is retained to cover payment gateway fees and operations.',
+                              'ग्राहक को सेवा शुल्क का 100% वापस मिलेगा; गेटवे और संचालन लागत हेतु प्लेटफ़ॉर्म शुल्क रखा जाएगा।'
+                            )}
+                          </p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-3 p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/15 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="refundPolicy"
+                          value="full"
+                          checked={refundPolicyInput === 'full'}
+                          onChange={() => setRefundPolicyInput('full')}
+                          className="mt-0.5 accent-[#F1E194]"
+                        />
+                        <div>
+                          <p className="text-xs font-semibold text-[#FFF9E8]">
+                            {tr('Full Refund (Service Price + Platform Fee)', 'पूर्ण रिफ़ंड (सेवा मूल्य + प्लेटफ़ॉर्म शुल्क)')}
+                          </p>
+                          <p className="text-[11px] text-[#8A8178] mt-0.5">
+                            {tr(
+                              'Customer receives 100% of both the barber service price and the BarberLoo platform fee upon cancellation.',
+                              'रद्द करने पर ग्राहक को संपूर्ण राशि (सेवा + शुल्क) वापस मिलेगी।'
+                            )}
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Canonical Production Domain for Salon QR Passes & Deep Linking */}
+                  <div className="pt-2 border-t border-[#F1E194]/15">
+                    <label className="block text-xs font-semibold text-[#FFF9E8] mb-1.5">
+                      {tr('Official Production Domain (for Salon QR Passes)', 'आधिकारिक डोमेन (सैलून QR पास हेतु)')}
+                    </label>
+                    <input
+                      type="url"
+                      required
+                      value={customDomainInput}
+                      onChange={(e) => setCustomDomainInput(e.target.value)}
+                      placeholder="https://barberloo.in"
+                      className="w-full px-4 py-3 rounded-[14px] bg-[#111113] border border-[#F1E194]/20 text-sm text-[#FFF9E8] font-mono-num font-semibold"
+                    />
+                    <span className="text-[10px] text-[#8A8178] mt-1 block">
+                      {tr(
+                        'All Instant Salon QR codes and customer booking links will use this domain (barberloo.in) instead of sandbox preview URLs.',
+                        'सभी सैलून QR कोड व बुकिंग लिंक सैंडबॉक्स URL के बजाय इस डोमेन का उपयोग करेंगे।'
+                      )}
+                    </span>
+                  </div>
+
+                  {feeSaveFeedback && (
+                    <div className="p-3 rounded-[12px] bg-emerald-950/80 border border-emerald-500/30 text-xs text-emerald-200">
+                      {feeSaveFeedback}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={isSavingFee}
+                    className="w-full py-3.5 px-6 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-bold tracking-[0.14em] uppercase hover:bg-[#FFF9E8] transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+                  >
+                    <span>
+                      {isSavingFee
+                        ? tr('SAVING RULES...', 'सहेजा जा रहा है...')
+                        : tr('SAVE PLATFORM FEE & REFUND RULES', 'प्लेटफ़ॉर्म शुल्क व रिफ़ंड नियम सहेजें')}
+                    </span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Right 5 Cols: Live Price Simulation & Rules */}
+              <div className="lg:col-span-5 space-y-5">
+                {/* Live Simulation Card */}
+                <div className="rounded-[24px] bg-[#111113] border border-[#F1E194]/25 p-6 space-y-4 shadow-xl">
+                  <div className="flex items-center justify-between pb-3 border-b border-[#F1E194]/15">
+                    <h3 className="font-display text-lg font-bold text-[#FFF9E8]">
+                      {tr('Live Price Engine Simulation', 'लाइव मूल्य गणना सिमुलेशन')}
+                    </h3>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#241719] text-[#F1E194] border border-[#F1E194]/25">
+                      INR (₹)
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-[#8A8178]">
+                    {tr(
+                      'Here is how appointments are calculated under your active rules:',
+                      'सक्रिय नियमों के तहत गणना:'
+                    )}
+                  </p>
+
+                  {/* Simulation Example 1 */}
+                  {(() => {
+                    const svc1 = 150;
+                    const fee1 =
+                      feeTypeInput === 'percentage'
+                        ? Math.max(minFeeInput, Math.round(svc1 * (feeAmountInput / 100)))
+                        : feeAmountInput;
+                    const tot1 = svc1 + fee1;
+                    return (
+                      <div className="p-4 rounded-[16px] bg-[#241719] border border-[#F1E194]/15 space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-semibold text-[#FFF9E8]">
+                            Haircut ({tr('Example 1', 'उदाहरण 1')})
+                          </span>
+                          <span className="font-mono-num text-[#8A8178]">Base: {formatINR(svc1)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-[#8A8178]">
+                          <span>Service price</span>
+                          <span className="font-mono-num font-semibold text-[#FFF9E8]">{formatINR(svc1)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-[#8A8178]">
+                          <span>BarberLoo platform fee</span>
+                          <span className="font-mono-num font-semibold text-[#F1E194]">{formatINR(fee1)}</span>
+                        </div>
+                        <div className="pt-2 border-t border-[#F1E194]/15 flex justify-between items-baseline">
+                          <span className="text-xs font-bold text-[#F1E194]">Total customer payment</span>
+                          <span className="font-mono-num text-xl font-bold text-[#F1E194]">{formatINR(tot1)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Simulation Example 2 */}
+                  {(() => {
+                    const svc2 = 300;
+                    const fee2 =
+                      feeTypeInput === 'percentage'
+                        ? Math.max(minFeeInput, Math.round(svc2 * (feeAmountInput / 100)))
+                        : feeAmountInput;
+                    const tot2 = svc2 + fee2;
+                    return (
+                      <div className="p-4 rounded-[16px] bg-[#241719] border border-[#F1E194]/15 space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-semibold text-[#FFF9E8]">
+                            Luxury Grooming ({tr('Example 2', 'उदाहरण 2')})
+                          </span>
+                          <span className="font-mono-num text-[#8A8178]">Base: {formatINR(svc2)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-[#8A8178]">
+                          <span>Service price</span>
+                          <span className="font-mono-num font-semibold text-[#FFF9E8]">{formatINR(svc2)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-[#8A8178]">
+                          <span>BarberLoo platform fee</span>
+                          <span className="font-mono-num font-semibold text-[#F1E194]">{formatINR(fee2)}</span>
+                        </div>
+                        <div className="pt-2 border-t border-[#F1E194]/15 flex justify-between items-baseline">
+                          <span className="text-xs font-bold text-[#F1E194]">Total customer payment</span>
+                          <span className="font-mono-num text-xl font-bold text-[#F1E194]">{formatINR(tot2)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/15 text-[11px] text-[#8A8178] space-y-1">
+                    <p className="text-[#F1E194] font-semibold">
+                      🛡️ {tr('Strict Architecture Rules Enforced:', 'सख्त वास्तुकला नियम लागू:')}
+                    </p>
+                    <p>• The barber/shop controls the service price.</p>
+                    <p>• BarberLoo controls the platform fee.</p>
+                    <p>• The server calculates: total = trusted_service_price + trusted_platform_fee.</p>
+                    <p>• Razorpay order amount strictly equals total.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {activeSection === 'users' && (
           <div className="space-y-6">
             <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
@@ -633,77 +1182,211 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               )}
             </div>
 
-            {/* BARBER VERIFICATION */}
-            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
-              <h2 className="font-display text-2xl font-bold">
-                {tr('Barber Profile Verification', 'बार्बर प्रोफ़ाइल सत्यापन')} ({barbers.length})
-              </h2>
+            {/* BARBER VERIFICATION & SUSPENSION GOVERNANCE */}
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-2xl font-bold flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-[#F1E194]" />
+                    <span>{tr('Barber Governance & Suspension Control', 'बार्बर सत्यापन व निलंबन प्रबंधन')}</span>
+                    <span className="text-sm font-mono-num font-normal text-[#8A8178]">({barbers.length})</span>
+                  </h2>
+                  <p className="text-xs text-[#8A8178] mt-1 max-w-2xl leading-relaxed">
+                    {tr(
+                      'When a barber is suspended: Their chair is instantly hidden from customer discovery, public booking is blocked, and their console enters restricted appeal mode.',
+                      'निलंबित करने पर: बार्बर का प्रोफ़ाइल तुरंत सार्वजनिक खोज व बुकिंग से हट जाता है और बुकिंग ब्लॉक हो जाती है।'
+                    )}
+                  </p>
+                </div>
+
+                {/* Filter Tabs */}
+                <div className="flex flex-wrap gap-1.5 p-1 rounded-[14px] bg-[#111113] border border-[#F1E194]/15 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setBarberFilter('all')}
+                    className={`px-3 py-1.5 rounded-[10px] font-semibold transition-colors cursor-pointer ${
+                      barberFilter === 'all'
+                        ? 'bg-[#F1E194] text-[#111113]'
+                        : 'text-[#8A8178] hover:text-[#FFF9E8]'
+                    }`}
+                  >
+                    {tr('All', 'सभी')} ({barbers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBarberFilter('verified')}
+                    className={`px-3 py-1.5 rounded-[10px] font-semibold transition-colors cursor-pointer ${
+                      barberFilter === 'verified'
+                        ? 'bg-emerald-500 text-[#111113]'
+                        : 'text-emerald-400/80 hover:text-emerald-300'
+                    }`}
+                  >
+                    {tr('Active', 'सक्रिय')} ({barbers.filter((b: any) => b.verificationStatus === 'verified' && b.active !== false).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBarberFilter('suspended')}
+                    className={`px-3 py-1.5 rounded-[10px] font-semibold transition-colors cursor-pointer ${
+                      barberFilter === 'suspended'
+                        ? 'bg-rose-500 text-[#FFF9E8]'
+                        : 'text-rose-400/80 hover:text-rose-300'
+                    }`}
+                  >
+                    {tr('Suspended', 'निलंबित')} ({barbers.filter((b: any) => b.verificationStatus === 'suspended' || b.active === false).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBarberFilter('pending')}
+                    className={`px-3 py-1.5 rounded-[10px] font-semibold transition-colors cursor-pointer ${
+                      barberFilter === 'pending'
+                        ? 'bg-amber-400 text-[#111113]'
+                        : 'text-amber-400/80 hover:text-amber-300'
+                    }`}
+                  >
+                    {tr('Pending', 'प्रतीक्षारत')} ({barbers.filter((b: any) => b.verificationStatus === 'pending').length})
+                  </button>
+                </div>
+              </div>
+
               {barbers.length === 0 ? (
                 <p className="text-xs text-[#8A8178] py-4">
                   {tr('No barber profiles registered yet.', 'अभी तक कोई बार्बर प्रोफ़ाइल पंजीकृत नहीं है।')}
                 </p>
               ) : (
-                <div className="space-y-2.5">
-                  {barbers.map((b: any) => (
-                    <div
-                      key={b.id}
-                      className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/12 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs"
-                    >
-                      <div>
-                        <p className="font-semibold text-sm text-[#FFF9E8]">
-                          {b.name} ·{' '}
-                          <span className="text-[#F1E194]">{b.shopName}</span>
-                        </p>
-                        <p className="text-[#8A8178]">
-                          {b.role} · {b.specialty} · Status:{' '}
-                          <span className="uppercase text-[#F1E194]">
-                            {b.verificationStatus || 'verified'}
-                          </span>
-                        </p>
-                      </div>
-                      {onUpdateBarber && (
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onUpdateBarber(b.id, {
-                                verified: true,
-                                verificationStatus: 'verified',
-                                active: true,
-                              })
-                            }
-                            className="px-3 py-1.5 rounded-[10px] bg-emerald-950 text-emerald-300 font-semibold cursor-pointer"
-                          >
-                            {tr('Verify Barber', 'सत्यापित करें')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onUpdateBarber(b.id, {
-                                verified: false,
-                                verificationStatus: 'rejected',
-                              })
-                            }
-                            className="px-3 py-1.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/20 text-[#8A8178] font-semibold cursor-pointer"
-                          >
-                            {tr('Reject', 'अस्वीकार करें')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onUpdateBarber(b.id, {
-                                active: false,
-                                verificationStatus: 'suspended',
-                              })
-                            }
-                            className="px-3 py-1.5 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] font-semibold cursor-pointer"
-                          >
-                            {tr('Suspend', 'निलंबित करें')}
-                          </button>
+                <div className="space-y-3">
+                  {barbers
+                    .filter((b: any) => {
+                      if (barberFilter === 'verified') return b.verificationStatus === 'verified' && b.active !== false;
+                      if (barberFilter === 'suspended') return b.verificationStatus === 'suspended' || b.active === false;
+                      if (barberFilter === 'pending') return b.verificationStatus === 'pending';
+                      return true;
+                    })
+                    .map((b: any) => {
+                      const isSuspended = b.verificationStatus === 'suspended' || b.active === false;
+                      const isVerified = b.verificationStatus === 'verified' && b.active !== false;
+                      const isPending = b.verificationStatus === 'pending';
+
+                      return (
+                        <div
+                          key={b.id}
+                          className={`p-4 rounded-[18px] border transition-all ${
+                            isSuspended
+                              ? 'bg-rose-950/20 border-rose-500/30'
+                              : 'bg-[#111113] border-[#F1E194]/12'
+                          } flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-semibold text-sm text-[#FFF9E8]">
+                                {b.name} ·{' '}
+                                <span className="text-[#F1E194]">{b.shopName}</span>
+                              </p>
+                              {isSuspended && (
+                                <span className="px-2.5 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-500/40 text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3 text-rose-400" />
+                                  <span>{tr('CHAIR SUSPENDED', 'कुर्सी निलंबित')}</span>
+                                </span>
+                              )}
+                              {isVerified && (
+                                <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1">
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                  <span>{tr('VERIFIED & ACTIVE', 'सत्यापित व सक्रिय')}</span>
+                                </span>
+                              )}
+                              {isPending && (
+                                <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-500/30 text-[10px] font-bold uppercase tracking-wider">
+                                  {tr('PENDING REVIEW', 'समीक्षाधीन')}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[#8A8178]">
+                              {b.role} · {b.specialty} · Experience: {b.experience || `${b.experienceYears || 5} yrs`}
+                            </p>
+                            {isSuspended && (
+                              <p className="text-[11px] text-rose-400/90 font-medium">
+                                ⚠ {tr(
+                                  'This barber chair is currently blocked from online bookings and hidden from directory.',
+                                  'यह बार्बर कुर्सी वर्तमान में ऑनलाइन बुकिंग से अवरुद्ध है और डायरेक्टरी से छिपी हुई है।'
+                                )}
+                              </p>
+                            )}
+                          </div>
+
+                          {onUpdateBarber && (
+                            <div className="flex flex-wrap gap-2 items-center">
+                              {isSuspended ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onUpdateBarber(b.id, {
+                                      verified: true,
+                                      verificationStatus: 'verified',
+                                      active: true,
+                                    })
+                                  }
+                                  className="px-3.5 py-2 rounded-[12px] bg-emerald-700 hover:bg-emerald-600 text-white font-semibold cursor-pointer inline-flex items-center gap-1.5 transition-colors shadow-sm"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>{tr('Reinstate Chair', 'निलंबन हटाएं व सक्रिय करें')}</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSuspensionModalBarber(b);
+                                    setSuspensionReason('Misconduct / Policy Violation');
+                                    setSuspensionNotes('');
+                                    setAppointmentAction('flag');
+                                    const otherBarbers = barbers.filter(
+                                      (other: any) =>
+                                        other.id !== b.id &&
+                                        other.shopId === b.shopId &&
+                                        other.active !== false &&
+                                        other.verificationStatus !== 'suspended'
+                                    );
+                                    setReassignBarberId(otherBarbers[0]?.id || '');
+                                  }}
+                                  className="px-3.5 py-2 rounded-[12px] bg-[#5B0E14] hover:bg-[#73121a] text-[#FFF9E8] font-semibold cursor-pointer inline-flex items-center gap-1.5 transition-colors shadow-sm"
+                                >
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-300" />
+                                  <span>{tr('Suspend Chair', 'कुर्सी निलंबित करें')}</span>
+                                </button>
+                              )}
+
+                              {!isVerified && !isSuspended && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onUpdateBarber(b.id, {
+                                      verified: true,
+                                      verificationStatus: 'verified',
+                                      active: true,
+                                    })
+                                  }
+                                  className="px-3 py-1.5 rounded-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/25 font-semibold cursor-pointer"
+                                >
+                                  {tr('Verify Barber', 'सत्यापित करें')}
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateBarber(b.id, {
+                                    verified: false,
+                                    verificationStatus: 'rejected',
+                                    active: false,
+                                  })
+                                }
+                                className="px-3 py-1.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/20 text-[#8A8178] font-semibold cursor-pointer hover:text-[#FFF9E8]"
+                              >
+                                {tr('Reject', 'अस्वीकार')}
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      );
+                    })}
                 </div>
               )}
             </div>
@@ -738,9 +1421,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <p className="text-[#8A8178]">
                         {s.address} · {s.district} · {s.phone}
                       </p>
+                      <p className="text-[11px] font-mono-num text-[#F1E194]/80 mt-1 break-all">
+                        QR Destination: {getShopQrDestinationUrl(s.id, { domain: getProductionDomain(platformSettings) })}
+                      </p>
                     </div>
                     {onUpdateShop && (
                       <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAdminQrShop(s)}
+                          className="px-3 py-1.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/25 text-[#F1E194] font-semibold cursor-pointer inline-flex items-center gap-1.5 hover:bg-[#322023]"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>{tr('Salon QR Pass', 'QR पास')}</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() =>
@@ -1110,39 +1804,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   {reports.map((rep: any) => (
                     <div
                       key={rep.id}
-                      className="p-4 rounded-[14px] bg-[#111113] border border-[#F1E194]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                      className={`p-4 rounded-[14px] border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                        rep.targetType === 'barber_appeal'
+                          ? 'bg-amber-950/20 border-amber-500/40'
+                          : 'bg-[#111113] border-[#F1E194]/15'
+                      }`}
                     >
-                      <div>
-                        <p className="font-semibold text-[#FFF9E8]">
-                          {rep.reason} ({rep.targetLabel}) ·{' '}
-                          <span className="text-[#F1E194] uppercase">
-                            [{rep.status}]
-                          </span>
-                        </p>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {rep.targetType === 'barber_appeal' && (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-900 text-amber-200 border border-amber-500/40 text-[10px] font-bold uppercase tracking-wider">
+                              {tr('BARBER APPEAL', 'बार्बर अपील')}
+                            </span>
+                          )}
+                          <p className="font-semibold text-[#FFF9E8]">
+                            {rep.reason} ({rep.targetLabel}) ·{' '}
+                            <span className="text-[#F1E194] uppercase">
+                              [{rep.status}]
+                            </span>
+                          </p>
+                        </div>
                         <p className="text-[#8A8178]">{rep.details}</p>
                       </div>
-                      {onUpdateReport && (
-                        <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {rep.targetType === 'barber_appeal' && onUpdateBarber && rep.status !== 'resolved' && (
                           <button
                             type="button"
-                            onClick={() =>
-                              onUpdateReport(rep.id, { status: 'investigating' })
-                            }
-                            className="px-3 py-1.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/25 text-[#F1E194] font-semibold cursor-pointer"
+                            onClick={async () => {
+                              await onUpdateBarber(rep.targetId, {
+                                verified: true,
+                                verificationStatus: 'verified',
+                                active: true,
+                              });
+                              if (onUpdateReport) {
+                                await onUpdateReport(rep.id, {
+                                  status: 'resolved',
+                                  resolutionNote: 'Reinstated by Admin via Appeal Review',
+                                });
+                              }
+                            }}
+                            className="px-3 py-1.5 rounded-[10px] bg-emerald-700 hover:bg-emerald-600 text-white font-semibold cursor-pointer shadow-sm flex items-center gap-1"
                           >
-                            {tr('Investigate', 'जांच करें')}
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{tr('Reinstate Chair', 'कुर्सी बहाल करें')}</span>
                           </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onUpdateReport(rep.id, { status: 'resolved' })
-                            }
-                            className="px-3 py-1.5 rounded-[10px] bg-[#F1E194] text-[#111113] font-semibold cursor-pointer"
-                          >
-                            {tr('Resolve', 'समाधान करें')}
-                          </button>
-                        </div>
-                      )}
+                        )}
+                        {onUpdateReport && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onUpdateReport(rep.id, { status: 'investigating' })
+                              }
+                              className="px-3 py-1.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/25 text-[#F1E194] font-semibold cursor-pointer"
+                            >
+                              {tr('Investigate', 'जांच करें')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onUpdateReport(rep.id, { status: 'resolved' })
+                              }
+                              className="px-3 py-1.5 rounded-[10px] bg-[#F1E194] text-[#111113] font-semibold cursor-pointer"
+                            >
+                              {tr('Resolve', 'समाधान करें')}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1543,7 +2272,7 @@ git push -u origin main`}
                     </span>
                   </div>
                   <p className="text-[11px] text-[#8A8178]">
-                    Auto-compensation: +{SLA_TARGETS.BREACH_COMPENSATION_POINTS} PTS
+                    Guarantee policy: Service guarantee voucher on breach
                   </p>
                 </div>
               </div>
@@ -1627,19 +2356,18 @@ git push -u origin main`}
                                     appointmentId: apt.id,
                                     serviceName: apt.serviceName,
                                     barberName: apt.barberName,
-                                    points: 100,
                                   });
                                   setSlaActionToast(
                                     tr(
-                                      `✓ Granted +100 PTS SLA Guarantee Credit to ${apt.clientName}!`,
-                                      `✓ ${apt.clientName} को +100 PTS SLA क्रेडिट प्रदान किया गया!`
+                                      `✓ Granted SLA Guarantee Compensation to ${apt.clientName}!`,
+                                      `✓ ${apt.clientName} को SLA सेवा गारंटी वाउचर प्रदान किया गया!`
                                     )
                                   );
                                   setTimeout(() => setSlaActionToast(''), 3500);
                                 }}
                                 className="px-3 py-1.5 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] font-semibold cursor-pointer"
                               >
-                                {tr('Grant +100 PTS SLA Credit', '+100 PTS SLA क्रेडिट दें')}
+                                {tr('Grant SLA Guarantee Voucher', 'SLA गारंटी वाउचर दें')}
                               </button>
                             )}
                           </div>
@@ -1653,6 +2381,210 @@ git push -u origin main`}
           </div>
         )}
       </div>
+
+      {/* Admin Barber Suspension Governance Modal */}
+      {suspensionModalBarber && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-[24px] bg-[#1a1214] border-2 border-rose-500/40 p-6 sm:p-8 space-y-6 shadow-2xl text-[#FFF9E8]">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-[14px] bg-rose-950/80 border border-rose-500/50 text-rose-300 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-display text-xl font-bold text-[#FFF9E8]">
+                    {tr('Suspend Barber Chair', 'बार्बर कुर्सी निलंबित करें')}
+                  </h3>
+                  <p className="text-xs text-rose-300">
+                    {suspensionModalBarber.name} · {suspensionModalBarber.shopName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSuspensionModalBarber(null)}
+                className="w-8 h-8 rounded-full bg-[#111113] border border-[#F1E194]/20 flex items-center justify-center text-[#8A8178] hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Affected upcoming appointments notice */}
+            {(() => {
+              const affectedCount = appointments.filter(
+                (a: any) =>
+                  a.barberId === suspensionModalBarber.id &&
+                  (a.status === 'confirmed' ||
+                    a.status === 'pending' ||
+                    a.status === 'Confirmed' ||
+                    a.status === 'Pending')
+              ).length;
+              return (
+                <div className="p-3.5 rounded-[14px] bg-rose-950/40 border border-rose-500/30 text-xs text-rose-200 flex items-center justify-between">
+                  <span>{tr('Upcoming appointments currently scheduled:', 'मौजूदा आगामी बुकिंग:')}</span>
+                  <span className="font-bold font-mono-num text-rose-300 px-2 py-0.5 rounded bg-rose-900/60 border border-rose-400/40">
+                    {affectedCount} {tr('booking(s)', 'बुकिंग')}
+                  </span>
+                </div>
+              );
+            })()}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!onUpdateBarber) return;
+                const reassignBarber = barbers.find((b: any) => b.id === reassignBarberId);
+                onUpdateBarber(suspensionModalBarber.id, {
+                  active: false,
+                  verificationStatus: 'suspended',
+                  suspensionReason,
+                  suspensionNotes,
+                  appointmentAction,
+                  reassignBarberId: appointmentAction === 'reassign' ? reassignBarberId : undefined,
+                  reassignBarberName: appointmentAction === 'reassign' ? reassignBarber?.name : undefined,
+                });
+                setSuspensionModalBarber(null);
+              }}
+              className="space-y-4 text-xs"
+            >
+              {/* Reason selection */}
+              <div className="space-y-1.5">
+                <label className="font-semibold text-[#F1E194]">
+                  {tr('Suspension Reason', 'निलंबन का कारण')}
+                </label>
+                <select
+                  value={suspensionReason}
+                  onChange={(e) => setSuspensionReason(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                >
+                  <option value="Misconduct / Policy Violation">{tr('Misconduct / Policy Violation', 'आचार संहिता या नीति उल्लंघन')}</option>
+                  <option value="Multiple Customer Complaints">{tr('Multiple Customer Complaints', 'ग्राहकों की एकाधिक शिकायतें')}</option>
+                  <option value="Unannounced Absenteeism / Inactive">{tr('Unannounced Absenteeism / Inactive', 'बिना सूचना अनुपस्थिति / निष्क्रिय')}</option>
+                  <option value="Quality Audit / Investigation">{tr('Quality Audit / Investigation', 'गुणवत्ता ऑडिट या जांचधीन')}</option>
+                  <option value="Licensing / Verification Pending">{tr('Licensing / Verification Pending', 'सत्यापन या लाइसेंसिंग लंबित')}</option>
+                  <option value="Other / Administrative Discretion">{tr('Other / Administrative Discretion', 'अन्य प्रशासनिक कारण')}</option>
+                </select>
+              </div>
+
+              {/* Optional notes */}
+              <div className="space-y-1.5">
+                <label className="font-semibold text-[#F1E194]">
+                  {tr('Notes / Instructions (Internal & Barber Notification)', 'निर्देश व विवरण')}
+                </label>
+                <textarea
+                  rows={2}
+                  value={suspensionNotes}
+                  onChange={(e) => setSuspensionNotes(e.target.value)}
+                  placeholder={tr('Provide specifics or required steps for reinstatement...', 'बहाली हेतु आवश्यक निर्देश लिखें...')}
+                  className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-[#FFF9E8] placeholder:text-[#8A8178] focus:outline-none focus:border-[#F1E194]"
+                />
+              </div>
+
+              {/* Strategy for upcoming appointments */}
+              <div className="space-y-2">
+                <label className="font-semibold text-[#F1E194]">
+                  {tr('Action for Upcoming Appointments', 'आगामी बुकिंग के लिए कार्रवाई')}
+                </label>
+                <div className="space-y-2">
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/15 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="aptAction"
+                      value="flag"
+                      checked={appointmentAction === 'flag'}
+                      onChange={() => setAppointmentAction('flag')}
+                      className="mt-0.5 text-rose-500"
+                    />
+                    <div>
+                      <p className="font-semibold text-[#FFF9E8]">{tr('Flag & Alert Customers', 'अलर्ट भेजें (ग्राहक पुनर्निर्धारण कर सकते हैं)')}</p>
+                      <p className="text-[11px] text-[#8A8178]">{tr('Sends in-app notice to customers; appointments remain flagged for review.', 'ग्राहकों को सूचना जाएगी और अपॉइंटमेंट समीक्षा हेतु फ़्लैग रहेंगे।')}</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/15 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="aptAction"
+                      value="reassign"
+                      checked={appointmentAction === 'reassign'}
+                      onChange={() => setAppointmentAction('reassign')}
+                      className="mt-0.5 text-rose-500"
+                    />
+                    <div className="flex-1">
+                      <p className="font-semibold text-[#FFF9E8]">{tr('Reassign to Another Active Barber', 'सैलून के अन्य सक्रिय बार्बर को सौंपें')}</p>
+                      <p className="text-[11px] text-[#8A8178]">{tr('Seamlessly transfers upcoming bookings and notifies clients.', 'बुकिंग ट्रांसफर होगी और ग्राहकों को नए बार्बर का अलर्ट जाएगा।')}</p>
+                      {appointmentAction === 'reassign' && (
+                        <div className="mt-2">
+                          <select
+                            value={reassignBarberId}
+                            onChange={(e) => setReassignBarberId(e.target.value)}
+                            className="w-full px-3 py-1.5 rounded-[8px] bg-[#1a1214] border border-[#F1E194]/30 text-[#FFF9E8] text-xs"
+                          >
+                            {barbers
+                              .filter(
+                                (other: any) =>
+                                  other.id !== suspensionModalBarber.id &&
+                                  other.shopId === suspensionModalBarber.shopId &&
+                                  other.active !== false &&
+                                  other.verificationStatus !== 'suspended'
+                              )
+                              .map((other: any) => (
+                                <option key={other.id} value={other.id}>
+                                  {other.name} ({other.specialty})
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/15 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="aptAction"
+                      value="cancel"
+                      checked={appointmentAction === 'cancel'}
+                      onChange={() => setAppointmentAction('cancel')}
+                      className="mt-0.5 text-rose-500"
+                    />
+                    <div>
+                      <p className="font-semibold text-rose-300">{tr('Cancel Upcoming Appointments', 'सभी आगामी बुकिंग रद्द करें')}</p>
+                      <p className="text-[11px] text-[#8A8178]">{tr('Cancels bookings and issues immediate cancellation notices.', 'बुकिंग रद्द कर दी जाएगी और रद्दीकरण सूचना भेजी जाएगी।')}</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3 pt-3 border-t border-[#F1E194]/15">
+                <button
+                  type="button"
+                  onClick={() => setSuspensionModalBarber(null)}
+                  className="px-4 py-2 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-[#FFF9E8] font-semibold cursor-pointer hover:bg-white/5"
+                >
+                  {tr('Cancel', 'रद्द करें')}
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-[12px] bg-[#5B0E14] hover:bg-[#73121a] text-[#FFF9E8] font-semibold cursor-pointer shadow-lg inline-flex items-center gap-1.5"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-300" />
+                  <span>{tr('Confirm Chair Suspension', 'कुर्सी निलंबन की पुष्टि करें')}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Salon QR Modal */}
+      <SalonQrModal
+        shop={selectedAdminQrShop}
+        isOpen={Boolean(selectedAdminQrShop)}
+        onClose={() => setSelectedAdminQrShop(null)}
+        platformSettings={platformSettings}
+      />
     </div>
   );
 };

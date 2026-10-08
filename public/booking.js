@@ -26,58 +26,79 @@
     }
 
     const supa = getSupabaseClient();
-    if (!supa) {
-      return { error: 'no_client', message: 'Supabase client not initialized.' };
+    if (supa) {
+      // 1. Load shop
+      const { data: shop, error: shopErr } = await supa
+        .from('shops')
+        .select('*')
+        .eq('id', cleanId)
+        .maybeSingle();
+
+      if (!shopErr && shop) {
+        // 2. Load services
+        const { data: services } = await supa
+          .from('services')
+          .select('*')
+          .eq('shop_id', cleanId);
+
+        const activeServices = (services || []).filter(
+          (s) => s.active !== false && s.is_active !== false
+        );
+
+        // 3. Load barbers
+        const { data: barbers } = await supa
+          .from('barbers')
+          .select('*')
+          .eq('shop_id', cleanId);
+
+        const activeBarbers = (barbers || []).filter(
+          (b) => b.active !== false && b.is_active !== false
+        );
+
+        console.log('BOOKING SHOP ID:', cleanId);
+        console.log('SHOP RESULT:', shop);
+        console.log('SERVICES RESULT:', activeServices.length);
+        console.log('BARBERS RESULT:', activeBarbers.length);
+        console.log('SELECTED SHOP:', shop.name);
+
+        return {
+          shop,
+          services: activeServices,
+          barbers: activeBarbers,
+          error: null,
+        };
+      }
     }
 
-    // 1. Load shop
-    const { data: shop, error: shopErr } = await supa
-      .from('shops')
-      .select('*')
-      .eq('id', cleanId)
-      .maybeSingle();
-
-    if (shopErr || !shop) {
-      console.log('BOOKING SHOP ID:', cleanId);
-      console.log('SHOP RESULT:', null);
-      console.log('SERVICES RESULT:', 0);
-      console.log('BARBERS RESULT:', 0);
-      console.log('SELECTED SHOP:', null);
-      return { error: 'shop_not_found', message: "We couldn't find this shop." };
+    // Backend fallback
+    try {
+      const res = await fetch(`/api/shops/${encodeURIComponent(cleanId)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.shop) {
+          console.log('BOOKING SHOP ID:', cleanId);
+          console.log('SHOP RESULT:', json.shop);
+          console.log('SERVICES RESULT:', json.services?.length || 0);
+          console.log('BARBERS RESULT:', json.barbers?.length || 0);
+          console.log('SELECTED SHOP:', json.shop.name);
+          return {
+            shop: json.shop,
+            services: json.services || [],
+            barbers: json.barbers || [],
+            error: null,
+          };
+        }
+      }
+    } catch {
+      // ignore
     }
-
-    // 2. Load services
-    const { data: services, error: srvErr } = await supa
-      .from('services')
-      .select('*')
-      .eq('shop_id', cleanId);
-
-    const activeServices = (services || []).filter(
-      (s) => s.active !== false && s.is_active !== false
-    );
-
-    // 3. Load barbers
-    const { data: barbers, error: brbErr } = await supa
-      .from('barbers')
-      .select('*')
-      .eq('shop_id', cleanId);
-
-    const activeBarbers = (barbers || []).filter(
-      (b) => b.active !== false && b.is_active !== false
-    );
 
     console.log('BOOKING SHOP ID:', cleanId);
-    console.log('SHOP RESULT:', shop);
-    console.log('SERVICES RESULT:', activeServices.length);
-    console.log('BARBERS RESULT:', activeBarbers.length);
-    console.log('SELECTED SHOP:', shop.name);
-
-    return {
-      shop,
-      services: activeServices,
-      barbers: activeBarbers,
-      error: null,
-    };
+    console.log('SHOP RESULT:', null);
+    console.log('SERVICES RESULT:', 0);
+    console.log('BARBERS RESULT:', 0);
+    console.log('SELECTED SHOP:', null);
+    return { error: 'shop_not_found', message: "We couldn't find this shop." };
   }
 
   window.barberLooBooking = {

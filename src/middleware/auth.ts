@@ -29,6 +29,7 @@ export interface DecodedUserToken {
   email?: string;
   name?: string;
   role: 'customer' | 'barber' | 'shop_owner' | 'admin';
+  status?: 'active' | 'suspended';
 }
 
 export interface AuthRequest extends Request {
@@ -131,15 +132,12 @@ export async function verifyAuthToken(
 
     const userProfile = existingProfiles[0];
     if (userProfile) {
-      // Block suspended accounts immediately
-      if (userProfile.status === 'suspended') {
-        return null;
-      }
       return {
         uid: verifiedUid,
         email: verifiedEmail || userProfile.email,
         name: verifiedName || userProfile.name,
         role: (userProfile.role as any) || 'customer',
+        status: (userProfile.status as any) || 'active',
       };
     }
 

@@ -13,6 +13,10 @@ import {
   Users,
   Calendar,
   TrendingUp,
+  QrCode,
+  AlertTriangle,
+  ShieldAlert,
+  Send,
 } from 'lucide-react';
 import {
   useLanguage,
@@ -29,6 +33,9 @@ import {
   DEFAULT_CITIES,
   getCitiesForState,
 } from '../lib/locations';
+import { getShopQrDestinationUrl, getProductionDomain } from '../lib/domain';
+import { SalonQrModal } from './SalonQrModal';
+import { apiCreateReport } from '../lib/api';
 
 interface BarberDashboardProps {
   appointments: AppointmentItem[];
@@ -64,6 +71,7 @@ interface BarberDashboardProps {
   notifications?: any[];
   onMarkNotificationsRead?: () => Promise<void>;
   profiles?: any[];
+  platformSettings?: any;
 }
 
 export const BarberDashboard: React.FC<BarberDashboardProps> = ({
@@ -92,9 +100,19 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   notifications = [],
   onMarkNotificationsRead,
   profiles = [],
+  platformSettings,
 }) => {
   const { lang, tr, formatINR } = useLanguage();
   const istNow = getCurrentISTDisplay(lang);
+
+  const currentHour = new Date().getHours();
+  const greetingTime =
+    currentHour < 12
+      ? tr('Good morning', 'शुभ प्रभात')
+      : currentHour < 17
+      ? tr('Good afternoon', 'शुभ दोपहर')
+      : tr('Good evening', 'शुभ संध्या');
+  const barberFirstName = currentUserProfile?.name?.split(' ')[0] || 'Rahul';
 
   const [activeTab, setActiveTab] = useState<
     | 'appointments'
@@ -142,6 +160,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   const [whHolidayNote, setWhHolidayNote] = useState('');
 
   // Edit Shop, Gallery & Shop Offers state
+  const [selectedQrShop, setSelectedQrShop] = useState<any | null>(null);
   const [editingShopId, setEditingShopId] = useState<string | null>(null);
   const [editShopName, setEditShopName] = useState('');
   const [editShopDistrict, setEditShopDistrict] = useState('');
@@ -213,6 +232,53 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
 
   const activeShop = shops[0] || null;
 
+  // Suspension & Governance State for Logged-In Barber
+  const linkedBarber = barbers.find(
+    (b: any) =>
+      (currentUserProfile?.uid &&
+        (b.userUid === currentUserProfile.uid || b.id === currentUserProfile.uid)) ||
+      (barbers.length === 1 ? b : null)
+  );
+
+  const isBarberSuspended =
+    currentUserProfile?.status === 'suspended' ||
+    linkedBarber?.verificationStatus === 'suspended' ||
+    (linkedBarber && linkedBarber.active === false && linkedBarber.verificationStatus !== 'verified');
+
+  const [appealMessage, setAppealMessage] = useState('');
+  const [appealSubmitted, setAppealSubmitted] = useState(false);
+  const [appealSubmitting, setAppealSubmitting] = useState(false);
+
+  const handleAppealSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!appealMessage.trim()) return;
+    setAppealSubmitting(true);
+    try {
+      await apiCreateReport({
+        reporterUid: currentUserProfile?.uid || 'barber',
+        reporterName: linkedBarber?.name || currentUserProfile?.name || 'Barber',
+        targetType: 'barber_appeal',
+        targetId: linkedBarber?.id || currentUserProfile?.uid || 'barber',
+        targetLabel: linkedBarber?.name || currentUserProfile?.name || 'Barber Chair',
+        reason: 'Chair Reinstatement Appeal',
+        details: appealMessage.trim(),
+      }).catch(() => {});
+
+      if (onBroadcastShopNotification) {
+        await onBroadcastShopNotification({
+          shopName: activeShop?.name || 'Partner Salon',
+          message: `Reinstatement Appeal from ${linkedBarber?.name || currentUserProfile?.name || 'Barber'}: ${appealMessage.trim()}`,
+          targetRole: 'all',
+        });
+      }
+      setAppealSubmitted(true);
+    } catch {
+      // silent
+    } finally {
+      setAppealSubmitting(false);
+    }
+  };
+
   // Real calculated revenue & analytics from appointments
   const completedApts = appointments.filter(
     (a) => String(a.status).toLowerCase() === 'completed'
@@ -230,12 +296,21 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
       String(a.status).toLowerCase() === 'completed' ||
       String(a.status).toLowerCase() === 'confirmed'
   );
-  const totalRealRevenueINR = completedOrConfirmedApts.reduce(
-    (sum, a) => sum + (Number(a.price) || 0),
+  const totalServiceRevenueINR = completedOrConfirmedApts.reduce(
+    (sum, a) => sum + (Number(a.servicePrice ?? (a.price - (a.platformFee ?? 10))) || 0),
     0
   );
+  const totalPlatformFeesCollectedINR = completedOrConfirmedApts.reduce(
+    (sum, a) => sum + (Number(a.platformFee ?? 10) || 0),
+    0
+  );
+  const totalCustomerPaidINR = completedOrConfirmedApts.reduce(
+    (sum, a) => sum + (Number(a.totalPrice ?? a.price) || 0),
+    0
+  );
+  const totalRealRevenueINR = totalServiceRevenueINR;
   const completedRevenueINR = completedApts.reduce(
-    (sum, a) => sum + (Number(a.price) || 0),
+    (sum, a) => sum + (Number(a.servicePrice ?? (a.price - (a.platformFee ?? 10))) || 0),
     0
   );
 
@@ -250,14 +325,14 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
       ? Math.round((cancelledApts.length / appointments.length) * 100)
       : 0;
   const peakBookingHour = useMemo(() => {
-    if (appointments.length === 0) return '14:15 IST';
+    if (appointments.length === 0) return '-';
     const counts: Record<string, number> = {};
     for (const a of appointments) {
-      const t = a.time || '14:15';
-      counts[t] = (counts[t] || 0) + 1;
+      if (!a.time) continue;
+      counts[a.time] = (counts[a.time] || 0) + 1;
     }
     const sorted = Object.entries(counts).sort((x, y) => y[1] - x[1]);
-    return `${sorted[0]?.[0] || '14:15'} IST`;
+    return sorted[0] ? `${sorted[0][0]} IST` : '-';
   }, [appointments]);
 
   // Customer directory aggregated from real appointments
@@ -320,8 +395,10 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   const handleCreateServiceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSrvName.trim() || !onCreateService) return;
+    const targetShopId = activeShop?.id || (shops.length > 0 ? shops[0].id : '');
+    if (!targetShopId) return;
     await onCreateService({
-      shopId: activeShop?.id || 'shop-1',
+      shopId: targetShopId,
       name: newSrvName.trim(),
       category: newSrvCategory,
       durationMin: Number(newSrvDuration) || 45,
@@ -347,10 +424,12 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   const handleCreateBarberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBrbName.trim() || !onCreateBarber) return;
+    const targetShop = activeShop || (shops.length > 0 ? shops[0] : null);
+    if (!targetShop) return;
     await onCreateBarber({
       userUid: currentUserProfile?.uid || '',
-      shopId: activeShop?.id || 'shop-1',
-      shopName: activeShop?.name || 'BarberLoo Partner Salon',
+      shopId: targetShop.id,
+      shopName: targetShop.name || 'BarberLoo Partner Salon',
       name: newBrbName.trim(),
       role: newBrbRole.trim(),
       specialty: newBrbSpecialty.trim(),
@@ -402,13 +481,11 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
               )}
             </p>
             <h1 className="font-display text-4xl sm:text-5xl font-bold text-[#FFF9E8]">
-              {activeShop
-                ? activeShop.name
-                : tr('Barber Partner Console', 'बार्बर पार्टनर कंसोल')}
+              {greetingTime}, {barberFirstName}
             </h1>
             <p className="text-xs text-[#8A8178] mt-1">
-              {tr('Signed in as:', 'लॉग इन:')} {currentUserProfile?.name} (
-              {currentUserProfile?.email})
+              {activeShop ? `${activeShop.name} · ` : ''}
+              {currentUserProfile?.email}
             </p>
           </div>
 
@@ -440,14 +517,117 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
             </div>
             <div className="px-4 py-3 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
-                {tr('Revenue (INR)', 'राजस्व (₹ INR)')}
+                {tr('Service Revenue', 'सेवा राजस्व (दुकान)')}
               </span>
               <span className="font-mono-num text-xl font-bold text-[#F1E194]">
-                {formatINR(totalRealRevenueINR)}
+                {formatINR(totalServiceRevenueINR)}
+              </span>
+              <span className="text-[9px] text-[#8A8178] block mt-0.5">
+                {tr('Paid by clients: ', 'कुल ग्राहक भुगतान: ')}{formatINR(totalCustomerPaidINR)}
               </span>
             </div>
           </div>
         </div>
+
+        {/* SET UP YOUR SHOP CHECKLIST (Rule 23) */}
+        {(() => {
+          const hasShopInfo = Boolean(activeShop || shops.length > 0);
+          const hasWorkingHours = workingHours.length > 0;
+          const hasServices = services.length > 0;
+          const hasBarbers = barbers.length > 0;
+          const hasPhotos = Boolean(activeShop?.image || (activeShop?.gallery?.length ?? 0) > 0);
+          const isComplete = hasShopInfo && hasWorkingHours && hasServices && hasBarbers && hasPhotos;
+
+          return (
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/25 p-6 sm:p-7 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-[11px] font-semibold tracking-wider uppercase text-[#F1E194]">
+                    {tr('SET UP YOUR SHOP', 'अपनी दुकान सेट करें')}
+                  </span>
+                  <h2 className="font-display text-2xl font-bold mt-0.5">
+                    {isComplete
+                      ? tr('Shop Setup Complete ✓', 'दुकान सेटअप पूर्ण ✓')
+                      : tr('Complete Your Salon Setup', 'सैलून सेटअप पूरा करें')}
+                  </h2>
+                </div>
+                {!isComplete && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!hasShopInfo) setActiveTab('shop');
+                      else if (!hasWorkingHours) setActiveTab('schedule');
+                      else if (!hasServices) setActiveTab('services');
+                      else if (!hasBarbers) setActiveTab('team');
+                      else setActiveTab('shop');
+                    }}
+                    className="px-5 py-2.5 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold uppercase tracking-wider cursor-pointer hover:bg-[#FFF9E8] transition-colors"
+                  >
+                    {tr('Continue Setup', 'सेटअप जारी रखें')}
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
+                <div
+                  className={`p-3 rounded-[14px] border text-xs flex items-center gap-2 cursor-pointer ${
+                    hasShopInfo
+                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+                      : 'bg-[#111113] border-[#F1E194]/20 text-[#8A8178]'
+                  }`}
+                  onClick={() => setActiveTab('shop')}
+                >
+                  <span className="font-bold">{hasShopInfo ? '✓' : '○'}</span>
+                  <span className="font-semibold">{tr('Shop information', 'दुकान जानकारी')}</span>
+                </div>
+                <div
+                  className={`p-3 rounded-[14px] border text-xs flex items-center gap-2 cursor-pointer ${
+                    hasWorkingHours
+                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+                      : 'bg-[#111113] border-[#F1E194]/20 text-[#8A8178]'
+                  }`}
+                  onClick={() => setActiveTab('schedule')}
+                >
+                  <span className="font-bold">{hasWorkingHours ? '✓' : '○'}</span>
+                  <span className="font-semibold">{tr('Working hours', 'कार्य समय')}</span>
+                </div>
+                <div
+                  className={`p-3 rounded-[14px] border text-xs flex items-center gap-2 cursor-pointer ${
+                    hasServices
+                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+                      : 'bg-[#111113] border-[#F1E194]/20 text-[#8A8178]'
+                  }`}
+                  onClick={() => setActiveTab('services')}
+                >
+                  <span className="font-bold">{hasServices ? '✓' : '○'}</span>
+                  <span className="font-semibold">{tr('Add services', 'सेवाएं जोड़ें')}</span>
+                </div>
+                <div
+                  className={`p-3 rounded-[14px] border text-xs flex items-center gap-2 cursor-pointer ${
+                    hasBarbers
+                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+                      : 'bg-[#111113] border-[#F1E194]/20 text-[#8A8178]'
+                  }`}
+                  onClick={() => setActiveTab('team')}
+                >
+                  <span className="font-bold">{hasBarbers ? '✓' : '○'}</span>
+                  <span className="font-semibold">{tr('Add barbers', 'बार्बर जोड़ें')}</span>
+                </div>
+                <div
+                  className={`p-3 rounded-[14px] border text-xs flex items-center gap-2 cursor-pointer ${
+                    hasPhotos
+                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+                      : 'bg-[#111113] border-[#F1E194]/20 text-[#8A8178]'
+                  }`}
+                  onClick={() => setActiveTab('shop')}
+                >
+                  <span className="font-bold">{hasPhotos ? '✓' : '○'}</span>
+                  <span className="font-semibold">{tr('Add photos', 'फ़ोटो जोड़ें')}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Incoming Broadcasts & Notifications for Barber */}
         {notifications.length > 0 && (
@@ -486,6 +666,128 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                   </p>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Dedicated Chair Suspension Notice & Appeal Protocol */}
+        {isBarberSuspended && (
+          <div className="rounded-[24px] bg-rose-950/40 border-2 border-rose-500/50 p-6 sm:p-8 space-y-6 shadow-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-[16px] bg-rose-900/60 border border-rose-500/40 text-rose-300 flex items-center justify-center shrink-0">
+                  <ShieldAlert className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="px-3 py-1 rounded-full bg-rose-900 text-rose-200 border border-rose-400/40 text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>{tr('CHAIR / ACCOUNT SUSPENDED BY ADMINISTRATION', 'प्रशासन द्वारा कुर्सी व खाता निलंबित')}</span>
+                  </span>
+                  <h2 className="font-display text-2xl sm:text-3xl font-bold text-white mt-2">
+                    {tr(
+                      'Your Barber Chair Is Currently Suspended',
+                      'आपकी बार्बर कुर्सी वर्तमान में निलंबित है'
+                    )}
+                  </h2>
+                  <p className="text-xs sm:text-sm text-rose-200/90 mt-1 max-w-2xl leading-relaxed">
+                    {tr(
+                      'Platform administration has temporarily placed your chair on administrative suspension. Your profile and chair are hidden from public discovery, and new client appointments cannot be booked.',
+                      'प्लेटफ़ॉर्म प्रशासन ने अस्थायी रूप से आपकी कुर्सी निलंबित कर दी है। आपकी प्रोफ़ाइल सार्वजनिक खोज से छिपी हुई है और नए ग्राहक अपॉइंटमेंट बुक नहीं कर सकते।'
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="shrink-0">
+                <span className="px-3.5 py-1.5 rounded-[12px] bg-[#111113] border border-rose-500/30 text-rose-300 text-xs font-mono-num font-semibold">
+                  Status: SUSPENDED
+                </span>
+              </div>
+            </div>
+
+            {/* Impact Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-2">
+              <div className="p-4 rounded-[16px] bg-[#111113]/70 border border-rose-500/20 text-xs space-y-1">
+                <div className="font-semibold text-rose-300">1. {tr('Public Visibility', 'सार्वजनिक दृश्यता')}</div>
+                <p className="text-[#8A8178]">
+                  {tr(
+                    'Hidden from Homepage master barbers, salon cards, and QR booking pass.',
+                    'होमपेज, सैलून कार्ड और QR बुकिंग पास से छिपा हुआ है।'
+                  )}
+                </p>
+              </div>
+
+              <div className="p-4 rounded-[16px] bg-[#111113]/70 border border-rose-500/20 text-xs space-y-1">
+                <div className="font-semibold text-rose-300">2. {tr('New Appointments', 'नई बुकिंग')}</div>
+                <p className="text-[#8A8178]">
+                  {tr(
+                    'Booking slots locked. System prevents any customer from scheduling slots.',
+                    'बुकिंग स्लॉट लॉक हैं। ग्राहक नए स्लॉट बुक नहीं कर सकते।'
+                  )}
+                </p>
+              </div>
+
+              <div className="p-4 rounded-[16px] bg-[#111113]/70 border border-rose-500/20 text-xs space-y-1">
+                <div className="font-semibold text-rose-300">3. {tr('Scheduled Sessions', 'मौजूदा सत्र')}</div>
+                <p className="text-[#8A8178]">
+                  {tr(
+                    'Existing records are preserved below for reference and audit.',
+                    'मौजूदा रिकॉर्ड संदर्भ और ऑडिट के लिए नीचे सुरक्षित हैं।'
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Appeal Submission Form */}
+            <div className="p-5 rounded-[18px] bg-[#111113]/90 border border-[#F1E194]/20 space-y-3">
+              <h3 className="font-display text-lg font-bold text-[#FFF9E8]">
+                {tr('Submit Reinstatement Appeal to Platform Admin', 'प्रशासन को निलंबन बहाली अपील भेजें')}
+              </h3>
+              <p className="text-xs text-[#8A8178]">
+                {tr(
+                  'If you believe this suspension is in error or you have resolved the underlying compliance issue, submit your message below directly to the BarberLoo Admin Console.',
+                  'यदि आपको लगता है कि यह निलंबन गलती से हुआ है, तो सीधे एडमिन कंसोल को अपना संदेश भेजें।'
+                )}
+              </p>
+
+              {appealSubmitted ? (
+                <div className="p-4 rounded-[14px] bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>
+                    {tr(
+                      '✓ Your appeal has been logged and transmitted to the Administrator. You will be notified once reviewed.',
+                      '✓ आपकी अपील प्रशासक को भेज दी गई है। समीक्षा के बाद आपको सूचित किया जाएगा।'
+                    )}
+                  </span>
+                </div>
+              ) : (
+                <form onSubmit={handleAppealSubmit} className="space-y-3">
+                  <textarea
+                    rows={3}
+                    required
+                    value={appealMessage}
+                    onChange={(e) => setAppealMessage(e.target.value)}
+                    placeholder={tr(
+                      'State your appeal, verification details, or corrective steps taken for reinstatement...',
+                      'बहाली के लिए अपनी अपील और विवरण लिखें...'
+                    )}
+                    className="w-full px-4 py-3 rounded-[14px] bg-[#1a1214] border border-[#F1E194]/20 text-xs text-[#FFF9E8] placeholder:text-[#8A8178] focus:outline-none focus:border-[#F1E194]"
+                  />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <span className="text-[11px] text-[#8A8178]">
+                      {tr('Helpline: nexwaveservices@gmail.com', 'हेल्पलाइन: nexwaveservices@gmail.com')}
+                    </span>
+                    <button
+                      type="submit"
+                      disabled={appealSubmitting || !appealMessage.trim()}
+                      className="px-5 py-2.5 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold uppercase tracking-wider cursor-pointer inline-flex items-center gap-2 hover:bg-[#FFF9E8] transition-colors disabled:opacity-50"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{appealSubmitting ? tr('Transmitting...', 'भेज रहे हैं...') : tr('Submit Appeal', 'अपील भेजें')}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         )}
@@ -599,13 +901,39 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                           {apt.clientName} ({apt.clientPhone})
                         </h3>
                         <p className="text-xs text-[#8A8178]">
-                          {apt.serviceName} · {apt.barberName} ·{' '}
-                          <span className="text-[#F1E194] font-mono-num font-semibold">
-                            {formatINR(apt.price)}
-                          </span>
+                          {apt.serviceName} · {apt.barberName}
                         </p>
+
+                        {/* Transparent Money Flow for Shop Owner / Barber */}
+                        <div className="mt-2.5 p-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 grid grid-cols-3 gap-2 text-center text-xs">
+                          <div>
+                            <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                              {tr('Service price', 'सेवा शुल्क')}
+                            </span>
+                            <span className="font-mono-num font-bold text-[#FFF9E8]">
+                              {formatINR(apt.servicePrice ?? (apt.price - (apt.platformFee ?? 10)))}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                              {tr('BarberLoo fee', 'BarberLoo शुल्क')}
+                            </span>
+                            <span className="font-mono-num font-semibold text-[#F1E194]">
+                              {formatINR(apt.platformFee ?? 10)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                              {tr('Customer paid', 'कुल ग्राहक भुगतान')}
+                            </span>
+                            <span className="font-mono-num font-bold text-emerald-400">
+                              {formatINR(apt.totalPrice ?? apt.price)}
+                            </span>
+                          </div>
+                        </div>
+
                         {(apt.notes || apt.barberNotes) && (
-                          <p className="text-[11px] text-[#F1E194]/80 mt-1">
+                          <p className="text-[11px] text-[#F1E194]/80 mt-2">
                             {apt.notes ? `Client Note: ${apt.notes} ` : ''}
                             {apt.barberNotes
                               ? `· Barber Note: ${apt.barberNotes}`
@@ -1993,11 +2321,19 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                             {s.address} · {s.phone} ·{' '}
                             {tr('Closes at', 'बंद होने का समय')} {s.closesAt || '21:30'} IST
                           </p>
-                          <p className="text-[11px] font-mono-num text-[#F1E194]/80 mt-1">
-                            QR Destination: {s.qrCodeUrl || `${window.location.origin}/?shop=${s.id}`}
+                          <p className="text-[11px] font-mono-num text-[#F1E194]/80 mt-1 break-all">
+                            QR Destination: {getShopQrDestinationUrl(s.id, { domain: getProductionDomain(platformSettings) })}
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedQrShop(s)}
+                            className="px-3.5 py-2 rounded-[12px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 hover:bg-[#73121a] transition-colors"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                            <span>{tr('Salon QR Pass & Standee', 'सैलून QR पास व स्टैंडी')}</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => {
@@ -2474,6 +2810,14 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
           </div>
         )}
       </div>
+
+      {/* Salon QR Standee & Pass Modal */}
+      <SalonQrModal
+        shop={selectedQrShop}
+        isOpen={Boolean(selectedQrShop)}
+        onClose={() => setSelectedQrShop(null)}
+        platformSettings={platformSettings}
+      />
     </div>
   );
 };

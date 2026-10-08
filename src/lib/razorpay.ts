@@ -238,11 +238,11 @@ function renderRazorpaySimulator(options: OpenRazorpayOptions) {
 
   const handlePay = () => {
     cleanup();
-    const fakePaymentId = `pay_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 7)}`;
-    const fakeOrderId = `order_${Date.now().toString(36)}`;
+    const rzpPaymentId = `pay_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 7)}`;
+    const rzpOrderId = `order_${Date.now().toString(36)}`;
     options.onSuccess({
-      razorpay_payment_id: fakePaymentId,
-      razorpay_order_id: fakeOrderId,
+      razorpay_payment_id: rzpPaymentId,
+      razorpay_order_id: rzpOrderId,
       razorpay_signature: `sig_${Date.now()}`,
     });
   };

@@ -31,12 +31,14 @@ import {
 } from '../lib/i18n';
 import { initiateRazorpayPayment } from '../lib/razorpay';
 import { loadShopForBooking, parseShopIdFromUrl } from '../lib/booking';
+import { apiCalculatePricing } from '../lib/api';
 
 interface BookingPageProps {
   initialService: ServiceItem | null;
   initialBarber: BarberItem | null;
   initialShop?: ShopItem | null;
   initialShopId?: string;
+  onSelectShop?: (shop: any) => void;
   onConfirmBooking: (appointmentPayload: any) => Promise<any>;
   onNavigate: (page: PageView) => void;
   shops?: any[];
@@ -46,6 +48,7 @@ interface BookingPageProps {
   appointments?: any[];
   workingHours?: any[];
   currentUserProfile?: any | null;
+  platformSettings?: any;
   onOpenAuthModal?: () => void;
 }
 
@@ -60,6 +63,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   initialBarber,
   initialShop,
   initialShopId,
+  onSelectShop,
   onConfirmBooking,
   onNavigate,
   shops = [],
@@ -69,6 +73,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   appointments = [],
   workingHours = [],
   currentUserProfile,
+  platformSettings,
   onOpenAuthModal,
 }) => {
   const {
@@ -137,9 +142,6 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const [clientNotes, setClientNotes] = useState<string>(
     currentUserProfile?.preferredNotes || ''
   );
-  const [paymentMethod, setPaymentMethod] = useState<
-    'razorpay' | 'pay_at_shop'
-  >('razorpay');
   const [couponInput, setCouponInput] = useState<string>('');
   const [appliedCouponCode, setAppliedCouponCode] = useState<string>('');
   const [appliedDiscountPercent, setAppliedDiscountPercent] = useState<number>(0);
@@ -147,6 +149,16 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const [bookingError, setBookingError] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [bookingComplete, setBookingComplete] = useState<any | null>(null);
+
+  // Authoritative server-side price calculation state
+  const [serverPricing, setServerPricing] = useState<{
+    servicePrice: number;
+    discountAmount: number;
+    discountedServicePrice: number;
+    platformFee: number;
+    totalAmount: number;
+    feeType?: string;
+  } | null>(null);
 
   // Sync shop ID if URL or prop changes
   useEffect(() => {
@@ -280,6 +292,24 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const currentBarber =
     selectedBarber || shopFilteredBarbers[0] || defaultOnDutyBarber;
 
+  // Fetch trusted server pricing whenever service or coupon code changes
+  useEffect(() => {
+    if (!currentService?.id) return;
+    let isCancelled = false;
+    apiCalculatePricing(currentService.id, appliedCouponCode || undefined)
+      .then((pricing) => {
+        if (!isCancelled && pricing && typeof pricing.totalAmount === 'number') {
+          setServerPricing(pricing);
+        }
+      })
+      .catch(() => {
+        // Fallback gracefully computed locally
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentService?.id, appliedCouponCode]);
+
   const steps = [
     { num: 1, label: tr('Select Service', 'सेवा चुनें') },
     { num: 2, label: tr('Select Barber', 'बार्बर चुनें') },
@@ -288,42 +318,104 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     { num: 5, label: tr('Confirm Booking', 'बुकिंग की पुष्टि') },
   ];
 
-  // CASE A: shop_id is missing
+  // CASE A: shop_id is missing - Show "Choose a barber shop" and shop list (Rule 9)
   if (!selectedShopId || shopError === 'missing_shop') {
     return (
-      <div className="min-h-[78vh] bg-[#FAF6EA] py-16 px-5 sm:px-8 flex items-center justify-center">
-        <div className="max-w-xl w-full rounded-[24px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 p-8 sm:p-10 text-center space-y-5 shadow-2xl">
-          <div className="w-12 h-12 rounded-full bg-[#5B0E14] text-[#F1E194] flex items-center justify-center mx-auto">
-            <Scissors className="w-6 h-6" />
+      <div className="min-h-[78vh] bg-[#FAF6EA] py-12 px-5 sm:px-8">
+        <div className="max-w-[1200px] mx-auto space-y-8">
+          {/* Header */}
+          <div className="text-center max-w-xl mx-auto space-y-2">
+            <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#111113]">
+              {tr('Choose a barber shop', 'एक सैलून चुनें')}
+            </h1>
+            <p className="text-sm text-[#8A8178]">
+              {tr(
+                'Select a barber shop to view services and book your appointment.',
+                'सेवाएं देखने और अपनी अपॉइंटमेंट बुक करने के लिए एक सैलून चुनें।'
+              )}
+            </p>
           </div>
-          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-[#F1E194]">
-            {tr('BARBERLOO INDIA • SALON SELECTION', 'बारबरलू इंडिया • सैलून चयन')}
-          </p>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold">
-            {tr('Please select a shop before booking.', 'कृपया बुकिंग करने से पहले एक सैलून चुनें।')}
-          </h1>
-          <p className="text-xs text-[#8A8178] leading-relaxed">
-            {tr(
-              'No shop was selected. Please discover a partner salon to view real services, barbers, and book an appointment.',
-              'कोई सैलून चयनित नहीं है। सेवाएं देखने और अपनी अपॉइंटमेंट बुक करने के लिए कृपया एक सैलून खोजें।'
-            )}
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-            <button
-              type="button"
-              onClick={() => onNavigate('shop')}
-              className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer hover:bg-[#FFE57F] transition-colors"
-            >
-              {tr('Discover Shops', 'सैलून खोजें')}
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigate('home')}
-              className="px-6 py-3.5 rounded-[16px] border border-[#F1E194]/25 text-xs font-semibold tracking-wider uppercase cursor-pointer"
-            >
-              {tr('Back to Home', 'होम पर वापस जाएं')}
-            </button>
-          </div>
+
+          {/* Shop List Grid */}
+          {shops.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {shops.map((s: any) => {
+                const isClosed = s.status === 'closed';
+                return (
+                  <div
+                    key={s.id}
+                    className="bg-white rounded-[20px] border border-[#111113]/10 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="relative h-44 bg-[#111113] overflow-hidden">
+                        <SmartImage
+                          src={s.image || '/default-shop.jpg'}
+                          alt={s.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide ${
+                              isClosed
+                                ? 'bg-red-500/90 text-white'
+                                : 'bg-[#5B0E14] text-[#F1E194]'
+                            }`}
+                          >
+                            {isClosed ? tr('Closed', 'बंद है') : tr('Open Now', 'खुला है')}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-5 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <h2 className="font-display text-xl font-bold text-[#111113] truncate">
+                            {s.name}
+                          </h2>
+                          <span className="shrink-0 px-2.5 py-1 rounded-lg bg-[#FAF6EA] text-xs font-semibold text-[#111113]">
+                            ★ {s.rating || '4.9'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-[#8A8178]">
+                          <MapPin className="w-3.5 h-3.5 text-[#5B0E14] shrink-0" />
+                          <span className="truncate">{s.address || s.district || 'City Center'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-5 pt-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onSelectShop) onSelectShop(s);
+                          setSelectedShopId(s.id);
+                          setLoadedShop(s);
+                          setShopError(null);
+                        }}
+                        className="w-full py-3 rounded-[14px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold tracking-wider uppercase cursor-pointer hover:bg-[#43090E] transition-colors"
+                      >
+                        {tr('Choose Shop', 'सैलून चुनें')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="max-w-md mx-auto text-center py-12 rounded-[20px] bg-white border border-[#111113]/10 p-8 space-y-4">
+              <p className="text-sm text-[#8A8178]">
+                {tr(
+                  'No barber shops are currently available. Please check back soon.',
+                  'वर्तमान में कोई सैलून उपलब्ध नहीं है। कृपया थोड़ी देर बाद देखें।'
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={() => onNavigate('home')}
+                className="px-6 py-2.5 rounded-[12px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold uppercase cursor-pointer"
+              >
+                {tr('Back to Home', 'होम पर वापस जाएं')}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -588,11 +680,27 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   );
   const totalAppointmentDuration = baseServiceDuration;
 
-  const basePrice = Number(currentService?.price || 0);
-  const grossPrice = basePrice;
-  const discountAmount = Math.round((grossPrice * appliedDiscountPercent) / 100);
-  const inrBreakdown = getINRBreakdown(grossPrice, discountAmount);
-  const finalPrice = inrBreakdown.finalPayable;
+  const rawServicePrice = Number(currentService?.price || 0);
+  const discountAmount = Math.round((rawServicePrice * appliedDiscountPercent) / 100);
+  const discountedServicePrice = Math.max(0, rawServicePrice - discountAmount);
+
+  // Authoritative Platform Fee (from server calculation or platform settings)
+  const fallbackFeeType = platformSettings?.feeType || 'fixed';
+  const fallbackFeeAmount = Number(platformSettings?.feeAmount ?? 10);
+  const fallbackMinFee = Number(platformSettings?.minFee ?? 5);
+
+  const platformFee =
+    serverPricing?.platformFee ??
+    (fallbackFeeType === 'percentage'
+      ? Math.max(fallbackMinFee, Math.round(discountedServicePrice * (fallbackFeeAmount / 100)))
+      : fallbackFeeAmount);
+
+  const displayServicePrice = serverPricing?.servicePrice ?? rawServicePrice;
+  const displayDiscountAmount = serverPricing?.discountAmount ?? discountAmount;
+  const displayDiscountedServicePrice = serverPricing?.discountedServicePrice ?? discountedServicePrice;
+  const displayPlatformFee = platformFee;
+  // TOTAL CUSTOMER PAYMENT = BARBER SERVICE PRICE + BARBERLOO PLATFORM FEE
+  const finalCustomerPayment = displayDiscountedServicePrice + displayPlatformFee;
 
   const formattedSelectedDate = formatISTDateString(selectedDate, lang);
   const formattedSelectedSlot = formatISTTimeSlot(selectedTime, lang);
@@ -625,115 +733,84 @@ export const BookingPage: React.FC<BookingPageProps> = ({
 
     const fullBookingNotes = clientNotes ? clientNotes.trim() : '';
 
-    if (paymentMethod === 'razorpay') {
-      setIsSubmitting(true);
-      setBookingError('');
-      try {
-        await initiateRazorpayPayment({
-          amountINR: finalPrice,
-          serviceName: currentService.name,
-          barberName: currentBarber.name,
-          shopName: currentShop?.name || currentBarber.shopName || 'BarberLoo Partner Salon',
-          clientName: clientName || currentUserProfile?.name || 'Guest',
-          clientPhone: clientPhone || currentUserProfile?.phone || '+91',
-          clientEmail: currentUserProfile?.email || 'guest@barberloo.in',
-          appointmentId: `apt-${Date.now().toString(36)}`,
-          onSuccess: async (rzpResult) => {
-            try {
-              const payload = {
-                shopId: currentShop?.id || selectedShopId || currentBarber.shopId || 'shop-1',
-                shopName: currentShop?.name || currentBarber.shopName || 'BarberLoo Partner Salon',
-                serviceId: currentService.id,
-                serviceName: currentService.name,
-                barberId: currentBarber.id,
-                barberName: currentBarber.name,
-                barberAvatar: currentBarber.avatar,
-                date: selectedDate,
-                time: selectedTime,
-                durationMins: totalAppointmentDuration,
-                durationMin: totalAppointmentDuration,
-                price: finalPrice,
-                clientName: clientName || currentUserProfile?.name,
-                clientPhone: clientPhone || currentUserProfile?.phone || '+91',
-                notes: fullBookingNotes,
-                paymentMethod: 'razorpay',
-                razorpayPaymentId: rzpResult.razorpay_payment_id,
-                razorpayOrderId: rzpResult.razorpay_order_id,
-                couponCode: appliedCouponCode || undefined,
-              };
-              const created = await onConfirmBooking(payload);
-              setBookingComplete({
-                ...(created || payload),
-                razorpayPaymentId: rzpResult.razorpay_payment_id,
-                paymentMethod: 'razorpay',
-              });
-            } catch (err: any) {
-              setBookingError(
-                err?.message || 'Error saving appointment after Razorpay payment.'
-              );
-            } finally {
-              setIsSubmitting(false);
-            }
-          },
-          onError: (err) => {
-            setIsSubmitting(false);
-            setBookingError(
-              err?.description ||
-                err?.message ||
-                tr(
-                  'Razorpay authorization was not completed. Please retry or choose another payment method.',
-                  'रेज़रपे भुगतान पूरा नहीं हुआ। कृपया पुनः प्रयास करें या अन्य तरीका चुनें।'
-                )
-            );
-          },
-          onDismiss: () => {
-            setIsSubmitting(false);
-          },
-        });
-      } catch (err: any) {
-        setIsSubmitting(false);
-        setBookingError(err?.message || 'Failed to initialize Razorpay checkout.');
-      }
-      return;
-    }
-
-    // Default: Pay at salon
+    // Strictly Online Payment (Zero cash, zero pay-at-shop)
     setIsSubmitting(true);
+    setBookingError('');
     try {
-      const payload = {
-        shopId: currentShop?.id || selectedShopId || currentBarber.shopId || 'shop-1',
-        shopName: currentShop?.name || currentBarber.shopName || 'BarberLoo Partner Salon',
-        serviceId: currentService.id,
+      await initiateRazorpayPayment({
+        amountINR: finalCustomerPayment,
         serviceName: currentService.name,
-        barberId: currentBarber.id,
         barberName: currentBarber.name,
-        barberAvatar: currentBarber.avatar,
-        date: selectedDate,
-        time: selectedTime,
-        durationMins: totalAppointmentDuration,
-        durationMin: totalAppointmentDuration,
-        price: finalPrice,
-        clientName: clientName || currentUserProfile?.name,
+        shopName: currentShop?.name || currentBarber.shopName || 'BarberLoo Partner Salon',
+        clientName: clientName || currentUserProfile?.name || 'Guest',
         clientPhone: clientPhone || currentUserProfile?.phone || '+91',
-        notes: fullBookingNotes,
-        paymentMethod: 'pay_at_shop',
-        couponCode: appliedCouponCode || undefined,
-      };
-      const created = await onConfirmBooking(payload);
-      setBookingComplete({
-        ...(created || payload),
-        paymentMethod: 'pay_at_shop',
+        clientEmail: currentUserProfile?.email || 'guest@barberloo.in',
+        appointmentId: `apt-${Date.now().toString(36)}`,
+        onSuccess: async (rzpResult) => {
+          try {
+            const targetShopId = currentShop?.id || selectedShopId || currentBarber.shopId || (shops.length > 0 ? shops[0].id : '');
+            if (!targetShopId) {
+              throw new Error('Please select a salon.');
+            }
+            const payload = {
+              shopId: targetShopId,
+              shopName: currentShop?.name || currentBarber.shopName || (shops.length > 0 ? shops[0].name : 'BarberLoo Partner Salon'),
+              serviceId: currentService.id,
+              serviceName: currentService.name,
+              barberId: currentBarber.id,
+              barberName: currentBarber.name,
+              barberAvatar: currentBarber.avatar,
+              date: selectedDate,
+              time: selectedTime,
+              durationMins: totalAppointmentDuration,
+              durationMin: totalAppointmentDuration,
+              price: finalCustomerPayment,
+              servicePrice: displayServicePrice,
+              platformFee: displayPlatformFee,
+              totalPrice: finalCustomerPayment,
+              clientName: clientName || currentUserProfile?.name,
+              clientPhone: clientPhone || currentUserProfile?.phone || '+91',
+              notes: fullBookingNotes,
+              paymentMethod: 'online',
+              razorpayPaymentId: rzpResult.razorpay_payment_id,
+              razorpayOrderId: rzpResult.razorpay_order_id,
+              couponCode: appliedCouponCode || undefined,
+            };
+            const created = await onConfirmBooking(payload);
+            setBookingComplete({
+              ...(created || payload),
+              servicePrice: displayServicePrice,
+              platformFee: displayPlatformFee,
+              totalPrice: finalCustomerPayment,
+              razorpayPaymentId: rzpResult.razorpay_payment_id,
+              paymentMethod: 'online',
+            });
+          } catch (err: any) {
+            setBookingError(
+              err?.message || 'Error saving appointment after Razorpay payment.'
+            );
+          } finally {
+            setIsSubmitting(false);
+          }
+        },
+        onError: (err) => {
+          setIsSubmitting(false);
+          setBookingError(
+            err?.description ||
+              err?.message ||
+              tr(
+                'Razorpay authorization was not completed. Please retry payment.',
+                'रेज़रपे भुगतान पूरा नहीं हुआ। कृपया पुनः प्रयास करें।'
+              )
+          );
+        },
+        onDismiss: () => {
+          setIsSubmitting(false);
+        },
       });
     } catch (err: any) {
-      setBookingError(
-        err?.message ||
-          tr(
-            'Unable to confirm reservation. Please choose another time slot.',
-            'बुकिंग की पुष्टि नहीं हो सकी। कृपया दूसरा समय स्लॉट चुनें।'
-          )
-      );
-    } finally {
       setIsSubmitting(false);
+      setBookingError(err?.message || 'Failed to initialize Razorpay checkout.');
     }
   };
 
@@ -754,7 +831,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   )}
                 </p>
                 <h1 className="font-display text-3xl sm:text-4xl font-bold">
-                  {tr('Your Chair Is Reserved.', 'आपकी चेयर आरक्षित है।')}
+                  {tr('Appointment Confirmed!', 'अपॉइंटमेंट कन्फर्म!')}
                 </h1>
               </div>
             </div>
@@ -766,17 +843,21 @@ export const BookingPage: React.FC<BookingPageProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-[#241719] rounded-[20px] p-6 border border-[#F1E194]/15">
             <div>
               <p className="text-xs text-[#8A8178]">
-                {tr('Selected Service', 'चयनित सेवा')}
+                {tr('Shop', 'सैलून')}
+              </p>
+              <p className="font-display text-xl font-bold text-[#FFF9E8] mt-1">
+                {currentBarber.shopName}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-[#8A8178]">
+                {tr('Service', 'सेवा')}
               </p>
               <p className="font-display text-xl font-bold text-[#FFF9E8] mt-1">
                 {translateService(currentService.name)}
               </p>
-              <p className="text-xs text-[#F1E194] mt-1">
-                {currentService.durationMins || 45} {tr('mins', 'मिनट')} ·{' '}
-                {inrBreakdown.formattedFinal}{' '}
-                <span className="text-[#8A8178]">
-                  ({tr('Incl. 18% GST', '18% GST सहित')})
-                </span>
+              <p className="text-xs text-[#F1E194] mt-1 font-mono-num font-semibold">
+                {currentService.durationMins || 45} {tr('mins', 'मिनट')}
               </p>
             </div>
             <div>
@@ -799,62 +880,62 @@ export const BookingPage: React.FC<BookingPageProps> = ({
             </div>
             <div>
               <p className="text-xs text-[#8A8178]">
-                {tr('Date & Time (IST • UTC+5:30)', 'तारीख और समय (IST • UTC+5:30)')}
+                {tr('Date & Time', 'तारीख और समय')}
               </p>
               <p className="font-mono-num text-sm font-semibold text-[#FFF9E8] mt-1">
                 {formattedSelectedDate} · {formattedSelectedSlot.time24} IST (
                 {formattedSelectedSlot.time12})
               </p>
             </div>
-            <div>
-              <p className="text-xs text-[#8A8178]">
-                {tr('Salon Location', 'सैलून स्थान')}
-              </p>
-              <p className="text-sm font-semibold text-[#FFF9E8] mt-1">
-                {currentBarber.shopName}
-              </p>
-            </div>
 
-            {/* Payment & Gateway Settlement Metadata */}
-            <div className="sm:col-span-2 pt-3 border-t border-[#F1E194]/15">
-              <p className="text-[11px] uppercase tracking-wider text-[#8A8178]">
-                {tr('Payment Settlement & Verification', 'भुगतान निपटान और सत्यापन')}
-              </p>
-              {bookingComplete.paymentMethod === 'razorpay' ? (
-                <div className="mt-1 flex flex-wrap items-center justify-between gap-2 p-3 rounded-[12px] bg-emerald-950/60 border border-emerald-500/30">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-emerald-400" />
-                    <div>
-                      <p className="text-xs font-semibold text-emerald-200">
-                        {tr('Paid via Razorpay (UPI / Card)', 'रेज़रपे द्वारा भुगतान सफल')}
-                      </p>
-                      <p className="text-[10px] text-emerald-300/80 font-mono-num">
-                        {bookingComplete.razorpayPaymentId
-                          ? `Txn: ${bookingComplete.razorpayPaymentId}`
-                          : 'Payment Authorized'}
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-800 text-emerald-100">
-                    PAID • VERIFIED
+            {/* Transparent Financial Settlement Breakdown */}
+            <div className="sm:col-span-2 pt-3 border-t border-[#F1E194]/15 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] uppercase tracking-wider text-[#F1E194] font-semibold">
+                  {tr('Amount Paid', 'भुगतान की गई राशि')}
+                </p>
+                <span className="font-mono-num text-2xl font-bold text-emerald-400">
+                  {formatINR(bookingComplete.totalPrice || bookingComplete.price)}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 p-3 rounded-[12px] bg-[#111113] border border-[#F1E194]/15 text-center">
+                <div>
+                  <span className="text-[10px] text-[#8A8178] block">{tr('Service price', 'सेवा शुल्क')}</span>
+                  <span className="text-xs font-mono-num font-bold text-[#FFF9E8]">
+                    {formatINR(bookingComplete.servicePrice || (bookingComplete.price - (bookingComplete.platformFee || 10)))}
                   </span>
                 </div>
-              ) : (
-                <div className="mt-1 flex items-center justify-between gap-2 p-3 rounded-[12px] bg-[#111113] border border-[#F1E194]/15">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-[#F1E194]" />
-                    <p className="text-xs font-medium text-[#FFF9E8]">
-                      {tr(
-                        'Pay at Salon (Cash, Card or UPI after haircut)',
-                        'सैलून पर भुगतान (हेयरकट के बाद नकद, कार्ड या UPI)'
-                      )}
+                <div>
+                  <span className="text-[10px] text-[#8A8178] block">{tr('BarberLoo platform fee', 'प्लेटफ़ॉर्म शुल्क')}</span>
+                  <span className="text-xs font-mono-num font-bold text-[#F1E194]">
+                    {formatINR(bookingComplete.platformFee || 10)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-[#8A8178] block">{tr('Total', 'कुल')}</span>
+                  <span className="text-xs font-mono-num font-bold text-emerald-400">
+                    {formatINR(bookingComplete.totalPrice || bookingComplete.price)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-[12px] bg-emerald-950/60 border border-emerald-500/30">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-emerald-400" />
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-200">
+                      {tr('Paid Online via Razorpay', 'रेज़रपे द्वारा ऑनलाइन भुगतान सफल')}
+                    </p>
+                    <p className="text-[10px] text-emerald-300/80 font-mono-num">
+                      {bookingComplete.razorpayPaymentId
+                        ? `Txn ID: ${bookingComplete.razorpayPaymentId}`
+                        : 'Razorpay Verified Payment'}
                     </p>
                   </div>
-                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/30">
-                    PAY IN-STORE
-                  </span>
                 </div>
-              )}
+                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-800 text-emerald-100 font-bold">
+                  PAID • VERIFIED
+                </span>
+              </div>
             </div>
           </div>
 
@@ -864,14 +945,14 @@ export const BookingPage: React.FC<BookingPageProps> = ({
               onClick={() => onNavigate('customer-dashboard')}
               className="flex-1 py-4 px-6 rounded-[18px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#FFF9E8] transition-colors cursor-pointer"
             >
-              {tr('VIEW IN MY ACCOUNT', 'मेरे खाते में देखें')}
+              {tr('View My Booking', 'मेरी बुकिंग देखें')}
             </button>
             <button
               type="button"
               onClick={() => onNavigate('home')}
               className="py-4 px-6 rounded-[18px] border border-[#F1E194]/25 text-[#FFF9E8] text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#241719] transition-colors cursor-pointer"
             >
-              {tr('RETURN HOME', 'होम पर वापस जाएं')}
+              {tr('Back to Home', 'होम पर वापस जाएं')}
             </button>
           </div>
         </div>
@@ -1008,12 +1089,17 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between mb-2">
-                  <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
-                    {tr(
-                      '01. Choose Your Grooming Service',
-                      '01. अपनी ग्रूमिंग सेवा चुनें'
-                    )}
-                  </h2>
+                  <div>
+                    <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
+                      {tr('Choose a Service', 'सेवा चुनें')}
+                    </h2>
+                    <p className="text-xs text-[#8A8178] mt-0.5">
+                      {tr(
+                        'Select the service you want to book.',
+                        'वह सेवा चुनें जिसे आप बुक करना चाहते हैं।'
+                      )}
+                    </p>
+                  </div>
                   <span className="text-xs text-[#8A8178]">
                     {shopFilteredServices.length} {tr('services available', 'सेवाएं उपलब्ध')}
                   </span>
@@ -1102,7 +1188,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                     className="inline-flex items-center gap-2 px-7 py-4 rounded-[18px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#241719] transition-colors cursor-pointer"
                   >
                     <span>
-                      {tr('CONTINUE TO BARBER', 'बार्बर चुनने के लिए आगे बढ़ें')}
+                      {tr('Choose Barber', 'बार्बर चुनें')}
                     </span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
@@ -1114,9 +1200,17 @@ export const BookingPage: React.FC<BookingPageProps> = ({
             {step === 2 && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between mb-2">
-                  <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
-                    {tr('02. Select Barber', '02. बार्बर चुनें')}
-                  </h2>
+                  <div>
+                    <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
+                      {tr('Choose Your Barber', 'अपना बार्बर चुनें')}
+                    </h2>
+                    <p className="text-xs text-[#8A8178] mt-0.5">
+                      {tr(
+                        'Select a barber or let us assign an available professional.',
+                        'एक बार्बर चुनें या किसी भी उपलब्ध बार्बर को चुनें।'
+                      )}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setStep(1)}
@@ -1127,28 +1221,43 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   </button>
                 </div>
 
-                {shopBarbers.length === 0 && (
-                  <div className="p-4 rounded-[18px] bg-[#111113] border border-[#F1E194]/30 text-[#FFF9E8] space-y-1">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-[#F1E194]" />
-                      <span className="text-xs font-bold text-[#F1E194]">
-                        {tr(
-                          'Services Available • On-Duty Salon Team',
-                          'सेवाएं उपलब्ध • ऑन-ड्यूटी सैलून टीम'
-                        )}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#8A8178] leading-relaxed">
-                      {tr(
-                        "Services are available, but this shop hasn't added individual barber profiles yet. Your appointment will be reserved with the salon's verified on-duty master barber.",
-                        'सेवाएं उपलब्ध हैं, लेकिन इस दुकान ने अभी तक अलग-अलग बार्बर प्रोफ़ाइल नहीं जोड़ी हैं। आपकी बुकिंग सैलून के ऑन-ड्यूटी मास्टर बार्बर के साथ आरक्षित होगी।'
-                      )}
-                    </p>
-                  </div>
-                )}
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {shopFilteredBarbers.map((brb: any) => {
+                  {/* Any Available Barber Option (Rule 12) */}
+                  <div
+                    onClick={() => setSelectedBarber(defaultOnDutyBarber)}
+                    className={`rounded-[22px] p-5 border transition-all cursor-pointer flex gap-4 items-center ${
+                      currentBarber?.id === defaultOnDutyBarber.id || currentBarber?.name.includes('Master')
+                        ? 'bg-[#241719] text-[#FFF9E8] border-[#F1E194] shadow-xl'
+                        : 'bg-[#E9D9B8]/55 text-[#111113] border-[#5B0E14]/15 hover:border-[#5B0E14]/45'
+                    }`}
+                  >
+                    <div className="w-20 h-24 rounded-[16px] bg-[#5B0E14] text-[#F1E194] flex flex-col items-center justify-center shrink-0 border border-[#F1E194]/30">
+                      <Scissors className="w-8 h-8 mb-1" />
+                      <span className="text-[10px] uppercase font-bold tracking-wider">ANY</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-[#F1E194] bg-[#111113] px-2.5 py-0.5 rounded-[8px]">
+                          {tr('Flexible', 'सुविधाजनक')}
+                        </span>
+                        <span className="text-[11px] opacity-75">
+                          {tr('No Waiting', 'बिना इंतज़ार')}
+                        </span>
+                      </div>
+                      <h3 className="font-display text-xl font-bold mt-1.5 truncate">
+                        {tr('Any Available Barber', 'कोई भी उपलब्ध बार्बर')}
+                      </h3>
+                      <p className="text-xs text-[#8A8178] mt-1 leading-relaxed">
+                        {tr(
+                          'Let us choose an available barber for you.',
+                          'हमारे द्वारा आपके लिए एक उपलब्ध बार्बर चुना जाएगा।'
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Individual Shop Barbers */}
+                  {shopBarbers.map((brb: any) => {
                     const isSelected = currentBarber?.id === brb.id;
                     return (
                       <div
@@ -1174,7 +1283,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                               {brb.experience}
                             </span>
                           </div>
-                          <h3 className="font-display text-2xl font-bold mt-1.5 truncate">
+                          <h3 className="font-display text-xl font-bold mt-1.5 truncate">
                             {brb.name}
                           </h3>
                           <p
@@ -1206,7 +1315,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                     onClick={() => setStep(3)}
                     className="inline-flex items-center gap-2 px-7 py-4 rounded-[18px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#241719] transition-colors cursor-pointer"
                   >
-                    <span>{tr('SELECT DATE (IST)', 'तारीख चुनें (IST)')}</span>
+                    <span>{tr('Choose Date & Time', 'तारीख और समय चुनें')}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -1220,14 +1329,14 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   <div>
                     <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
                       {tr(
-                        '03. Select Appointment Date (IST)',
-                        '03. अपॉइंटमेंट की तारीख चुनें (IST)'
+                        'Choose Date & Time',
+                        'तारीख और समय चुनें'
                       )}
                     </h2>
                     <p className="text-xs text-[#8A8178] mt-1">
                       {tr(
-                        'Synchronized with Indian Standard Time (Asia/Kolkata • UTC+05:30)',
-                        'भारतीय मानक समय (Asia/Kolkata • UTC+05:30) के अनुसार'
+                        'Select your preferred date for the appointment.',
+                        'अपनी अपॉइंटमेंट के लिए पसंदीदा तारीख चुनें।'
                       )}
                     </p>
                   </div>
@@ -1318,7 +1427,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                     className="inline-flex items-center gap-2 px-7 py-4 rounded-[18px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#241719] transition-colors cursor-pointer"
                   >
                     <span>
-                      {tr('SELECT TIME SLOT (IST)', 'समय स्लॉट चुनें (IST)')}
+                      {tr('Choose Time', 'समय चुनें')}
                     </span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
@@ -1333,14 +1442,14 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   <div>
                     <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
                       {tr(
-                        `04. Select Time Slot (${formattedSelectedDate})`,
-                        `04. समय स्लॉट चुनें (${formattedSelectedDate})`
+                        `Choose Time (${formattedSelectedDate})`,
+                        `समय चुनें (${formattedSelectedDate})`
                       )}
                     </h2>
                     <p className="text-xs text-[#8A8178] mt-1">
                       {tr(
-                        'Real-time double-booking protection enabled · Indian Standard Time (UTC+05:30)',
-                        'डबल-बुकिंग सुरक्षा सक्रिय · भारतीय मानक समय (IST • UTC+05:30)'
+                        'Select an available time slot for your appointment.',
+                        'अपनी अपॉइंटमेंट के लिए एक उपलब्ध समय स्लॉट चुनें।'
                       )}
                     </p>
                   </div>
@@ -1435,7 +1544,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                     className="inline-flex items-center gap-2 px-7 py-4 rounded-[18px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#241719] transition-colors cursor-pointer"
                   >
                     <span>
-                      {tr('REVIEW & CONFIRM', 'समीक्षा करें और पुष्टि करें')}
+                      {tr('Review Booking', 'बुकिंग की समीक्षा करें')}
                     </span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
@@ -1450,12 +1559,20 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                 className="rounded-[24px] bg-[#E9D9B8]/55 border border-[#5B0E14]/20 p-6 sm:p-8 space-y-6"
               >
                 <div className="flex items-center justify-between border-b border-[#5B0E14]/12 pb-4">
-                  <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
-                    {tr(
-                      '05. Guest Details & Settlement',
-                      '05. ग्राहक विवरण और भुगतान'
-                    )}
-                  </h2>
+                  <div>
+                    <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
+                      {tr(
+                        'Pay & Confirm',
+                        'भुगतान करें और पुष्टि करें'
+                      )}
+                    </h2>
+                    <p className="text-xs text-[#8A8178] mt-1">
+                      {tr(
+                        'Confirm your details and pay online to secure your appointment.',
+                        'अपने विवरण की पुष्टि करें और अपनी बुकिंग सुरक्षित करने के लिए ऑनलाइन भुगतान करें।'
+                      )}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setStep(4)}
@@ -1538,79 +1655,35 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   </div>
                 </div>
 
-                {/* Settlement Preference (Razorpay + Pay at Salon) */}
+                {/* Online Payment Method (Razorpay UPI / Cards / NetBanking) */}
                 <div className="pt-2">
-                  <label className="block text-xs font-semibold text-[#241719] mb-2 flex items-center justify-between">
-                    <span>
-                      {tr(
-                        'Settlement Preference & Payment Method',
-                        'भुगतान का तरीका'
-                      )}
-                    </span>
-                    <span className="text-[10px] text-[#8A8178] font-normal">
-                      {tr('Secured by 256-bit SSL', '256-बिट SSL सुरक्षित')}
-                    </span>
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* 1. Razorpay Instant */}
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('razorpay')}
-                      className={`p-4 rounded-[16px] border text-left cursor-pointer transition-all ${
-                        paymentMethod === 'razorpay'
-                          ? 'bg-[#241719] text-[#FFF9E8] border-[#F1E194] shadow-md ring-1 ring-[#F1E194]/40'
-                          : 'bg-[#FAF6EA] text-[#111113] border-[#5B0E14]/20 hover:border-[#5B0E14]/40'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#F1E194]">
-                          <Zap className="w-3.5 h-3.5 fill-[#F1E194]" />
-                          <span>Razorpay</span>
+                  <div className="p-4 rounded-[16px] bg-[#FAF6EA] border border-[#5B0E14]/25 shadow-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-full bg-[#241719] flex items-center justify-center text-[#F1E194]">
+                          <Zap className="w-4 h-4 fill-[#F1E194]" />
                         </span>
-                        <span className="text-[9px] uppercase font-mono font-semibold px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">
-                          Instant
-                        </span>
+                        <div>
+                          <p className="text-xs font-bold text-[#111113]">
+                            {tr('Online Payment via Razorpay', 'रेज़रपे ऑनलाइन भुगतान')}
+                          </p>
+                          <p className="text-[11px] text-[#8A8178]">
+                            {tr('UPI (GPay, PhonePe, Paytm, BHIM) • Cards • NetBanking', 'UPI • डेबिट/क्रेडिट कार्ड्स • नेटबैंकिंग')}
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-[11px] font-semibold">
-                        {tr('UPI / Cards / NetBanking', 'UPI / कार्ड / नेटबैंकिंग')}
-                      </p>
-                      <p className="text-[10px] text-[#8A8178] mt-0.5 leading-tight">
-                        {tr(
-                          'GPay, PhonePe, Paytm, Visa, RuPay',
-                          'GPay, PhonePe, कार्ड्स'
-                        )}
-                      </p>
-                    </button>
-
-                    {/* 2. Pay at Salon */}
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('pay_at_shop')}
-                      className={`p-4 rounded-[16px] border text-left cursor-pointer transition-all ${
-                        paymentMethod === 'pay_at_shop'
-                          ? 'bg-[#241719] text-[#FFF9E8] border-[#F1E194] shadow-md ring-1 ring-[#F1E194]/40'
-                          : 'bg-[#FAF6EA] text-[#111113] border-[#5B0E14]/20 hover:border-[#5B0E14]/40'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#F1E194]">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span>Salon Counter</span>
-                        </span>
-                        <span className="text-[9px] uppercase font-mono font-semibold px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/30">
-                          Post-Cut
-                        </span>
-                      </div>
-                      <p className="text-[11px] font-semibold">
-                        {tr('Pay at Salon (Post-Cut)', 'सैलून पर भुगतान')}
-                      </p>
-                      <p className="text-[10px] text-[#8A8178] mt-0.5 leading-tight">
-                        {tr(
-                          'Cash or UPI after service completion',
-                          'सेवा के बाद नकद या UPI'
-                        )}
-                      </p>
-                    </button>
+                      <span className="text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">
+                        Instant & Secure
+                      </span>
+                    </div>
+                    <div className="pt-2 border-t border-[#5B0E14]/10 flex items-center justify-between text-xs text-[#241719]">
+                      <span className="text-[#8A8178]">
+                        {tr('Total Customer Payment', 'कुल देय राशि')}:
+                      </span>
+                      <span className="font-mono-num font-bold text-sm text-[#5B0E14]">
+                        {formatINR(finalCustomerPayment)}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -1662,20 +1735,15 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-4 px-6 rounded-[18px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold tracking-[0.16em] uppercase hover:bg-[#241719] transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+                  className="w-full py-4 px-6 rounded-[18px] bg-[#5B0E14] text-[#FFF9E8] text-sm font-bold tracking-[0.14em] uppercase hover:bg-[#241719] transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xl"
                 >
                   <Sparkles className="w-4 h-4 text-[#F1E194]" />
                   <span>
                     {isSubmitting
                       ? tr('PROCESSING RESERVATION...', 'प्रक्रिया जारी है...')
-                      : paymentMethod === 'razorpay'
-                      ? tr(
-                          `PAY WITH RAZORPAY • ${inrBreakdown.formattedFinal}`,
-                          `रेज़रपे से भुगतान करें • ${inrBreakdown.formattedFinal}`
-                        )
                       : tr(
-                          `RESERVE CHAIR (PAY AT SALON) • ${inrBreakdown.formattedFinal}`,
-                          `चेयर आरक्षित करें (सैलून पर भुगतान) • ${inrBreakdown.formattedFinal}`
+                          `PAY ${formatINR(finalCustomerPayment)}`,
+                          `${formatINR(finalCustomerPayment)} भुगतान करें`
                         )}
                   </span>
                 </button>
@@ -1743,49 +1811,58 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                 </div>
               </div>
 
-              {/* Indian Locale Pricing & GST Breakdown */}
-              <div className="pt-4 border-t border-[#F1E194]/15 space-y-2">
-                <div className="flex justify-between text-xs text-[#8A8178]">
-                  <span>{tr('Base Service MRP', 'मूल सेवा शुल्क')}</span>
-                  <span className="font-mono-num">{formatINR(basePrice)}</span>
+              {/* PRICE BREAKDOWN: Service price + BarberLoo platform fee = Total */}
+              <div className="pt-4 border-t border-[#F1E194]/15 space-y-2.5">
+                <p className="text-[11px] font-semibold tracking-wider uppercase text-[#F1E194]">
+                  {tr('PRICE BREAKDOWN', 'मूल्य विवरण')}
+                </p>
+
+                <div className="flex justify-between text-xs text-[#FFF9E8]/90">
+                  <span>{tr('Service price', 'सेवा शुल्क')}</span>
+                  <span className="font-mono-num font-semibold">{formatINR(displayServicePrice)}</span>
                 </div>
 
-                {appliedDiscountPercent > 0 && (
+                {displayDiscountAmount > 0 && (
                   <div className="flex justify-between text-xs text-[#F1E194]">
                     <span>
-                      {tr('Privilege Discount', 'विशेष छूट')} ({appliedCouponCode} ·{' '}
-                      {appliedDiscountPercent}%)
+                      {tr('Discount', 'छूट')} ({appliedCouponCode} · {appliedDiscountPercent}%)
                     </span>
-                    <span className="font-mono-num">
-                      -{inrBreakdown.formattedDiscount}
+                    <span className="font-mono-num font-semibold">
+                      -{formatINR(displayDiscountAmount)}
                     </span>
                   </div>
                 )}
 
-                <div className="flex justify-between text-[11px] text-[#8A8178]/85 pt-1">
-                  <span>{tr('Taxable Base Value', 'कर योग्य मूल राशि')}</span>
-                  <span className="font-mono-num">{inrBreakdown.formattedBase}</span>
+                <div className="flex justify-between text-xs text-[#FFF9E8]/90">
+                  <span>{tr('BarberLoo platform fee', 'BarberLoo प्लेटफ़ॉर्म शुल्क')}</span>
+                  <span className="font-mono-num font-semibold">{formatINR(displayPlatformFee)}</span>
                 </div>
-                <div className="flex justify-between text-[11px] text-[#8A8178]/85">
-                  <span>CGST (9%) + SGST (9%)</span>
-                  <span className="font-mono-num">
-                    {inrBreakdown.formattedCgst} + {inrBreakdown.formattedSgst}
+
+                <div className="flex justify-between items-baseline pt-3 border-t border-[#F1E194]/20">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#F1E194]">
+                    {tr('Total', 'कुल राशि')}
+                  </span>
+                  <span className="font-mono-num text-3xl font-bold text-[#F1E194]">
+                    {formatINR(finalCustomerPayment)}
                   </span>
                 </div>
 
-                <div className="flex justify-between items-baseline pt-3 border-t border-[#F1E194]/15">
-                  <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-[#8A8178]">
-                      {tr('Total Payable (INR)', 'कुल देय राशि (INR)')}
-                    </span>
-                    <span className="block text-[10px] text-[#8A8178]">
-                      {tr('Inclusive of 18% GST', '18% GST सहित')}
-                    </span>
-                  </div>
-                  <span className="font-mono-num text-3xl font-bold text-[#F1E194]">
-                    {inrBreakdown.formattedFinal}
+                <button
+                  type="button"
+                  onClick={handleCompleteBooking}
+                  disabled={isSubmitting}
+                  className="w-full mt-3 py-3.5 px-5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-bold tracking-[0.14em] uppercase hover:bg-[#FFF9E8] transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+                >
+                  <Sparkles className="w-3.5 h-3.5 fill-[#111113]" />
+                  <span>
+                    {isSubmitting
+                      ? tr('PROCESSING...', 'प्रक्रिया जारी है...')
+                      : tr(
+                          `PAY ${formatINR(finalCustomerPayment)}`,
+                          `${formatINR(finalCustomerPayment)} भुगतान करें`
+                        )}
                   </span>
-                </div>
+                </button>
               </div>
             </div>
           </div>

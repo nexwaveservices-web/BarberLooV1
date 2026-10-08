@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
-import { eq } from 'drizzle-orm';
+import { eq, or, and } from 'drizzle-orm';
 import { db } from './src/db/index.ts';
 import {
   states,
@@ -19,9 +19,9 @@ import {
   workingHours,
   payments,
   coupons,
-  rewards,
   reports,
   appointments,
+  platformSettings,
 } from './src/db/schema.ts';
 import {
   getOrCreateUser,
@@ -29,6 +29,9 @@ import {
   createBookingInDb,
   updateAppointmentInDb,
   resolveAllowedRole,
+  getPlatformSettings,
+  updatePlatformSettingsInDb,
+  calculateServerBookingPrice,
 } from './src/db/users.ts';
 import {
   requireAuth,
@@ -85,6 +88,16 @@ async function startServer() {
       });
     }
     next(err);
+  });
+
+  // Health Check Endpoint
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      status: 'ok',
+      service: 'barberloo',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // WP Pusher & GitHub status & webhook endpoints
@@ -366,6 +379,19 @@ async function startServer() {
         }
         if (status !== undefined) {
           updateFields.status = status;
+          if (status === 'suspended') {
+            await db
+              .update(barbers)
+              .set({ active: false, verificationStatus: 'suspended' })
+              .where(or(eq(barbers.userUid, uid), eq(barbers.id, uid)))
+              .catch(() => {});
+          } else if (status === 'active') {
+            await db
+              .update(barbers)
+              .set({ active: true, verificationStatus: 'verified', verified: true })
+              .where(or(eq(barbers.userUid, uid), eq(barbers.id, uid)))
+              .catch(() => {});
+          }
         }
       }
 
@@ -407,7 +433,6 @@ async function startServer() {
         customerUid: requester.uid, // Authoritative verified user ID
         clientName,
         clientPhone,
-        clientTier: userProf?.tier || 'Member',
         shopId: req.body.shopId || 'shop-1',
         shopName: req.body.shopName || '',
         barberId: req.body.barberId,
@@ -418,7 +443,7 @@ async function startServer() {
         time: req.body.time,
         durationMin: Number(req.body.durationMin) || 45,
         price: Number(req.body.price) || 0,
-        paymentMethod: req.body.paymentMethod || 'pay_at_shop',
+        paymentMethod: req.body.paymentMethod || 'online',
         razorpayPaymentId: req.body.razorpayPaymentId || '',
         razorpayOrderId: req.body.razorpayOrderId || '',
         woocommerceOrderId: req.body.woocommerceOrderId || '',
@@ -600,13 +625,157 @@ async function startServer() {
         if (req.body[k] !== undefined) updateData[k] = req.body[k];
       }
 
+      if (req.body.verificationStatus === 'suspended') {
+        updateData.active = false;
+      } else if (req.body.verificationStatus === 'verified') {
+        updateData.active = true;
+        updateData.verified = true;
+      }
+
       const [updated] = await db
         .update(barbers)
         .set(updateData)
         .where(eq(barbers.id, req.params.id))
         .returning();
 
+      if (req.body.verificationStatus === 'suspended') {
+        const suspensionReason =
+          req.body.suspensionReason || 'Administrative suspension';
+        const appointmentAction = req.body.appointmentAction || 'flag';
+        const reassignBarberId = req.body.reassignBarberId;
+        const reassignBarberName =
+          req.body.reassignBarberName || 'Salon Master Barber';
+
+        // 1. Synchronize user profile status to suspended
+        if (updated?.userUid) {
+          await db
+            .update(profiles)
+            .set({ status: 'suspended' })
+            .where(eq(profiles.uid, updated.userUid))
+            .catch(() => {});
+        }
+
+        // 2. Handle affected upcoming appointments
+        const affectedApts = await db
+          .select()
+          .from(appointments)
+          .where(
+            and(
+              eq(appointments.barberId, req.params.id),
+              or(
+                eq(appointments.status, 'confirmed'),
+                eq(appointments.status, 'pending')
+              )
+            )
+          )
+          .catch(() => []);
+
+        for (const apt of affectedApts) {
+          if (appointmentAction === 'cancel') {
+            await db
+              .update(appointments)
+              .set({
+                status: 'cancelled',
+                notes: `${apt.notes || ''} [Cancelled by Salon: Barber chair suspended]`.trim(),
+              })
+              .where(eq(appointments.id, apt.id))
+              .catch(() => {});
+
+            if (apt.customerUid) {
+              await db
+                .insert(notifications)
+                .values({
+                  id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  recipientUid: apt.customerUid,
+                  type: 'appointment_cancelled',
+                  title: `Appointment Cancelled: ${apt.shopName}`,
+                  timeLabel: 'Just now',
+                  unread: true,
+                })
+                .catch(() => {});
+            }
+          } else if (appointmentAction === 'reassign' && reassignBarberId) {
+            await db
+              .update(appointments)
+              .set({
+                barberId: reassignBarberId,
+                barberName: reassignBarberName,
+                notes: `${apt.notes || ''} [Reassigned from suspended chair]`.trim(),
+              })
+              .where(eq(appointments.id, apt.id))
+              .catch(() => {});
+
+            if (apt.customerUid) {
+              await db
+                .insert(notifications)
+                .values({
+                  id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  recipientUid: apt.customerUid,
+                  type: 'appointment_updated',
+                  title: `Appointment Reassigned: ${reassignBarberName} (${apt.shopName})`,
+                  timeLabel: 'Just now',
+                  unread: true,
+                })
+                .catch(() => {});
+            }
+          } else {
+            if (apt.customerUid) {
+              await db
+                .insert(notifications)
+                .values({
+                  id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  recipientUid: apt.customerUid,
+                  type: 'appointment_alert',
+                  title: `Schedule Notice for Your Booking at ${apt.shopName}`,
+                  timeLabel: 'Just now',
+                  unread: true,
+                })
+                .catch(() => {});
+            }
+          }
+        }
+
+        // 3. Notify the suspended barber with explicit reason
+        if (updated?.userUid) {
+          await db
+            .insert(notifications)
+            .values({
+              id: `notif-${Date.now()}`,
+              recipientUid: updated.userUid,
+              type: 'account_suspended',
+              title: `Account Notice: Chair Suspended (${suspensionReason})`,
+              timeLabel: 'Just now',
+              unread: true,
+            })
+            .catch(() => {});
+        }
+      } else if (req.body.verificationStatus === 'verified') {
+        // Reinstatement: Restore user profile to active
+        if (updated?.userUid) {
+          await db
+            .update(profiles)
+            .set({ status: 'active' })
+            .where(eq(profiles.uid, updated.userUid))
+            .catch(() => {});
+
+          await db
+            .insert(notifications)
+            .values({
+              id: `notif-${Date.now()}`,
+              recipientUid: updated.userUid,
+              type: 'account_reinstated',
+              title: 'Account Notice: Chair Reinstated & Verified',
+              timeLabel: 'Just now',
+              unread: true,
+            })
+            .catch(() => {});
+        }
+      }
+
       broadcastEvent('state:updated', { entity: 'barbers' });
+      broadcastEvent('state:updated', { entity: 'profiles' });
+      broadcastEvent('state:updated', { entity: 'appointments' });
+      broadcastEvent('state:updated', { entity: 'notifications' });
       res.json(updated);
     } catch (error: any) {
       res
@@ -715,6 +884,47 @@ async function startServer() {
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error.message || 'Failed to update shop' });
+    }
+  });
+
+  app.get('/api/shops/:id', async (req, res) => {
+    try {
+      const cleanId = (req.params.id || '').trim();
+      if (!cleanId) return res.status(400).json({ error: 'Shop ID required' });
+
+      const [shopRecord] = await db
+        .select()
+        .from(shops)
+        .where(or(eq(shops.id, cleanId), eq(shops.qrCodeSlug, cleanId)))
+        .limit(1);
+
+      if (!shopRecord) {
+        return res.status(404).json({ error: 'Shop not found' });
+      }
+
+      const pSettings = await getPlatformSettings();
+      const domain = pSettings?.customDomain || 'https://barberloo.in';
+
+      const shopServices = await db
+        .select()
+        .from(services)
+        .where(eq(services.shopId, shopRecord.id));
+
+      const shopBarbers = await db
+        .select()
+        .from(barbers)
+        .where(eq(barbers.shopId, shopRecord.id));
+
+      res.json({
+        shop: {
+          ...shopRecord,
+          qrCodeUrl: `${domain}/booking.html?shop_id=${encodeURIComponent(shopRecord.id)}`,
+        },
+        services: shopServices,
+        barbers: shopBarbers,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to fetch shop details' });
     }
   });
 
@@ -905,61 +1115,7 @@ async function startServer() {
     }
   );
 
-  // 12. Loyalty Rewards Redemption (Requires Auth)
-  app.post(
-    '/api/rewards/redeem',
-    requireAuth,
-    async (req: AuthRequest, res) => {
-      try {
-        const customerUid = req.user!.uid;
-        const cost = Number(req.body.cost) || 300;
-        const label = req.body.label || 'Reward Redemption';
-
-        const profList = await db
-          .select()
-          .from(profiles)
-          .where(eq(profiles.uid, customerUid));
-        const prof = profList[0];
-        if (!prof || prof.rewardBalance < cost) {
-          return res
-            .status(400)
-            .json({ error: 'Insufficient reward points balance.' });
-        }
-
-        const newBalance = prof.rewardBalance - cost;
-        await db
-          .update(profiles)
-          .set({ rewardBalance: newBalance })
-          .where(eq(profiles.uid, customerUid));
-
-        await db.insert(rewards).values({
-          id: `rew-${Date.now()}`,
-          customerUid,
-          pointsDelta: -cost,
-          reason: `Redeemed: ${label}`,
-          type: 'redeemed',
-        });
-
-        await db.insert(notifications).values({
-          id: `notif-${Date.now()}`,
-          recipientUid: customerUid,
-          type: 'reward_redeemed',
-          title: `Redeemed ${cost} PTS for ${label}`,
-          timeLabel: 'Just now · Loyalty Desk',
-          unread: true,
-        });
-
-        broadcastEvent('state:updated', { entity: 'rewards' });
-        res.json({ rewardBalance: newBalance });
-      } catch (error: any) {
-        res
-          .status(500)
-          .json({ error: error.message || 'Failed to redeem reward' });
-      }
-    }
-  );
-
-  // 13. Mark Notifications Read (Requires Auth)
+  // 12. Mark Notifications Read (Requires Auth)
   app.post(
     '/api/notifications/read',
     requireAuth,
@@ -1107,13 +1263,56 @@ async function startServer() {
     }
   );
 
-  // 17. Razorpay Order Creation (Requires Auth)
+  // 16b. Platform Fee Configuration Endpoints
+  app.get('/api/platform/fee', async (_req, res) => {
+    try {
+      const settings = await getPlatformSettings();
+      res.json(settings);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch platform fee settings' });
+    }
+  });
+
+  app.patch('/api/platform/fee', requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const updated = await updatePlatformSettingsInDb(req.body);
+      broadcastEvent('state:updated', { entity: 'platformSettings', settings: updated });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update platform fee settings' });
+    }
+  });
+
+  // 16c. Authoritative Server-side Price Calculation API
+  app.post('/api/pricing/calculate', async (req, res) => {
+    try {
+      const { serviceId, couponCode } = req.body;
+      if (!serviceId) {
+        return res.status(400).json({ error: 'Service ID is required' });
+      }
+      const pricing = await calculateServerBookingPrice(serviceId, couponCode);
+      res.json(pricing);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to calculate pricing' });
+    }
+  });
+
+  // 17. Razorpay Order Creation (Server-calculated Total Price Only)
   app.post(
     '/api/payments/razorpay/create-order',
     requireAuth,
     async (req: AuthRequest, res) => {
       try {
-        const { amount, currency = 'INR', receipt, notes } = req.body;
+        const { serviceId, couponCode, receipt, notes } = req.body;
+        if (!serviceId) {
+          return res.status(400).json({ error: 'serviceId is required to create a booking payment order' });
+        }
+
+        // Authoritative Server-side Price & Fee Calculation
+        const pricing = await calculateServerBookingPrice(serviceId, couponCode);
+        const serverTotalAmount = pricing.totalAmount; // in INR rupees
+        const orderAmountPaise = Math.round(serverTotalAmount * 100); // in paise
+
         const keyId =
           process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
         const keySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -1126,30 +1325,46 @@ async function startServer() {
           });
 
           const order = await razorpay.orders.create({
-            amount: Math.round(Number(amount) * 100), // amount in paise
-            currency,
+            amount: orderAmountPaise,
+            currency: 'INR',
             receipt: receipt || `rcpt_${Date.now()}`,
-            notes: notes || {},
+            notes: {
+              ...(notes || {}),
+              serviceId: pricing.serviceId,
+              serviceName: pricing.serviceName,
+              servicePrice: String(pricing.servicePrice),
+              platformFee: String(pricing.platformFee),
+              discountAmount: String(pricing.discountAmount),
+              totalAmount: String(pricing.totalAmount),
+            },
           });
 
           return res.json({
             success: true,
             orderId: order.id,
             amount: order.amount,
-            currency: order.currency,
+            servicePrice: pricing.servicePrice,
+            platformFee: pricing.platformFee,
+            discountAmount: pricing.discountAmount,
+            totalAmount: pricing.totalAmount,
+            currency: 'INR',
             keyId,
           });
         }
 
-        // Test Mode order fallback for local evaluation
+        // Test Mode order fallback for local evaluation / simulation
         const simulatedOrderId = `order_${Date.now().toString(36)}${Math.random()
           .toString(36)
           .substring(2, 6)}`;
         res.json({
           success: true,
           orderId: simulatedOrderId,
-          amount: Math.round(Number(amount) * 100),
-          currency,
+          amount: orderAmountPaise,
+          servicePrice: pricing.servicePrice,
+          platformFee: pricing.platformFee,
+          discountAmount: pricing.discountAmount,
+          totalAmount: pricing.totalAmount,
+          currency: 'INR',
           keyId: keyId || 'rzp_test_barberloo_india',
           isSimulator: true,
         });

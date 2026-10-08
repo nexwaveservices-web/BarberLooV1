@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   AppointmentItem,
   BarberItem,
@@ -18,6 +18,7 @@ import {
   User,
   Check,
   RotateCcw,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import {
   useLanguage,
@@ -30,6 +31,7 @@ import { apiClaimSlaCompensation } from '../lib/api';
 import {
   evaluateAppointmentSla,
   markCustomerClaimedSla,
+  hasCustomerClaimedSla,
 } from '../lib/sla';
 import {
   getBrowserNotificationPermission,
@@ -46,6 +48,7 @@ import {
 } from '../lib/locations';
 
 interface CustomerDashboardProps {
+  initialSection?: 'bookings' | 'profile';
   appointments: AppointmentItem[];
   onCancelAppointment: (id: string) => void;
   onRescheduleAppointment?: (
@@ -64,18 +67,17 @@ interface CustomerDashboardProps {
   onToggleFavorite?: (targetType: 'shop' | 'barber', targetId: string) => void;
   notifications?: any[];
   onMarkNotificationsRead?: () => Promise<void>;
-  rewards?: any[];
-  rewardBalance?: number;
-  onRedeemReward?: (cost: number, label: string) => Promise<void>;
   currentUserProfile?: any;
   onUpdateProfile?: (updates: any) => Promise<void>;
   payments?: any[];
   reviews?: any[];
   onSubmitReview?: (payload: any) => Promise<void>;
   onUpdateReview?: (id: string, updates: any) => Promise<void>;
+  platformSettings?: any;
 }
 
 export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
+  initialSection = 'bookings',
   appointments,
   onCancelAppointment,
   onRescheduleAppointment,
@@ -90,23 +92,33 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   onToggleFavorite,
   notifications = [],
   onMarkNotificationsRead,
-  rewards = [],
-  rewardBalance = 0,
-  onRedeemReward,
   currentUserProfile,
   onUpdateProfile,
   payments = [],
   reviews = [],
   onSubmitReview,
   onUpdateReview,
+  platformSettings,
 }) => {
   const { lang, tr, formatINR, translateService } = useLanguage();
   const istDates = useMemo(() => getUpcomingISTDates(7, lang), [lang]);
 
+  const [activeCustomerSection, setActiveCustomerSection] = useState<'bookings' | 'profile'>(
+    initialSection
+  );
+
+  useEffect(() => {
+    if (initialSection) {
+      setActiveCustomerSection(initialSection);
+    }
+  }, [initialSection]);
+
   const [historyFilter, setHistoryFilter] = useState<
-    'All' | 'Upcoming' | 'Completed' | 'Cancelled' | 'No-Show'
-  >('All');
+    'Upcoming' | 'Past' | 'All'
+  >('Upcoming');
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [cancellingApt, setCancellingApt] = useState<any | null>(null);
+  const [isProcessingCancel, setIsProcessingCancel] = useState(false);
   const [newDate, setNewDate] = useState(
     istDates[1]?.isoDate || new Date().toISOString().slice(0, 10)
   );
@@ -152,27 +164,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [browserAlertsOn, setBrowserAlertsOn] = useState<boolean>(() =>
     areBrowserAlertsEnabled()
   );
-  const [claimedSlaIds, setClaimedSlaIds] = useState<string[]>([]);
-
-  const handleClaimSlaBonus = async (apt: any) => {
-    if (!currentUserProfile?.uid || claimedSlaIds.includes(apt.id)) return;
-    markCustomerClaimedSla(apt.id);
-    setClaimedSlaIds((prev) => [...prev, apt.id]);
-    await apiClaimSlaCompensation({
-      customerUid: currentUserProfile.uid,
-      appointmentId: apt.id,
-      serviceName: apt.serviceName,
-      barberName: apt.barberName,
-      points: 100,
-    });
-    setStatusToast(
-      tr(
-        '🛡️ +100 PTS SLA On-Time Chair Guarantee Credit added to your rewards!',
-        '🛡️ +100 PTS SLA ऑन-टाइम गारंटी क्रेडिट आपके रिवॉर्ड्स में जोड़ दिया गया है!'
-      )
-    );
-    setTimeout(() => setStatusToast(''), 4000);
-  };
 
   const upcomingAppointments = appointments.filter(
     (a) =>
@@ -229,18 +220,22 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   const filteredAppointments = appointments.filter((apt) => {
     const st = String(apt.status).toLowerCase();
-    if (historyFilter === 'All') return true;
-    if (historyFilter === 'Upcoming')
+    if (historyFilter === 'Upcoming') {
       return (
         st === 'confirmed' ||
         st === 'pending' ||
         st === 'in_progress' ||
         st === 'in progress'
       );
-    if (historyFilter === 'Completed') return st === 'completed';
-    if (historyFilter === 'Cancelled') return st === 'cancelled';
-    if (historyFilter === 'No-Show')
-      return st === 'no_show' || st === 'no-show';
+    }
+    if (historyFilter === 'Past') {
+      return (
+        st === 'completed' ||
+        st === 'cancelled' ||
+        st === 'no_show' ||
+        st === 'no-show'
+      );
+    }
     return true;
   });
 
@@ -325,32 +320,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     onNavigate('booking');
   };
 
-  const handleRedeem = async (cost: number, label: string) => {
-    if (!onRedeemReward) return;
-    if (rewardBalance < cost) {
-      setStatusToast(
-        tr(
-          `Need ${cost} PTS to redeem ${label}. Complete appointments to earn points!`,
-          `इसे रिडीम करने के लिए ${cost} पॉइंट्स आवश्यक हैं।`
-        )
-      );
-      setTimeout(() => setStatusToast(''), 3500);
-      return;
-    }
-    await onRedeemReward(cost, label);
-    setStatusToast(
-      tr(
-        `✓ Redeemed ${label} (-${cost} PTS)`,
-        `✓ ${label} सफलतापूर्वक रिडीम किया गया (-${cost} PTS)`
-      )
-    );
-    setTimeout(() => setStatusToast(''), 3500);
-  };
-
   return (
     <div className="min-h-screen bg-[#FAF6EA] text-[#111113] py-10 sm:py-14">
       <div className="max-w-[1360px] mx-auto px-5 sm:px-8 space-y-10">
-        {/* Top Welcome & Loyalty Header */}
+        {/* Top Welcome Header */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-8 border-b border-[#5B0E14]/15">
           <div className="flex items-center gap-4">
             {currentUserProfile?.avatarUrl ? (
@@ -375,18 +348,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="px-5 py-3 rounded-[18px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/30 flex items-center gap-3">
-              <Award className="w-5 h-5 text-[#F1E194]" />
-              <div>
-                <div className="text-[10px] uppercase tracking-widest text-[#8A8178]">
-                  {tr('Reward Points', 'रिवॉर्ड पॉइंट्स')}
-                </div>
-                <div className="font-mono-num text-lg font-bold text-[#F1E194]">
-                  {rewardBalance.toLocaleString('en-IN')} PTS
-                </div>
-              </div>
-            </div>
-
             <button
               type="button"
               onClick={() => setEditingProfile((prev) => !prev)}
@@ -404,6 +365,44 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               {tr('+ BOOK NEW CUT', '+ नया अपॉइंटमेंट बुक करें')}
             </button>
           </div>
+        </div>
+
+        {/* Navigation Tabs between My Bookings and Profile (Rules 17 & 18) */}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setActiveCustomerSection('bookings')}
+            className={`px-6 py-3 rounded-[18px] text-xs font-semibold cursor-pointer transition-colors inline-flex items-center gap-2 ${
+              activeCustomerSection === 'bookings'
+                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md'
+                : 'bg-[#E9D9B8]/70 text-[#111113] hover:bg-[#E9D9B8]'
+            }`}
+          >
+            <Calendar className="w-4 h-4" />
+            <span>{tr('My Bookings', 'मेरी बुकिंग')}</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                activeCustomerSection === 'bookings'
+                  ? 'bg-[#FFF9E8]/20 text-[#FFF9E8]'
+                  : 'bg-[#5B0E14]/15 text-[#5B0E14]'
+              }`}
+            >
+              {appointments.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveCustomerSection('profile')}
+            className={`px-6 py-3 rounded-[18px] text-xs font-semibold cursor-pointer transition-colors inline-flex items-center gap-2 ${
+              activeCustomerSection === 'profile'
+                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md'
+                : 'bg-[#E9D9B8]/70 text-[#111113] hover:bg-[#E9D9B8]'
+            }`}
+          >
+            <User className="w-4 h-4" />
+            <span>{tr('Profile', 'प्रोफ़ाइल')}</span>
+          </button>
         </div>
 
         {statusToast && (
@@ -552,8 +551,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           </form>
         )}
 
-        {/* Main 12-Col Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Section 1: Bookings View or Section 2: Profile View (Rule 18) */}
+        {activeCustomerSection === 'bookings' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Left 8 Cols */}
           <div className="lg:col-span-8 space-y-8">
             {/* Upcoming Appointment Hero Card */}
@@ -649,7 +649,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     const sla = evaluateAppointmentSla(nextAppointment);
                     if (sla.status === 'EXEMPT') return null;
                     const alreadyClaimed =
-                      claimedSlaIds.includes(nextAppointment.id) ||
+                      hasCustomerClaimedSla(nextAppointment.id) ||
                       !sla.canClaimCompensation;
                     return (
                       <div
@@ -669,18 +669,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             {sla.detailText}
                           </p>
                         </div>
-                        {sla.status === 'BREACHED' && !alreadyClaimed && (
-                          <button
-                            type="button"
-                            onClick={() => handleClaimSlaBonus(nextAppointment)}
-                            className="px-3.5 py-2 rounded-[10px] bg-[#F1E194] text-[#111113] text-[11px] font-semibold uppercase tracking-wider shrink-0 cursor-pointer"
-                          >
-                            {tr(
-                              'Claim +100 PTS SLA Credit',
-                              '+100 PTS SLA क्रेडिट प्राप्त करें'
-                            )}
-                          </button>
-                        )}
                       </div>
                     );
                   })()}
@@ -755,7 +743,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onCancelAppointment(nextAppointment.id)}
+                        onClick={() => setCancellingApt(nextAppointment)}
                         className="px-4 py-2 rounded-[14px] bg-[#5B0E14] text-xs font-semibold text-[#FFF9E8] hover:bg-[#75131b] transition-colors cursor-pointer inline-flex items-center gap-1.5"
                       >
                         <XCircle className="w-3.5 h-3.5" />
@@ -783,42 +771,37 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               )}
             </div>
 
-            {/* Booking History with One-Tap Rebooking */}
+            {/* My Bookings (Rule 17) */}
             <div className="rounded-[24px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 sm:p-8 space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
-                  {tr('Booking History', 'बुकिंग इतिहास')}
-                </h2>
+                <div>
+                  <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
+                    {tr('My Bookings', 'मेरी बुकिंग')}
+                  </h2>
+                  <p className="text-xs text-[#8A8178] mt-0.5">
+                    {tr('See your appointments and booking status.', 'अपनी सभी अपॉइंटमेंट्स देखें।')}
+                  </p>
+                </div>
 
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {(
                     [
-                      'All',
-                      'Upcoming',
-                      'Completed',
-                      'Cancelled',
-                      'No-Show',
+                      { id: 'Upcoming', label: tr('Upcoming', 'आगामी') },
+                      { id: 'Past', label: tr('Past', 'पिछली') },
+                      { id: 'All', label: tr('All', 'सभी') },
                     ] as const
                   ).map((tab) => (
                     <button
-                      key={tab}
+                      key={tab.id}
                       type="button"
-                      onClick={() => setHistoryFilter(tab)}
-                      className={`px-3 py-1.5 rounded-[12px] text-xs font-semibold cursor-pointer ${
-                        historyFilter === tab
+                      onClick={() => setHistoryFilter(tab.id as any)}
+                      className={`px-4 py-2 rounded-[14px] text-xs font-semibold cursor-pointer transition-colors ${
+                        historyFilter === tab.id
                           ? 'bg-[#5B0E14] text-[#FFF9E8]'
-                          : 'bg-[#FAF6EA] text-[#241719]'
+                          : 'bg-[#FAF6EA] text-[#241719] hover:bg-[#FAF6EA]/80'
                       }`}
                     >
-                      {tab === 'All'
-                        ? tr('All', 'सभी')
-                        : tab === 'Upcoming'
-                        ? tr('Upcoming', 'आगामी')
-                        : tab === 'Completed'
-                        ? tr('Completed', 'पूर्ण')
-                        : tab === 'Cancelled'
-                        ? tr('Cancelled', 'रद्द')
-                        : tr('No-Show', 'अनुपस्थित')}
+                      {tab.label}
                     </button>
                   ))}
                 </div>
@@ -914,6 +897,31 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             <span className="px-2.5 py-1 rounded-[10px] bg-[#E9D9B8] text-[11px] font-semibold">
                               {apt.status}
                             </span>
+                            {!isCompleted &&
+                              String(apt.status).toLowerCase() !== 'cancelled' && (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setReschedulingId(
+                                        reschedulingId === apt.id ? null : apt.id
+                                      )
+                                    }
+                                    className="px-3 py-1.5 rounded-[10px] border border-[#5B0E14]/25 text-[#111113] hover:bg-[#E9D9B8]/60 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <RefreshCw className="w-3 h-3 text-[#5B0E14]" />
+                                    <span>{tr('Reschedule', 'समय बदलें')}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCancellingApt(apt)}
+                                    className="px-3 py-1.5 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer hover:bg-[#75131b]"
+                                  >
+                                    <XCircle className="w-3 h-3" />
+                                    <span>{tr('Cancel', 'रद्द करें')}</span>
+                                  </button>
+                                </div>
+                              )}
                             {isCompleted && (
                               <>
                                 <button
@@ -999,8 +1007,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                   } else if (onSubmitReview) {
                                     await onSubmitReview({
                                       appointmentId: apt.id,
-                                      shopId: apt.shopId || 'shop-1',
-                                      barberId: apt.barberId || 'brb-1',
+                                      shopId: apt.shopId || '',
+                                      barberId: apt.barberId || '',
                                       author: currentUserProfile?.name || 'Verified Client',
                                       role: 'Verified Client',
                                       rating: reviewRating,
@@ -1022,78 +1030,64 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             </div>
                           </div>
                         )}
+
+                        {reschedulingId === apt.id && (
+                          <div className="pt-3 border-t border-[#5B0E14]/15 space-y-2.5">
+                            <span className="text-xs font-semibold text-[#5B0E14] block">
+                              {tr('Select new date & time:', 'नई तारीख और समय चुनें:')}
+                            </span>
+                            <div className="flex flex-wrap items-center gap-2.5">
+                              <select
+                                value={newDate}
+                                onChange={(e) => setNewDate(e.target.value)}
+                                className="px-3 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/30 text-xs text-[#111113]"
+                              >
+                                {istDates.map((d) => (
+                                  <option key={d.isoDate} value={d.isoDate}>
+                                    {d.fullLabel}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={newTime}
+                                onChange={(e) => setNewTime(e.target.value)}
+                                className="px-3 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/30 text-xs text-[#111113]"
+                              >
+                                {[
+                                  '09:30',
+                                  '10:15',
+                                  '11:00',
+                                  '13:00',
+                                  '14:15',
+                                  '15:30',
+                                  '17:00',
+                                  '18:45',
+                                ].map((t) => (
+                                  <option key={t} value={t}>
+                                    {t} IST ({formatISTTimeSlot(t, lang).time12})
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => handleRescheduleSubmit(apt.id)}
+                                className="px-4 py-2 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer hover:bg-[#241719]"
+                              >
+                                {tr('Confirm Reschedule', 'पुनर्निर्धारित करें')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setReschedulingId(null)}
+                                className="px-3 py-2 text-xs text-[#8A8178] hover:text-[#111113] cursor-pointer"
+                              >
+                                {tr('Cancel', 'रद्द करें')}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
-                </div>
-              )}
-            </div>
-
-            {/* Loyalty Rewards & Points Ledger */}
-            <div className="rounded-[24px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 sm:p-8 space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h2 className="font-display text-2xl font-bold text-[#111113] flex items-center gap-2">
-                    <Award className="w-5 h-5 text-[#5B0E14]" />
-                    <span>
-                      {tr(
-                        'Loyalty Rewards & Points History',
-                        'लॉयल्टी रिवॉर्ड्स और पॉइंट्स इतिहास'
-                      )}
-                    </span>
-                  </h2>
-                  <p className="text-xs text-[#8A8178]">
-                    {tr(
-                      'Earn 15% of every completed booking in reward points.',
-                      'प्रत्येक पूर्ण बुकिंग पर रिवॉर्ड पॉइंट्स कमाएं।'
-                    )}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleRedeem(200, '₹150 Grooming Credit Voucher')
-                    }
-                    className="px-3.5 py-2 rounded-[12px] bg-[#241719] text-[#F1E194] text-xs font-semibold cursor-pointer"
-                  >
-                    {tr('Redeem ₹150 Voucher (200 PTS)', '₹150 वाउचर (200 PTS)')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleRedeem(300, 'Complimentary Hot Towel Ritual')
-                    }
-                    className="px-3.5 py-2 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer"
-                  >
-                    {tr('Hot Towel Upgrade (300 PTS)', 'हॉट टॉवल (300 PTS)')}
-                  </button>
-                </div>
-              </div>
-
-              {rewards.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-[#5B0E14]/10">
-                  {rewards.slice(0, 5).map((rw: any) => (
-                    <div
-                      key={rw.id}
-                      className="p-3 rounded-[12px] bg-[#FAF6EA] flex items-center justify-between text-xs"
-                    >
-                      <span className="font-medium text-[#111113]">
-                        {rw.reason}
-                      </span>
-                      <span
-                        className={`font-mono-num font-bold ${
-                          Number(rw.pointsDelta) >= 0
-                            ? 'text-emerald-700'
-                            : 'text-[#5B0E14]'
-                        }`}
-                      >
-                        {Number(rw.pointsDelta) >= 0
-                          ? `+${rw.pointsDelta} PTS`
-                          : `${rw.pointsDelta} PTS`}
-                      </span>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>
@@ -1273,7 +1267,414 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             </div>
           </div>
         </div>
+        ) : (
+          /* Rule 18: CUSTOMER PROFILE VIEW */
+          <div className="space-y-8">
+            {/* Page Header (Rule 4) */}
+            <div className="border-b border-[#5B0E14]/15 pb-4">
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-[#111113]">
+                {tr('My Profile', 'मेरी प्रोफ़ाइल')}
+              </h2>
+              <p className="text-xs sm:text-sm text-[#8A8178] mt-1">
+                {tr('Manage your account, saved shops, notifications, and settings.', 'अपनी प्रोफ़ाइल, पसंदीदा दुकानें, सूचनाएं और सेटिंग्स प्रबंधित करें।')}
+              </p>
+            </div>
+
+            {/* Profile Card: Photo, Name, Phone, Email */}
+            <div className="rounded-[24px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/25 p-7 sm:p-8 flex flex-col sm:flex-row items-center gap-6 shadow-xl">
+              <div className="relative">
+                {currentUserProfile?.avatarUrl ? (
+                  <SmartImage
+                    src={currentUserProfile.avatarUrl}
+                    alt={currentUserProfile.name}
+                    className="w-24 h-24 rounded-full object-cover border-4 border-[#F1E194]/40"
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded-full bg-[#5B0E14] border-4 border-[#F1E194]/40 flex items-center justify-center text-[#F1E194] text-3xl font-bold font-display">
+                    {currentUserProfile?.name ? currentUserProfile.name.charAt(0).toUpperCase() : 'U'}
+                  </div>
+                )}
+                <label className="absolute -bottom-1 -right-1 p-2 rounded-full bg-[#F1E194] text-[#111113] cursor-pointer hover:bg-[#FFF9E8] transition-colors shadow-md">
+                  <User className="w-3.5 h-3.5" />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file && onUpdateProfile) {
+                        const url = await uploadImageToSupabaseStorage(file, 'avatars');
+                        setProfileAvatar(url);
+                        await onUpdateProfile({ avatarUrl: url });
+                        setStatusToast(tr('✓ Profile photo updated!', '✓ प्रोफ़ाइल फ़ोटो अपडेट हो गई!'));
+                        setTimeout(() => setStatusToast(''), 3000);
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div className="text-center sm:text-left space-y-1">
+                <h3 className="font-display text-2xl font-bold text-[#FFF9E8]">
+                  {currentUserProfile?.name || tr('Guest Customer', 'अतिथि ग्राहक')}
+                </h3>
+                <p className="text-xs text-[#F1E194]/90 font-mono-num font-semibold">
+                  {currentUserProfile?.phone ? `+91 ${currentUserProfile.phone.replace(/^\+91/, '').trim()}` : tr('No mobile number added', 'कोई मोबाइल नंबर नहीं जोड़ा गया')}
+                </p>
+                <p className="text-xs text-[#8A8178]">
+                  {currentUserProfile?.email}
+                </p>
+                <span className="inline-block mt-2 px-3 py-1 rounded-full bg-[#F1E194]/15 border border-[#F1E194]/30 text-[#F1E194] text-[10px] font-semibold uppercase tracking-wider">
+                  {tr('Verified Customer • BarberLoo India', 'सत्यापित ग्राहक • BarberLoo भारत')}
+                </span>
+              </div>
+            </div>
+
+            {/* 4 Clear Sections: My Bookings, Saved Shops, Notifications, Settings (Rule 18) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* 1. My Bookings Summary Card */}
+              <div className="rounded-[24px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-display text-xl font-bold text-[#111113] flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-[#5B0E14]" />
+                    <span>{tr('My Bookings', 'मेरी बुकिंग')}</span>
+                  </h3>
+                  <span className="px-2.5 py-1 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-bold font-mono-num">
+                    {appointments.length}
+                  </span>
+                </div>
+                <p className="text-xs text-[#8A8178] leading-relaxed">
+                  {upcomingAppointments.length > 0
+                    ? tr(
+                        `You have ${upcomingAppointments.length} upcoming appointment(s) scheduled.`,
+                        `आपके पास ${upcomingAppointments.length} आगामी अपॉइंटमेंट निर्धारित हैं।`
+                      )
+                    : tr(
+                        'No upcoming appointments scheduled right now.',
+                        'वर्तमान में कोई आगामी अपॉइंटमेंट निर्धारित नहीं है।'
+                      )}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveCustomerSection('bookings')}
+                  className="w-full py-3 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold uppercase tracking-wider hover:bg-[#241719] transition-colors cursor-pointer"
+                >
+                  {tr('View My Bookings', 'मेरी बुकिंग देखें')}
+                </button>
+              </div>
+
+              {/* 2. Saved Shops Card */}
+              <div className="rounded-[24px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-display text-xl font-bold text-[#111113] flex items-center gap-2">
+                    <Heart className="w-4 h-4 text-[#5B0E14]" />
+                    <span>{tr('Saved Shops', 'पसंदीदा सैलून')}</span>
+                  </h3>
+                  <span className="px-2.5 py-1 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-bold font-mono-num">
+                    {favShops.length}
+                  </span>
+                </div>
+                {favShops.length === 0 ? (
+                  <p className="text-xs text-[#8A8178]">
+                    {tr('No saved shops yet. Tap the heart on any shop to save it here.', 'अभी तक कोई सैलून सहेजा नहीं गया है।')}
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {favShops.map((s: any) => (
+                      <div
+                        key={s.id}
+                        className="p-3 rounded-[14px] bg-[#FAF6EA] border border-[#5B0E14]/10 flex items-center justify-between text-xs"
+                      >
+                        <div>
+                          <p className="font-semibold text-[#111113]">{s.name}</p>
+                          <p className="text-[11px] text-[#8A8178]">{s.city || s.location || 'Punjab'}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onSelectShop) onSelectShop(s);
+                            onNavigate('shop');
+                          }}
+                          className="px-3 py-1.5 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer hover:bg-[#241719]"
+                        >
+                          {tr('View Shop', 'सैलून देखें')}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onNavigate('shop')}
+                  className="w-full py-3 rounded-[14px] border border-[#5B0E14]/30 text-[#111113] text-xs font-semibold uppercase tracking-wider hover:bg-[#FAF6EA] transition-colors cursor-pointer"
+                >
+                  {tr('Explore All Shops', 'सभी सैलून देखें')}
+                </button>
+              </div>
+
+              {/* 3. Notifications Card */}
+              <div className="rounded-[24px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-display text-xl font-bold text-[#111113] flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-[#5B0E14]" />
+                    <span>{tr('Notifications', 'सूचनाएं')}</span>
+                  </h3>
+                  {browserPerm !== 'unsupported' && (
+                    <button
+                      type="button"
+                      onClick={handleToggleOrEnableBrowserAlerts}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-all cursor-pointer ${
+                        browserPerm === 'granted' && browserAlertsOn
+                          ? 'bg-[#5B0E14] text-[#FFF9E8] border-[#5B0E14]'
+                          : 'bg-[#FAF6EA] text-[#5B0E14] border-[#5B0E14]/30'
+                      }`}
+                    >
+                      {browserPerm === 'granted' && browserAlertsOn
+                        ? tr('Alerts: ON', 'अलर्ट: चालू')
+                        : tr('Enable Alerts', 'अलर्ट चालू करें')}
+                    </button>
+                  )}
+                </div>
+                {notifications.length === 0 ? (
+                  <p className="text-xs text-[#8A8178]">
+                    {tr('No notifications yet.', 'अभी कोई सूचना नहीं है।')}
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {notifications.slice(0, 5).map((n: any) => (
+                      <div
+                        key={n.id}
+                        className="p-3 rounded-[12px] bg-[#FAF6EA] border border-[#5B0E14]/10 text-xs"
+                      >
+                        <p className="font-semibold text-[#111113]">{n.title}</p>
+                        <p className="text-[11px] text-[#8A8178] mt-0.5">{n.timeLabel || n.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Settings Card */}
+              <div className="rounded-[24px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 space-y-4">
+                <h3 className="font-display text-xl font-bold text-[#111113] flex items-center gap-2">
+                  <SettingsIcon className="w-4 h-4 text-[#5B0E14]" />
+                  <span>{tr('Settings', 'सेटिंग्स')}</span>
+                </h3>
+                <form onSubmit={handleSaveProfile} className="space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#241719] mb-1">
+                      {tr('Full Name', 'पूरा नाम')}
+                    </label>
+                    <input
+                      type="text"
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#241719] mb-1">
+                      {tr('Mobile Number', 'मोबाइल नंबर')}
+                    </label>
+                    <input
+                      type="text"
+                      value={profilePhone}
+                      onChange={(e) => setProfilePhone(e.target.value)}
+                      placeholder="e.g. 9876543210"
+                      className="w-full px-3 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#241719] mb-1">
+                      {tr('Email Address', 'ईमेल पता')}
+                    </label>
+                    <input
+                      type="email"
+                      value={profileEmail}
+                      onChange={(e) => setProfileEmail(e.target.value)}
+                      className="w-full px-3 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113]"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#241719] mb-1">
+                        {tr('State', 'राज्य')}
+                      </label>
+                      <select
+                        value={profileStateId}
+                        onChange={(e) => handleProfileStateChange(e.target.value)}
+                        className="w-full px-2.5 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113]"
+                      >
+                        {DEFAULT_STATES.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#241719] mb-1">
+                        {tr('City', 'शहर')}
+                      </label>
+                      <select
+                        value={profileCityId}
+                        onChange={(e) => setProfileCityId(e.target.value)}
+                        className="w-full px-2.5 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113]"
+                      >
+                        {getCitiesForState(profileStateId).map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#241719] mb-1">
+                      {tr('Preferred Haircut Notes', 'हेयरकट निर्देश')}
+                    </label>
+                    <input
+                      type="text"
+                      value={profileNotes}
+                      onChange={(e) => setProfileNotes(e.target.value)}
+                      placeholder={tr('e.g. Skin fade with textured top', 'उदा. स्किन फेड')}
+                      className="w-full px-3 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-3 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer hover:bg-[#241719] transition-colors"
+                  >
+                    {tr('Save Changes', 'बदलाव सहेजें')}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Cancellation & Refund Breakdown Modal */}
+      {cancellingApt && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="max-w-md w-full rounded-[24px] bg-[#111113] border border-[#F1E194]/30 p-6 space-y-5 text-[#FFF9E8] shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F1E194]/15">
+              <div className="flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-amber-400" />
+                <h3 className="font-display text-lg font-bold">
+                  {tr('Cancel Appointment & Refund', 'अपॉइंटमेंट रद्द व रिफ़ंड')}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancellingApt(null)}
+                className="text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-xs space-y-1 text-[#8A8178]">
+              <p className="font-semibold text-sm text-[#FFF9E8]">
+                {cancellingApt.serviceName} with {cancellingApt.barberName}
+              </p>
+              <p>
+                {cancellingApt.shopName} · {cancellingApt.date} · {cancellingApt.time} IST
+              </p>
+            </div>
+
+            {/* Breakdown: Service price, BarberLoo platform fee, Total paid */}
+            {(() => {
+              const fee = Number(cancellingApt.platformFee ?? 10);
+              const total = Number(cancellingApt.totalPrice ?? cancellingApt.price ?? 160);
+              const service = Number(
+                cancellingApt.servicePrice ?? (total - fee)
+              );
+              const policy = platformSettings?.refundPolicy || 'service_only';
+              const refundAmt = policy === 'full' ? total : service;
+
+              return (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 space-y-2.5 text-xs">
+                    <p className="text-[10px] font-semibold tracking-wider uppercase text-[#F1E194]">
+                      {tr('ORIGINAL PAYMENT BREAKDOWN', 'मूल भुगतान विवरण')}
+                    </p>
+                    <div className="flex justify-between text-[#8A8178]">
+                      <span>{tr('Service price', 'सेवा मूल्य')}</span>
+                      <span className="font-mono-num font-semibold text-[#FFF9E8]">
+                        {formatINR(service)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-[#8A8178]">
+                      <span>{tr('BarberLoo platform fee', 'BarberLoo प्लेटफ़ॉर्म शुल्क')}</span>
+                      <span className="font-mono-num font-semibold text-[#F1E194]">
+                        {formatINR(fee)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between pt-2 border-t border-[#F1E194]/15 text-xs font-semibold">
+                      <span>{tr('Total paid online', 'कुल ऑनलाइन भुगतान')}</span>
+                      <span className="font-mono-num text-[#FFF9E8]">{formatINR(total)}</span>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-[16px] bg-[#1a1415] border border-amber-400/30 space-y-2">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                        {tr('Applicable Refund Amount', 'प्रयोज्य रिफ़ंड राशि')}
+                      </span>
+                      <span className="font-mono-num text-2xl font-bold text-amber-400">
+                        {formatINR(refundAmt)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#8A8178] leading-relaxed">
+                      {policy === 'full'
+                        ? tr(
+                            `100% Full Refund Policy: You will receive the entire amount of ${formatINR(total)} (Service price + BarberLoo platform fee) back to your original payment method.`,
+                            `पूर्ण रिफ़ंड नीति: आपको सेवा शुल्क व प्लेटफ़ॉर्म शुल्क सहित पूरी राशि ${formatINR(total)} वापस मिलेगी।`
+                          )
+                        : tr(
+                            `BarberLoo Refund Policy: The barber service price of ${formatINR(service)} will be refunded to your original payment method. The BarberLoo platform fee (${formatINR(fee)}) is retained.`,
+                            `BarberLoo रिफ़ंड नीति: बार्बर सेवा शुल्क ${formatINR(service)} वापस मिलेगा। प्लेटफ़ॉर्म शुल्क (${formatINR(fee)}) गैर-वापसी योग्य है।`
+                          )}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setCancellingApt(null)}
+                      className="px-4 py-2.5 rounded-[12px] bg-[#241719] border border-[#F1E194]/20 text-xs font-semibold text-[#FFF9E8] hover:bg-[#322023] cursor-pointer"
+                    >
+                      {tr('Keep Appointment', 'अपॉइंटमेंट रखें')}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isProcessingCancel}
+                      onClick={async () => {
+                        setIsProcessingCancel(true);
+                        try {
+                          await onCancelAppointment(cancellingApt.id);
+                          setCancellingApt(null);
+                        } finally {
+                          setIsProcessingCancel(false);
+                        }
+                      }}
+                      className="px-5 py-2.5 rounded-[12px] bg-[#5B0E14] hover:bg-[#75131b] text-xs font-bold text-[#FFF9E8] cursor-pointer shadow-md"
+                    >
+                      {isProcessingCancel
+                        ? tr('Processing Refund...', 'रिफ़ंड प्रक्रिया जारी...')
+                        : tr(
+                            `Confirm Cancel & Refund (${formatINR(refundAmt)})`,
+                            `रद्द करें व रिफ़ंड लें (${formatINR(refundAmt)})`
+                          )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
