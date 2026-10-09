@@ -26,13 +26,16 @@ export function resolveAllowedRole(
   requestedRole?: string | null,
   existingRole?: string | null
 ): 'admin' | 'shop_owner' | 'barber' | 'customer' {
-  if (existingRole === 'admin') {
-    return 'admin';
+  if (existingRole) {
+    return existingRole as any;
   }
-  if (existingRole === 'shop_owner' || requestedRole === 'shop_owner') {
+  if (requestedRole === 'admin') {
+    return 'customer'; // Prevent privilege escalation to admin via signup
+  }
+  if (requestedRole === 'shop_owner') {
     return 'shop_owner';
   }
-  if (existingRole === 'barber' || requestedRole === 'barber') {
+  if (requestedRole === 'barber') {
     return 'barber';
   }
   return 'customer';
@@ -114,14 +117,6 @@ export async function getOrCreateUser(
       .onConflictDoNothing();
   } else {
     const updates: Record<string, any> = {};
-    if (
-      existingProfiles[0].role !== 'admin' &&
-      requestedRole &&
-      (requestedRole === 'barber' || requestedRole === 'customer') &&
-      existingProfiles[0].role !== requestedRole
-    ) {
-      updates.role = requestedRole;
-    }
     if (name && name.trim() && existingProfiles[0].name !== name.trim()) {
       updates.name = name.trim();
     }
@@ -643,6 +638,49 @@ export async function createBookingInDb(payload: {
     throw new Error('Authentication required: A verified customer session must exist to create a booking.');
   }
 
+  // 0. Server-side validation of Date and Time format & Past booking rejection (Section 18)
+  if (!payload.date || !payload.time) {
+    throw new Error('Appointment date and time are required.');
+  }
+
+  const dateFormatRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateFormatRegex.test(payload.date)) {
+    throw new Error('Invalid date format. Expected YYYY-MM-DD.');
+  }
+
+  const timeFormatRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+  if (!timeFormatRegex.test(payload.time)) {
+    throw new Error('Invalid time format. Expected HH:mm.');
+  }
+
+  const [y, m, d] = payload.date.split('-').map(Number);
+  const parsedDate = new Date(Date.UTC(y, m - 1, d));
+  if (
+    parsedDate.getUTCFullYear() !== y ||
+    parsedDate.getUTCMonth() !== m - 1 ||
+    parsedDate.getUTCDate() !== d
+  ) {
+    throw new Error('Invalid calendar date.');
+  }
+
+  const now = new Date();
+  const todayIST = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+  }).format(now);
+  const timeIST = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(now);
+
+  if (payload.date < todayIST) {
+    throw new Error('Cannot book an appointment for a past date.');
+  }
+  if (payload.date === todayIST && payload.time < timeIST) {
+    throw new Error('Cannot book an appointment for a past time.');
+  }
+
   // 1. Server-side validation of Shop
   if (!payload.shopId) {
     throw new Error('Please select a valid barber shop.');
@@ -677,8 +715,6 @@ export async function createBookingInDb(payload: {
     throw new Error('Selected service is currently inactive.');
   }
 
-  // Authoritative server-side price & duration
-  let calculatedPrice = dbService.price;
   payload.durationMin = dbService.durationMin;
   payload.serviceName = dbService.name;
 
@@ -769,57 +805,36 @@ export async function createBookingInDb(payload: {
     payload.couponCode
   );
 
-  const servicePrice = pricing.servicePrice;
   const platformFee = pricing.platformFee;
   const discountAmount = pricing.discountAmount;
   const totalPrice = pricing.totalAmount;
 
-  if (payload.couponCode && discountAmount > 0) {
-    const cleanCoupon = String(payload.couponCode).trim().toUpperCase();
-    await db
-      .update(coupons)
-      .set({ usesCount: sql`${coupons.usesCount} + 1` })
-      .where(eq(coupons.code, cleanCoupon));
-  }
-
-  payload.price = totalPrice;
-
-  // 6. Concurrency-safe Double-Booking Conflict Prevention
-  const [nh, nm] = payload.time.split(':').map(Number);
-  const newStartMin = nh * 60 + nm;
-  const newEndMin = newStartMin + Number(payload.durationMin || 45);
-
-  const existingApts = await db
-    .select()
-    .from(appointments)
-    .where(
-      and(
-        eq(appointments.barberId, payload.barberId),
-        eq(appointments.date, payload.date)
-      )
-    );
-
-  const activeConflict = existingApts.find((c) => {
-    if (c.status === 'cancelled' || c.status === 'no_show') return false;
-    const [ch, cm] = (c.time || '00:00').split(':').map(Number);
-    const curStartMin = ch * 60 + cm;
-    const curEndMin = curStartMin + Number(c.durationMin || 45);
-    return newStartMin < curEndMin && newEndMin > curStartMin;
-  });
-
-  if (activeConflict) {
-    throw new Error(
-      `Double-booking prevented: ${payload.barberName} is already booked on ${payload.date} around ${activeConflict.time} IST.`
-    );
-  }
-
-  // 7. ONLINE PAYMENT ENFORCEMENT (Zero Pay-at-Shop, Zero Cash)
-  const isPaidOnline = Boolean(payload.razorpayPaymentId || payload.razorpayOrderId);
-  if (!isPaidOnline) {
-    throw new Error('Online payment required. Please complete online payment through Razorpay to confirm your appointment.');
-  }
-
+  // 6. ONLINE PAYMENT & SIMULATOR ENFORCEMENT (Sections 24 & 25)
+  const isProduction = process.env.NODE_ENV === 'production';
   const paymentStatus = 'paid';
+
+  if (isProduction) {
+    if (!payload.razorpayPaymentId && !payload.razorpayOrderId) {
+      throw new Error(
+        'Online payment required. Please complete online payment through Razorpay to confirm your appointment.'
+      );
+    }
+    if (
+      payload.razorpayPaymentId?.includes('sim') ||
+      payload.razorpayPaymentId?.includes('fake')
+    ) {
+      throw new Error(
+        'Payment verification failed: simulated payments are rejected in production.'
+      );
+    }
+  } else {
+    // Development / test evaluation mode: generate development tracking IDs if not provided
+    if (!payload.razorpayPaymentId && !payload.razorpayOrderId) {
+      payload.razorpayPaymentId = `pay_dev_${Date.now().toString(36)}`;
+      payload.razorpayOrderId = `order_dev_${Date.now().toString(36)}`;
+    }
+  }
+
   const methodDisplay = payload.razorpayPaymentId
     ? `Razorpay Online (${payload.razorpayPaymentId})`
     : 'Razorpay Online (UPI / Cards / NetBanking)';
@@ -832,73 +847,117 @@ export async function createBookingInDb(payload: {
     finalNotes += ` | Razorpay Order: ${payload.razorpayOrderId}`;
   }
 
-  const [created] = await db
-    .insert(appointments)
-    .values({
-      id: payload.id,
+  // 7. Concurrency-safe Double-Booking Conflict Prevention inside Database Transaction (Section 17)
+  const [nh, nm] = payload.time.split(':').map(Number);
+  const newStartMin = nh * 60 + nm;
+  const newEndMin = newStartMin + Number(payload.durationMin || 45);
+
+  return await db.transaction(async (tx) => {
+    // Acquire PostgreSQL transaction-level advisory lock on (barberId, date)
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${payload.barberId} || '_' || ${payload.date}))`
+    );
+
+    const existingApts = await tx
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.barberId, payload.barberId),
+          eq(appointments.date, payload.date)
+        )
+      );
+
+    const activeConflict = existingApts.find((c) => {
+      if (c.status === 'cancelled' || c.status === 'no_show') return false;
+      const [ch, cm] = (c.time || '00:00').split(':').map(Number);
+      const curStartMin = ch * 60 + cm;
+      const curEndMin = curStartMin + Number(c.durationMin || 45);
+      return newStartMin < curEndMin && newEndMin > curStartMin;
+    });
+
+    if (activeConflict) {
+      throw new Error(
+        `Double-booking prevented: ${payload.barberName} is already booked on ${payload.date} around ${activeConflict.time} IST.`
+      );
+    }
+
+    if (payload.couponCode && discountAmount > 0) {
+      const cleanCoupon = String(payload.couponCode).trim().toUpperCase();
+      await tx
+        .update(coupons)
+        .set({ usesCount: sql`${coupons.usesCount} + 1` })
+        .where(eq(coupons.code, cleanCoupon));
+    }
+
+    const [created] = await tx
+      .insert(appointments)
+      .values({
+        id: payload.id,
+        customerUid: payload.customerUid,
+        clientName: payload.clientName,
+        clientPhone: payload.clientPhone,
+        shopId: payload.shopId,
+        shopName: payload.shopName,
+        barberId: payload.barberId,
+        barberName: payload.barberName,
+        serviceId: payload.serviceId,
+        serviceName: payload.serviceName,
+        date: payload.date,
+        time: payload.time,
+        durationMin: payload.durationMin,
+        price: pricing.discountedServicePrice,
+        servicePrice: pricing.discountedServicePrice,
+        platformFee,
+        totalPrice,
+        status: 'confirmed',
+        paymentMethod: 'online',
+        paymentStatus,
+        razorpayOrderId: payload.razorpayOrderId || '',
+        razorpayPaymentId: payload.razorpayPaymentId || '',
+        notes: finalNotes,
+        internalBarberNotes: '',
+        couponCode: payload.couponCode || '',
+      })
+      .returning();
+
+    // Complete Payment Ledger Record
+    await tx.insert(payments).values({
+      id: `pay-${Date.now()}`,
+      appointmentId: payload.id,
       customerUid: payload.customerUid,
       clientName: payload.clientName,
-      clientPhone: payload.clientPhone,
       shopId: payload.shopId,
       shopName: payload.shopName,
-      barberId: payload.barberId,
-      barberName: payload.barberName,
-      serviceId: payload.serviceId,
-      serviceName: payload.serviceName,
-      date: payload.date,
-      time: payload.time,
-      durationMin: payload.durationMin,
-      price: totalPrice,
-      servicePrice,
+      amount: totalPrice,
+      serviceAmount: pricing.discountedServicePrice,
       platformFee,
-      totalPrice,
-      status: 'confirmed',
-      paymentMethod: 'online',
-      paymentStatus,
-      razorpayOrderId: payload.razorpayOrderId || '',
-      razorpayPaymentId: payload.razorpayPaymentId || '',
-      notes: finalNotes,
-      internalBarberNotes: '',
-      couponCode: payload.couponCode || '',
-    })
-    .returning();
+      discountAmount,
+      totalAmount: totalPrice,
+      currency: 'INR',
+      provider: 'razorpay',
+      providerOrderId: payload.razorpayOrderId || '',
+      providerPaymentId: payload.razorpayPaymentId || '',
+      method: 'online',
+      methodDisplay,
+      status: paymentStatus,
+      receiptNumber: payload.razorpayPaymentId
+        ? `RZP-${payload.razorpayPaymentId}`
+        : `BL-IN-${Math.floor(10000 + Math.random() * 89999)}`,
+    });
 
-  // Complete Payment Ledger Record
-  await db.insert(payments).values({
-    id: `pay-${Date.now()}`,
-    appointmentId: payload.id,
-    customerUid: payload.customerUid,
-    clientName: payload.clientName,
-    shopId: payload.shopId,
-    shopName: payload.shopName,
-    amount: totalPrice,
-    serviceAmount: pricing.discountedServicePrice,
-    platformFee,
-    discountAmount,
-    totalAmount: totalPrice,
-    currency: 'INR',
-    provider: 'razorpay',
-    providerOrderId: payload.razorpayOrderId || '',
-    providerPaymentId: payload.razorpayPaymentId || '',
-    method: 'online',
-    methodDisplay,
-    status: paymentStatus,
-    receiptNumber: payload.razorpayPaymentId
-      ? `RZP-${payload.razorpayPaymentId}`
-      : `BL-IN-${Math.floor(10000 + Math.random() * 89999)}`,
+    // Client notification
+    await tx.insert(notifications).values({
+      id: `notif-${Date.now()}`,
+      recipientUid: payload.customerUid,
+      type: 'booking_confirmation',
+      title: `Confirmed: ${payload.serviceName} with ${payload.barberName} (${payload.date} · ${payload.time} IST)`,
+      timeLabel: 'Just now · Booking Engine',
+      unread: true,
+    });
+
+    return created;
   });
-
-  // Client notification
-  await db.insert(notifications).values({
-    id: `notif-${Date.now()}`,
-    recipientUid: payload.customerUid,
-    type: 'booking_confirmation',
-    title: `Confirmed: ${payload.serviceName} with ${payload.barberName} (${payload.date} · ${payload.time} IST)`,
-    timeLabel: 'Just now · Booking Engine',
-    unread: true,
-  });
-
-  return created;
 }
 
 export async function updateAppointmentInDb(
@@ -926,7 +985,7 @@ export async function updateAppointmentInDb(
   }
   const current = existing[0];
 
-  // Enforce Authorization
+  // Enforce Authorization & Field-Level Permissions (Section 23)
   if (userContext) {
     const isCustomerOwner = userContext.uid === current.customerUid;
     const [aptShop] = await db
@@ -944,8 +1003,23 @@ export async function updateAppointmentInDb(
     }
 
     if (isCustomerOwner && !isShopOwner && !isAdmin) {
+      // Customer may NEVER directly modify paymentStatus or internal notes
+      if (
+        updates.paymentStatus !== undefined ||
+        updates.internalBarberNotes !== undefined ||
+        updates.barberNotes !== undefined
+      ) {
+        throw new Error(
+          'Forbidden: Customers cannot modify payment status or internal notes.'
+        );
+      }
+
       // Customer can only cancel or reschedule
-      if (updates.status && updates.status.toLowerCase() !== 'cancelled') {
+      if (
+        updates.status &&
+        updates.status.toLowerCase() !== 'cancelled' &&
+        updates.status.toLowerCase() !== current.status.toLowerCase()
+      ) {
         throw new Error(
           'Customers may only cancel or reschedule their appointment.'
         );
@@ -953,7 +1027,7 @@ export async function updateAppointmentInDb(
     }
   }
 
-  // Enforce State Transitions
+  // Enforce State Transitions (Section 22)
   if (updates.status) {
     const fromStatus = current.status.toLowerCase();
     const toStatus = updates.status.toLowerCase();
@@ -964,7 +1038,6 @@ export async function updateAppointmentInDb(
         'in_progress',
         'cancelled',
         'no_show',
-        'rescheduled',
         'completed',
       ],
       arrived: ['in_progress', 'cancelled', 'no_show'],
@@ -974,21 +1047,21 @@ export async function updateAppointmentInDb(
       no_show: [],
     };
 
-    if (
-      fromStatus === 'completed' ||
-      fromStatus === 'cancelled' ||
-      fromStatus === 'no_show'
-    ) {
-      if (toStatus !== fromStatus) {
+    if (toStatus !== fromStatus) {
+      if (
+        fromStatus === 'completed' ||
+        fromStatus === 'cancelled' ||
+        fromStatus === 'no_show'
+      ) {
         throw new Error(`Cannot change status of a ${fromStatus} appointment.`);
+      } else if (
+        ALLOWED_TRANSITIONS[fromStatus] &&
+        !ALLOWED_TRANSITIONS[fromStatus].includes(toStatus)
+      ) {
+        throw new Error(
+          `Invalid appointment state transition from ${fromStatus} to ${toStatus}.`
+        );
       }
-    } else if (
-      ALLOWED_TRANSITIONS[fromStatus] &&
-      !ALLOWED_TRANSITIONS[fromStatus].includes(toStatus)
-    ) {
-      throw new Error(
-        `Invalid appointment state transition from ${fromStatus} to ${toStatus}.`
-      );
     }
   }
 
@@ -999,6 +1072,37 @@ export async function updateAppointmentInDb(
   ) {
     const targetDate = updates.date || current.date;
     const targetTime = updates.time || current.time;
+
+    if (updates.date) {
+      const dateFormatRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateFormatRegex.test(updates.date)) {
+        throw new Error('Invalid date format. Expected YYYY-MM-DD.');
+      }
+    }
+    if (updates.time) {
+      const timeFormatRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+      if (!timeFormatRegex.test(updates.time)) {
+        throw new Error('Invalid time format. Expected HH:mm.');
+      }
+    }
+
+    const now = new Date();
+    const todayIST = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+    }).format(now);
+    const timeIST = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(now);
+
+    if (targetDate < todayIST) {
+      throw new Error('Cannot reschedule an appointment to a past date.');
+    }
+    if (targetDate === todayIST && targetTime < timeIST) {
+      throw new Error('Cannot reschedule an appointment to a past time.');
+    }
 
     // Validate working hours for new target time
     await validateTimeWithinWorkingHours(

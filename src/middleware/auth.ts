@@ -22,7 +22,7 @@ const supaAuthVerifier = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 const AUTH_SECRET =
   process.env.AUTH_SECRET ||
   process.env.JWT_SECRET ||
-  'barberloo-production-secure-hmac-key-2026-auth';
+  (process.env.NODE_ENV === 'production' ? '' : 'barberloo-dev-secure-hmac-key-2026-auth');
 
 export interface DecodedUserToken {
   uid: string;
@@ -42,6 +42,9 @@ export function createSignedToken(payload: {
   role?: string;
   name?: string;
 }): string {
+  if (process.env.NODE_ENV === 'production' && !AUTH_SECRET) {
+    throw new Error('Fatal: AUTH_SECRET must be configured in production.');
+  }
   const cleanEmail = String(payload.email || '').trim().toLowerCase();
   const header = Buffer.from(
     JSON.stringify({ alg: 'HS256', typ: 'JWT' })
@@ -58,8 +61,9 @@ export function createSignedToken(payload: {
     })
   ).toString('base64url');
 
+  const secretToUse = AUTH_SECRET || 'barberloo-dev-secure-hmac-key-2026-auth';
   const signature = crypto
-    .createHmac('sha256', AUTH_SECRET)
+    .createHmac('sha256', secretToUse)
     .update(`${header}.${body}`)
     .digest('base64url');
 
@@ -79,25 +83,28 @@ export async function verifyAuthToken(
   const parts = token.split('.');
   if (parts.length === 3) {
     const [header, body, sig] = parts;
-    const expectedSig = crypto
-      .createHmac('sha256', AUTH_SECRET)
-      .update(`${header}.${body}`)
-      .digest('base64url');
+    const secretToUse = AUTH_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'barberloo-dev-secure-hmac-key-2026-auth');
+    if (secretToUse) {
+      const expectedSig = crypto
+        .createHmac('sha256', secretToUse)
+        .update(`${header}.${body}`)
+        .digest('base64url');
 
-    if (sig === expectedSig) {
-      try {
-        const payload = JSON.parse(
-          Buffer.from(body, 'base64url').toString('utf8')
-        );
-        if (!payload.exp || payload.exp >= Math.floor(Date.now() / 1000)) {
-          verifiedUid = String(payload.uid);
-          verifiedEmail = payload.email
-            ? String(payload.email).toLowerCase()
-            : undefined;
-          verifiedName = payload.name;
+      if (sig === expectedSig) {
+        try {
+          const payload = JSON.parse(
+            Buffer.from(body, 'base64url').toString('utf8')
+          );
+          if (!payload.exp || payload.exp >= Math.floor(Date.now() / 1000)) {
+            verifiedUid = String(payload.uid);
+            verifiedEmail = payload.email
+              ? String(payload.email).toLowerCase()
+              : undefined;
+            verifiedName = payload.name;
+          }
+        } catch {
+          // Fall through to Supabase check
         }
-      } catch {
-        // Fall through to Supabase check
       }
     }
   }
@@ -147,6 +154,7 @@ export async function verifyAuthToken(
       email: verifiedEmail,
       name: verifiedName,
       role: 'customer',
+      status: 'active',
     };
   } catch {
     return {
@@ -154,6 +162,7 @@ export async function verifyAuthToken(
       email: verifiedEmail,
       name: verifiedName,
       role: 'customer',
+      status: 'active',
     };
   }
 }
@@ -178,6 +187,13 @@ export const requireAuth = async (
       .json({ error: 'Unauthorized: Invalid, tampered, or expired authentication token' });
   }
 
+  // Section 34: Block suspended accounts
+  if (verified.status === 'suspended') {
+    return res.status(403).json({
+      error: 'Account Suspended: Your account is currently suspended. Please contact platform administration.',
+    });
+  }
+
   req.user = verified;
   next();
 };
@@ -200,6 +216,12 @@ export const requireBarberOrAdmin = async (
     return res
       .status(401)
       .json({ error: 'Unauthorized: Invalid authentication token' });
+  }
+
+  if (verified.status === 'suspended') {
+    return res.status(403).json({
+      error: 'Account Suspended: Your account is currently suspended. Please contact platform administration.',
+    });
   }
 
   req.user = verified;
@@ -236,6 +258,12 @@ export const requireShopOwnerOrAdmin = async (
       .json({ error: 'Unauthorized: Invalid authentication token' });
   }
 
+  if (verified.status === 'suspended') {
+    return res.status(403).json({
+      error: 'Account Suspended: Your account is currently suspended. Please contact platform administration.',
+    });
+  }
+
   req.user = verified;
   const isAuthorized =
     verified.role === 'shop_owner' ||
@@ -267,6 +295,12 @@ export const requireAdmin = async (
     return res
       .status(401)
       .json({ error: 'Unauthorized: Invalid authentication token' });
+  }
+
+  if (verified.status === 'suspended') {
+    return res.status(403).json({
+      error: 'Account Suspended: Your account is currently suspended. Please contact platform administration.',
+    });
   }
 
   req.user = verified;
