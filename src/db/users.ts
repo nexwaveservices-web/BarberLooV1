@@ -811,9 +811,15 @@ export async function createBookingInDb(payload: {
 
   // 6. ONLINE PAYMENT & SIMULATOR ENFORCEMENT (Sections 24 & 25)
   const isProduction = process.env.NODE_ENV === 'production';
-  const paymentStatus = 'paid';
+  const isWalkIn =
+    payload.paymentMethod === 'cash' ||
+    payload.paymentMethod === 'counter' ||
+    payload.paymentMethod === 'walk_in' ||
+    payload.paymentMethod === 'in_person';
 
-  if (isProduction) {
+  const paymentStatus = isWalkIn ? 'paid' : 'paid';
+
+  if (isProduction && !isWalkIn) {
     if (!payload.razorpayPaymentId && !payload.razorpayOrderId) {
       throw new Error(
         'Online payment required. Please complete online payment through Razorpay to confirm your appointment.'
@@ -827,15 +833,16 @@ export async function createBookingInDb(payload: {
         'Payment verification failed: simulated payments are rejected in production.'
       );
     }
-  } else {
-    // Development / test evaluation mode: generate development tracking IDs if not provided
-    if (!payload.razorpayPaymentId && !payload.razorpayOrderId) {
-      payload.razorpayPaymentId = `pay_dev_${Date.now().toString(36)}`;
-      payload.razorpayOrderId = `order_dev_${Date.now().toString(36)}`;
-    }
+  } else if (!payload.razorpayPaymentId && !payload.razorpayOrderId) {
+    // Generate tracking IDs for evaluation or walk-in audits
+    const prefix = isWalkIn ? 'counter' : 'dev';
+    payload.razorpayPaymentId = `pay_${prefix}_${Date.now().toString(36)}`;
+    payload.razorpayOrderId = `order_${prefix}_${Date.now().toString(36)}`;
   }
 
-  const methodDisplay = payload.razorpayPaymentId
+  const methodDisplay = isWalkIn
+    ? 'In-Salon Counter / Cash'
+    : payload.razorpayPaymentId
     ? `Razorpay Online (${payload.razorpayPaymentId})`
     : 'Razorpay Online (UPI / Cards / NetBanking)';
 
@@ -911,7 +918,7 @@ export async function createBookingInDb(payload: {
         platformFee,
         totalPrice,
         status: 'confirmed',
-        paymentMethod: 'online',
+        paymentMethod: payload.paymentMethod || 'online',
         paymentStatus,
         razorpayOrderId: payload.razorpayOrderId || '',
         razorpayPaymentId: payload.razorpayPaymentId || '',

@@ -85,34 +85,35 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const userRole = currentUserProfile?.role || null;
   const isOwnerAdmin = userRole === 'admin';
+  const isBarber = userRole === 'barber' || userRole === 'shop_owner';
 
-  // Customer navigation strictly matching Section 7:
-  // Desktop: Home, Shops, Book Appointment, My Bookings, Profile
-  // Mobile: Home, Shops, Book, Bookings, Profile
-  const navItems: { id: PageView; label: string }[] = [
-    { id: 'home', label: tr('Home', 'होम') },
-    { id: 'shop', label: tr('Shops', 'सैलून') },
-    { id: 'booking', label: tr('Book Appointment', 'अपॉइंटमेंट बुक करें') },
-    { id: 'customer-dashboard', label: tr('My Bookings', 'मेरी बुकिंग') },
-    { id: 'profile', label: tr('Profile', 'प्रोफ़ाइल') },
-  ];
+  // Navigation items:
+  // Customers/Guests: Home, Shops, Book Appointment, My Bookings, Profile
+  // Barbers: Home, Shops, Barber Console, Profile (no booking creation options)
+  const navItems: { id: PageView; label: string }[] = isBarber
+    ? [
+        { id: 'home', label: tr('Home', 'होम') },
+        { id: 'shop', label: tr('Shops', 'सैलून') },
+        { id: 'barber-dashboard', label: tr('Barber Console', 'बार्बर कंसोल') },
+        { id: 'profile', label: tr('Profile', 'प्रोफ़ाइल') },
+      ]
+    : [
+        { id: 'home', label: tr('Home', 'होम') },
+        { id: 'shop', label: tr('Shops', 'सैलून') },
+        { id: 'booking', label: tr('Book Appointment', 'अपॉइंटमेंट बुक करें') },
+        { id: 'customer-dashboard', label: tr('My Bookings', 'मेरी बुकिंग') },
+        { id: 'profile', label: tr('Profile', 'प्रोफ़ाइल') },
+      ];
 
-  if (currentUserProfile) {
-    if (isOwnerAdmin) {
-      navItems.push({
-        id: 'admin-dashboard',
-        label: tr('Admin Console', 'एडमिन कंसोल'),
-      });
-      navItems.push({
-        id: 'barber-dashboard',
-        label: tr('Barber Console', 'बार्बर कंसोल'),
-      });
-    } else if (userRole === 'barber' || userRole === 'shop_owner') {
-      navItems.push({
-        id: 'barber-dashboard',
-        label: tr('Barber Console', 'बार्बर कंसोल'),
-      });
-    }
+  if (currentUserProfile && isOwnerAdmin) {
+    navItems.push({
+      id: 'admin-dashboard',
+      label: tr('Admin Console', 'एडमिन कंसोल'),
+    });
+    navItems.push({
+      id: 'barber-dashboard',
+      label: tr('Barber Console', 'बार्बर कंसोल'),
+    });
   }
 
   const handleSelectPage = (page: PageView) => {
@@ -284,10 +285,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <>
       <header
-        className={`sticky top-0 z-50 transition-colors duration-200 border-b ${
+        className={`sticky top-0 z-50 transition-all duration-200 ${
           isDarkTheme
-            ? 'bg-[#111113]/95 border-[#F1E194]/15 text-[#FFF9E8]'
-            : 'bg-[#FAF6EA]/95 border-[#5B0E14]/12 text-[#111113]'
+            ? 'neu-dark-flat border-b border-[#F1E194]/15 text-[#FFF9E8]'
+            : 'neu-flat border-b border-white/60 text-[#111113]'
         } backdrop-blur-md`}
       >
         <div className="max-w-[1360px] mx-auto px-5 sm:px-8 h-16 sm:h-20 flex items-center justify-between gap-4">
@@ -295,15 +296,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={() => handleSelectPage('home')}
-            className="font-display text-2xl sm:text-[28px] font-bold tracking-[0.14em] whitespace-nowrap shrink-0 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#5B0E14] cursor-pointer"
+            className="font-display text-2xl sm:text-[28px] font-bold tracking-[0.14em] whitespace-nowrap shrink-0 text-left cursor-pointer transition-transform hover:scale-102"
           >
-            BARBERLOO
+            <span className={isDarkTheme ? 'text-[#FFF9E8]' : 'text-[#111113]'}>BARBER</span>
+            <span className="text-[#5B0E14]">LOO</span>
           </button>
 
           {/* Zone 2: Clean primary navigation links */}
           <nav
             aria-label="Primary Navigation"
-            className="hidden lg:flex items-center gap-7 text-sm font-medium"
+            className="hidden lg:flex items-center gap-3 text-xs font-semibold uppercase tracking-wider"
           >
             {navItems.map((item) => {
               const isActive = currentPage === item.id;
@@ -312,22 +314,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   key={item.id}
                   type="button"
                   onClick={() => handleSelectPage(item.id)}
-                  className={`relative py-1 whitespace-nowrap shrink-0 transition-colors duration-150 cursor-pointer ${
+                  className={`px-4 py-2 rounded-[14px] whitespace-nowrap shrink-0 transition-all duration-200 cursor-pointer ${
                     isDarkTheme
                       ? isActive
-                        ? 'text-[#F1E194]'
+                        ? 'neu-dark-pressed-sm text-[#F1E194] font-bold'
                         : 'text-[#FFF9E8]/75 hover:text-[#FFF9E8]'
                       : isActive
-                      ? 'text-[#5B0E14] font-semibold'
-                      : 'text-[#111113]/75 hover:text-[#111113]'
+                      ? 'neu-pressed-sm text-[#5B0E14] font-bold'
+                      : 'text-[#111113]/75 hover:text-[#5B0E14]'
                   }`}
                 >
                   {item.label}
-                  <span
-                    className={`absolute left-0 right-0 -bottom-0.5 h-[1.5px] transition-transform duration-200 origin-left ${
-                      isActive ? 'scale-x-100' : 'scale-x-0'
-                    } ${isDarkTheme ? 'bg-[#F1E194]' : 'bg-[#5B0E14]'}`}
-                  />
                 </button>
               );
             })}
@@ -340,10 +337,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={openDashboardForRole}
-                  className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-[18px] border transition-colors cursor-pointer ${
+                  className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-[16px] cursor-pointer ${
                     isDarkTheme
-                      ? 'border-[#F1E194]/30 text-[#F1E194] hover:bg-[#241719]'
-                      : 'border-[#5B0E14]/25 text-[#241719] hover:bg-[#E9D9B8]/60'
+                      ? 'neu-dark-btn text-[#F1E194]'
+                      : 'neu-btn text-[#241719]'
                   }`}
                 >
                   {isOwnerAdmin ? (
@@ -370,10 +367,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                   type="button"
                   onClick={handleLogout}
                   title={tr('Sign Out', 'लॉग आउट')}
-                  className={`p-2.5 rounded-[14px] border transition-colors cursor-pointer ${
+                  className={`p-2.5 rounded-[14px] cursor-pointer ${
                     isDarkTheme
-                      ? 'border-[#F1E194]/20 text-[#8A8178] hover:text-[#FFF9E8]'
-                      : 'border-[#5B0E14]/15 text-[#8A8178] hover:text-[#5B0E14]'
+                      ? 'neu-dark-icon-btn text-[#8A8178] hover:text-[#FFF9E8]'
+                      : 'neu-icon-btn text-[#8A8178] hover:text-[#5B0E14]'
                   }`}
                 >
                   <LogOut className="w-4 h-4" />
@@ -386,10 +383,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                   setAuthMode('login');
                   setAuthModalOpen(true);
                 }}
-                className={`hidden sm:inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold tracking-wider rounded-[18px] border transition-colors cursor-pointer ${
+                className={`hidden sm:inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold tracking-wider rounded-[16px] cursor-pointer ${
                   isDarkTheme
-                    ? 'border-[#F1E194]/30 text-[#F1E194] hover:bg-[#241719]'
-                    : 'border-[#5B0E14]/25 text-[#241719] hover:bg-[#E9D9B8]/60'
+                    ? 'neu-dark-btn text-[#F1E194]'
+                    : 'neu-btn text-[#241719]'
                 }`}
               >
                 <LogIn className="w-3.5 h-3.5" />
@@ -397,23 +394,35 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => handleSelectPage('booking')}
-              className={`px-4 sm:px-5 py-2.5 text-xs font-semibold tracking-[0.12em] rounded-[18px] transition-colors duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
-                isDarkTheme
-                  ? 'bg-[#F1E194] text-[#111113] hover:bg-[#FFF9E8]'
-                  : 'bg-[#5B0E14] text-[#FFF9E8] hover:bg-[#241719]'
-              }`}
-            >
-              {tr('BOOK NOW', 'बुक करें')}
-            </button>
+            {isBarber ? (
+              <button
+                type="button"
+                onClick={() => handleSelectPage('barber-dashboard')}
+                className="px-4 sm:px-5 py-2.5 text-xs font-semibold tracking-[0.12em] rounded-[16px] whitespace-nowrap shrink-0 cursor-pointer neu-dark-btn-gold text-[#111113]"
+              >
+                {tr('BARBER CONSOLE', 'बार्बर कंसोल')}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleSelectPage('booking')}
+                className={`px-4 sm:px-5 py-2.5 text-xs font-semibold tracking-[0.12em] rounded-[16px] whitespace-nowrap shrink-0 cursor-pointer ${
+                  isDarkTheme
+                    ? 'neu-dark-btn-gold text-[#111113]'
+                    : 'neu-btn-burgundy text-[#F1E194]'
+                }`}
+              >
+                {tr('BOOK NOW', 'बुक करें')}
+              </button>
+            )}
 
             <button
               type="button"
               aria-label="Toggle Menu"
               onClick={() => setMobileMenuOpen((prev) => !prev)}
-              className="lg:hidden p-2 rounded-lg focus-visible:outline-2"
+              className={`lg:hidden p-2.5 rounded-[12px] cursor-pointer ${
+                isDarkTheme ? 'neu-dark-icon-btn' : 'neu-icon-btn'
+              }`}
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -485,13 +494,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Real Supabase Authentication Modal (Customer, Barber & Owner Admin) */}
       {authModalOpen && (
         <div className="fixed inset-0 z-50 bg-[#111113]/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-[24px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/30 p-7 space-y-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-[28px] neu-dark-flat p-7 space-y-5">
             <div className="flex items-center justify-between border-b border-[#F1E194]/15 pb-4">
               <div>
                 <p className="text-xs font-semibold tracking-[0.2em] text-[#F1E194]">
                   {tr('BARBERLOO INDIA • SUPABASE AUTH', 'बारबरलू इंडिया • सुपाबेस ऑथ')}
                 </p>
-                <h2 className="font-display text-3xl font-bold mt-0.5">
+                <h2 className="font-display text-3xl font-bold mt-0.5 text-[#FFF9E8]">
                   {authMode === 'login'
                     ? tr('Sign In to Your Account', 'अपने खाते में साइन इन करें')
                     : authMode === 'signup'
@@ -502,14 +511,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setAuthModalOpen(false)}
-                className="p-1.5 rounded-lg text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+                className="p-2 rounded-[12px] neu-dark-icon-btn text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Mode Switcher */}
-            <div className="grid grid-cols-3 gap-1.5 p-1 rounded-[14px] bg-[#111113]">
+            {/* Mode Switcher in Neumorphic sculpted well */}
+            <div className="grid grid-cols-3 gap-1.5 p-1.5 rounded-[16px] neu-dark-pressed">
               {[
                 { id: 'login', label: tr('Login', 'लॉगिन') },
                 { id: 'signup', label: tr('Sign Up', 'साइन अप') },
@@ -523,9 +532,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setAuthMessage('');
                     setAuthError('');
                   }}
-                  className={`py-2 rounded-[10px] text-xs font-semibold cursor-pointer ${
+                  className={`py-2 rounded-[12px] text-xs font-semibold cursor-pointer transition-all ${
                     authMode === m.id
-                      ? 'bg-[#5B0E14] text-[#FFF9E8]'
+                      ? 'neu-dark-btn-gold text-[#111113]'
                       : 'text-[#8A8178] hover:text-[#FFF9E8]'
                   }`}
                 >
@@ -537,60 +546,60 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Account Type Selector on Sign Up */}
             {authMode === 'signup' && (
               <div>
-                  <label className="block text-xs text-[#8A8178] mb-2">
-                    {tr('I am joining BarberLoo as a:', 'मैं बारबरलू से जुड़ रहा हूँ:')}
-                  </label>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setSignupAccountType('customer')}
-                      className={`p-3 rounded-[14px] border text-left transition-all cursor-pointer ${
-                        signupAccountType === 'customer'
-                          ? 'bg-[#5B0E14] border-[#F1E194] text-[#FFF9E8]'
-                          : 'bg-[#111113] border-[#F1E194]/20 text-[#8A8178]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 text-xs font-semibold text-[#F1E194]">
-                        <User className="w-3.5 h-3.5" />
-                        <span>{tr('Customer', 'ग्राहक (Customer)')}</span>
-                      </div>
-                      <p className="text-[11px] opacity-80 mt-1">
-                        {tr(
-                          'Discover barbers & book appointments',
-                          'बार्बर खोजें और अपॉइंटमेंट बुक करें'
-                        )}
-                      </p>
-                    </button>
+                <label className="block text-xs text-[#8A8178] mb-2 font-medium">
+                  {tr('I am joining BarberLoo as a:', 'मैं बारबरलू से जुड़ रहा हूँ:')}
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setSignupAccountType('customer')}
+                    className={`p-3.5 rounded-[16px] text-left transition-all cursor-pointer ${
+                      signupAccountType === 'customer'
+                        ? 'neu-btn-burgundy text-[#FFF9E8]'
+                        : 'neu-dark-pressed text-[#8A8178]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 text-xs font-semibold text-[#F1E194]">
+                      <User className="w-3.5 h-3.5" />
+                      <span>{tr('Customer', 'ग्राहक (Customer)')}</span>
+                    </div>
+                    <p className="text-[11px] opacity-80 mt-1">
+                      {tr(
+                        'Discover barbers & book appointments',
+                        'बार्बर खोजें और अपॉइंटमेंट बुक करें'
+                      )}
+                    </p>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setSignupAccountType('barber')}
-                      className={`p-3 rounded-[14px] border text-left transition-all cursor-pointer ${
-                        signupAccountType === 'barber'
-                          ? 'bg-[#5B0E14] border-[#F1E194] text-[#FFF9E8]'
-                          : 'bg-[#111113] border-[#F1E194]/20 text-[#8A8178]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 text-xs font-semibold text-[#F1E194]">
-                        <Scissors className="w-3.5 h-3.5" />
-                        <span>{tr('Barber / Shop', 'बार्बर / सैलून पार्टनर')}</span>
-                      </div>
-                      <p className="text-[11px] opacity-80 mt-1">
-                        {tr(
-                          'List your salon & receive bookings',
-                          'अपना सैलून पंजीकृत करें और बुकिंग प्राप्त करें'
-                        )}
-                      </p>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSignupAccountType('barber')}
+                    className={`p-3.5 rounded-[16px] text-left transition-all cursor-pointer ${
+                      signupAccountType === 'barber'
+                        ? 'neu-btn-burgundy text-[#FFF9E8]'
+                        : 'neu-dark-pressed text-[#8A8178]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 text-xs font-semibold text-[#F1E194]">
+                      <Scissors className="w-3.5 h-3.5" />
+                      <span>{tr('Barber / Shop', 'बार्बर / सैलून पार्टनर')}</span>
+                    </div>
+                    <p className="text-[11px] opacity-80 mt-1">
+                      {tr(
+                        'List your salon & receive bookings',
+                        'अपना सैलून पंजीकृत करें और बुकिंग प्राप्त करें'
+                      )}
+                    </p>
+                  </button>
                 </div>
-              )}
+              </div>
+            )}
 
             <form onSubmit={handleEmailAuthSubmit} className="space-y-3.5">
               {authMode === 'signup' && (
                 <>
                   <div>
-                    <label className="block text-xs text-[#8A8178] mb-1">
+                    <label className="block text-xs text-[#8A8178] mb-1 font-medium">
                       {tr('Full Name', 'पूरा नाम')}
                     </label>
                     <input
@@ -599,11 +608,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                       value={nameInput}
                       onChange={(e) => setNameInput(e.target.value)}
                       placeholder={tr('Enter your full name', 'अपना पूरा नाम लिखें')}
-                      className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
+                      className="w-full px-3.5 py-2.5 rounded-[14px] neu-dark-input text-xs focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-[#8A8178] mb-1">
+                    <label className="block text-xs text-[#8A8178] mb-1 font-medium">
                       {tr('Mobile Number (+91)', 'मोबाइल नंबर (+91)')}
                     </label>
                     <input
@@ -612,37 +621,37 @@ export const Navbar: React.FC<NavbarProps> = ({
                       value={phoneInput}
                       onChange={(e) => setPhoneInput(e.target.value)}
                       placeholder="+91 98XXXXXXXX"
-                      className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
+                      className="w-full px-3.5 py-2.5 rounded-[14px] neu-dark-input text-xs focus:outline-none"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2.5">
                     <div>
-                      <label className="block text-xs text-[#8A8178] mb-1">
+                      <label className="block text-xs text-[#8A8178] mb-1 font-medium">
                         {tr('State', 'राज्य')}
                       </label>
                       <select
                         value={selectedStateId}
                         onChange={(e) => handleStateChange(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8] cursor-pointer"
+                        className="w-full px-3.5 py-2.5 rounded-[14px] neu-dark-input text-xs cursor-pointer focus:outline-none"
                       >
                         {DEFAULT_STATES.map((s) => (
-                          <option key={s.id} value={s.id}>
+                          <option key={s.id} value={s.id} className="bg-[#1C1718]">
                             {s.name}
                           </option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-[#8A8178] mb-1">
+                      <label className="block text-xs text-[#8A8178] mb-1 font-medium">
                         {tr('City', 'शहर')}
                       </label>
                       <select
                         value={selectedCityId}
                         onChange={(e) => setSelectedCityId(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8] cursor-pointer"
+                        className="w-full px-3.5 py-2.5 rounded-[14px] neu-dark-input text-xs cursor-pointer focus:outline-none"
                       >
                         {getCitiesForState(selectedStateId).map((c) => (
-                          <option key={c.id} value={c.id}>
+                          <option key={c.id} value={c.id} className="bg-[#1C1718]">
                             {c.name}
                           </option>
                         ))}
@@ -653,7 +662,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
 
               <div>
-                <label className="block text-xs text-[#8A8178] mb-1">
+                <label className="block text-xs text-[#8A8178] mb-1 font-medium">
                   {tr('Email Address', 'ईमेल पता')}
                 </label>
                 <input
@@ -662,12 +671,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
                   placeholder="you@example.com"
-                  className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
+                  className="w-full px-3.5 py-2.5 rounded-[14px] neu-dark-input text-xs focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-[#8A8178] mb-1">
+                <label className="block text-xs text-[#8A8178] mb-1 font-medium">
                   {authMode === 'reset'
                     ? tr('New Password (min 6 chars)', 'नया पासवर्ड (कम से कम 6 अक्षर)')
                     : tr('Password', 'पासवर्ड')}
@@ -679,18 +688,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
+                  className="w-full px-3.5 py-2.5 rounded-[14px] neu-dark-input text-xs focus:outline-none"
                 />
               </div>
 
               {authError && (
-                <p className="text-xs text-[#FFF9E8] bg-[#5B0E14] p-3 rounded-[10px] border border-[#F1E194]/30">
+                <p className="text-xs text-[#FFF9E8] bg-[#5B0E14] p-3 rounded-[12px] border border-[#F1E194]/30">
                   {authError}
                 </p>
               )}
 
               {authMessage && (
-                <p className="text-xs text-[#F1E194] bg-[#111113] p-3 rounded-[10px] border border-[#F1E194]/25">
+                <p className="text-xs text-[#F1E194] bg-[#111113] p-3 rounded-[12px] border border-[#F1E194]/25">
                   {authMessage}
                 </p>
               )}
@@ -698,7 +707,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="submit"
                 disabled={authBusy}
-                className="w-full py-3.5 rounded-[14px] bg-[#5B0E14] hover:bg-[#75131b] text-[#FFF9E8] border border-[#F1E194]/30 text-xs font-semibold tracking-wider cursor-pointer flex items-center justify-center gap-2"
+                className="w-full py-3.5 rounded-[16px] neu-btn-burgundy text-[#F1E194] text-xs font-semibold tracking-wider uppercase cursor-pointer flex items-center justify-center gap-2"
               >
                 <KeyRound className="w-3.5 h-3.5 text-[#F1E194]" />
                 <span>
@@ -719,10 +728,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       )}
 
-      {/* Mobile Persistent Bottom Navigation Bar (Section 7) */}
+      {/* Mobile Persistent Bottom Navigation Bar in Neumorphic luxury bar */}
       <nav
         aria-label="Mobile Bottom Navigation"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#111113] border-t border-[#F1E194]/25 py-2 px-2 flex justify-around items-center shadow-2xl backdrop-blur-md"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 neu-dark-flat border-t border-[#F1E194]/20 py-2 px-2 flex justify-around items-center"
       >
         <button
           type="button"
@@ -746,36 +755,64 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span>{tr('Shops', 'सैलून')}</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => handleSelectPage('booking')}
-          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-            currentPage === 'booking' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
-          }`}
-        >
-          <div className="w-8 h-8 rounded-full bg-[#5B0E14] text-[#F1E194] flex items-center justify-center -mt-3 mb-0.5 shadow-md border border-[#F1E194]/40">
-            <Scissors className="w-4 h-4" />
-          </div>
-          <span>{tr('Book', 'बुक')}</span>
-        </button>
+        {isBarber ? (
+          <button
+            type="button"
+            onClick={() => handleSelectPage('barber-dashboard')}
+            className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+              currentPage === 'barber-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+            }`}
+          >
+            <div className="w-8 h-8 rounded-full bg-[#F1E194] text-[#111113] flex items-center justify-center -mt-3 mb-0.5 shadow-md">
+              <Scissors className="w-4 h-4" />
+            </div>
+            <span>{tr('Console', 'कंसोल')}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => handleSelectPage('booking')}
+            className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+              currentPage === 'booking' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+            }`}
+          >
+            <div className="w-8 h-8 rounded-full bg-[#5B0E14] text-[#F1E194] flex items-center justify-center -mt-3 mb-0.5 shadow-md border border-[#F1E194]/40">
+              <Scissors className="w-4 h-4" />
+            </div>
+            <span>{tr('Book', 'बुक')}</span>
+          </button>
+        )}
 
-        <button
-          type="button"
-          onClick={() => {
-            if (!currentUserProfile) {
-              setAuthMode('login');
-              setAuthModalOpen(true);
-            } else {
-              handleSelectPage('customer-dashboard');
-            }
-          }}
-          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-            currentPage === 'customer-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
-          }`}
-        >
-          <Calendar className="w-5 h-5 mb-0.5" />
-          <span>{tr('Bookings', 'बुकिंग')}</span>
-        </button>
+        {isBarber ? (
+          <button
+            type="button"
+            onClick={() => handleSelectPage('barber-dashboard')}
+            className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+              currentPage === 'barber-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+            }`}
+          >
+            <Calendar className="w-5 h-5 mb-0.5" />
+            <span>{tr('Salon', 'सैलून')}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              if (!currentUserProfile) {
+                setAuthMode('login');
+                setAuthModalOpen(true);
+              } else {
+                handleSelectPage('customer-dashboard');
+              }
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
+              currentPage === 'customer-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+            }`}
+          >
+            <Calendar className="w-5 h-5 mb-0.5" />
+            <span>{tr('Bookings', 'बुकिंग')}</span>
+          </button>
+        )}
 
         <button
           type="button"

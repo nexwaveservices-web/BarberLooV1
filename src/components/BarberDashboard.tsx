@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   ShieldAlert,
   Send,
+  X,
 } from 'lucide-react';
 import {
   useLanguage,
@@ -112,7 +113,8 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
       : currentHour < 17
       ? tr('Good afternoon', 'शुभ दोपहर')
       : tr('Good evening', 'शुभ संध्या');
-  const barberFirstName = currentUserProfile?.name?.split(' ')[0] || 'Rahul';
+  const barberFirstName =
+    currentUserProfile?.name?.split(' ')[0] || tr('Master Barber', 'मास्टर बार्बर');
 
   const [activeTab, setActiveTab] = useState<
     | 'appointments'
@@ -853,9 +855,14 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
         {/* TAB 1: APPOINTMENTS */}
         {activeTab === 'appointments' && (
           <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 sm:p-8 space-y-5">
-            <h2 className="font-display text-3xl font-bold">
-              {tr('Client Appointments (IST)', 'ग्राहक अपॉइंटमेंट्स (IST)')}
-            </h2>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <h2 className="font-display text-3xl font-bold">
+                {tr('Client Appointments (IST)', 'ग्राहक अपॉइंटमेंट्स (IST)')}
+              </h2>
+              <div className="px-3.5 py-1.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-[#F1E194] text-xs font-semibold tracking-wider">
+                {appointments.length} {tr('Customer Bookings', 'ग्राहक बुकिंग')}
+              </div>
+            </div>
             {appointments.length === 0 ? (
               <p className="text-xs text-[#8A8178] py-8">
                 {tr(

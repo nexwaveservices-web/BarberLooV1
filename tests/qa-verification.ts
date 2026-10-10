@@ -1,7 +1,7 @@
 import { createSignedToken } from '../src/middleware/auth.ts';
 import { db } from '../src/db/index.ts';
 import { profiles, services, barbers, shops, appointments, coupons, reviews } from '../src/db/schema.ts';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, like, ilike } from 'drizzle-orm';
 import crypto from 'crypto';
 
 const BASE_URL = 'http://localhost:3000';
@@ -21,54 +21,79 @@ async function runQaSuite() {
     }
   }
 
+  // Pre-test cleanup: ensure no stale mock/test artifacts pollute test run
+  try {
+    await db.delete(appointments).where(
+      or(
+        like(appointments.customerUid, 'test-%'),
+        ilike(appointments.clientName, '%QA Test%')
+      )
+    );
+    await db.delete(services).where(eq(services.name, 'QA Test Service'));
+    await db.delete(coupons).where(eq(coupons.code, 'QAWELCOME20'));
+    await db.delete(profiles).where(
+      or(
+        like(profiles.uid, 'test-%'),
+        ilike(profiles.name, '%QA Test%')
+      )
+    );
+  } catch {
+    // Ignore transient cleanup error
+  }
+
   // Set up test users in database profiles
   const testCustomerUid = 'test-cust-' + Date.now();
   const testBarberUid = 'test-brb-' + Date.now();
   const testAdminUid = 'test-admin-' + Date.now();
 
-  await db.insert(profiles).values([
-    {
-      id: `prof-${testCustomerUid}`,
+  let validAptData: any = {};
+  let couponAptData: any = {};
+  let createdSrv: any = {};
+
+  try {
+    await db.insert(profiles).values([
+      {
+        id: `prof-${testCustomerUid}`,
+        uid: testCustomerUid,
+        email: 'customer.test@barberloo.in',
+        name: 'QA Test Customer',
+        phone: '+91 98765 00001',
+        role: 'customer',
+        status: 'active',
+      },
+      {
+        id: `prof-${testBarberUid}`,
+        uid: testBarberUid,
+        email: 'barber.test@barberloo.in',
+        name: 'QA Test Barber',
+        phone: '+91 98765 00002',
+        role: 'barber',
+        status: 'active',
+      },
+      {
+        id: `prof-${testAdminUid}`,
+        uid: testAdminUid,
+        email: 'admin.governance@barberloo.in',
+        name: 'Platform Overseer',
+        phone: '+91 98765 00003',
+        role: 'admin',
+        status: 'active',
+      },
+    ]);
+
+    const customerToken = createSignedToken({
       uid: testCustomerUid,
       email: 'customer.test@barberloo.in',
-      name: 'Rohan Sharma',
-      phone: '+91 98765 00001',
       role: 'customer',
-      status: 'active',
-    },
-    {
-      id: `prof-${testBarberUid}`,
+      name: 'QA Test Customer',
+    });
+
+    const barberToken = createSignedToken({
       uid: testBarberUid,
       email: 'barber.test@barberloo.in',
-      name: 'Karan Master',
-      phone: '+91 98765 00002',
       role: 'barber',
-      status: 'active',
-    },
-    {
-      id: `prof-${testAdminUid}`,
-      uid: testAdminUid,
-      email: 'admin.governance@barberloo.in',
-      name: 'Platform Overseer',
-      phone: '+91 98765 00003',
-      role: 'admin',
-      status: 'active',
-    },
-  ]);
-
-  const customerToken = createSignedToken({
-    uid: testCustomerUid,
-    email: 'customer.test@barberloo.in',
-    role: 'customer',
-    name: 'Rohan Sharma',
-  });
-
-  const barberToken = createSignedToken({
-    uid: testBarberUid,
-    email: 'barber.test@barberloo.in',
-    role: 'barber',
-    name: 'Karan Master',
-  });
+      name: 'QA Test Barber',
+    });
 
   const adminToken = createSignedToken({
     uid: testAdminUid,
@@ -383,18 +408,66 @@ async function runQaSuite() {
     'Test 20: Data privacy preserved — customer cannot view other clients private profile data'
   );
 
-  // Clean up created test fixtures
-  await db.delete(appointments).where(eq(appointments.id, validAptData.id));
-  if (couponAptData.id) {
-    await db.delete(appointments).where(eq(appointments.id, couponAptData.id));
+  // 21. Barber Role Enforcement: Barbers cannot create bookings
+  const resBarberApt = await fetch(`${BASE_URL}/api/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${barberToken}`,
+    },
+    body: JSON.stringify({
+      shopId: targetShop.id,
+      barberId: targetBarber.id,
+      serviceId: targetService.id,
+      date: '2026-11-25',
+      time: '14:00',
+      clientName: 'Mock Client',
+      clientPhone: '+91 98765 00000',
+    }),
+  });
+  const barberAptErr = await resBarberApt.json();
+  assert(
+    resBarberApt.status === 403 &&
+      barberAptErr.error?.includes('Barber accounts cannot create bookings'),
+    'Test 21: Barber account strictly blocked from creating appointments (HTTP 403 Forbidden)'
+  );
+
+  } finally {
+    // Clean up created test fixtures guaranteed
+    try {
+      await db
+        .delete(appointments)
+        .where(
+          or(
+            eq(appointments.customerUid, testCustomerUid),
+            like(appointments.customerUid, 'test-%')
+          )
+        );
+      await db
+        .delete(services)
+        .where(eq(services.name, 'QA Test Service'));
+      await db
+        .delete(coupons)
+        .where(
+          or(
+            eq(coupons.id, 'cpn-qa-test'),
+            eq(coupons.code, 'QAWELCOME20')
+          )
+        );
+      await db
+        .delete(profiles)
+        .where(
+          or(
+            eq(profiles.uid, testCustomerUid),
+            eq(profiles.uid, testBarberUid),
+            eq(profiles.uid, testAdminUid),
+            like(profiles.uid, 'test-%')
+          )
+        );
+    } catch {
+      // Best-effort cleanup
+    }
   }
-  if (createdSrv.id) {
-    await db.delete(services).where(eq(services.id, createdSrv.id));
-  }
-  await db.delete(coupons).where(eq(coupons.id, 'cpn-qa-test'));
-  await db.delete(profiles).where(eq(profiles.uid, testCustomerUid));
-  await db.delete(profiles).where(eq(profiles.uid, testBarberUid));
-  await db.delete(profiles).where(eq(profiles.uid, testAdminUid));
 
   console.log(`\n=== QA SUITE COMPLETE: ${passed} PASSED, ${failed} FAILED ===`);
   process.exit(failed > 0 ? 1 : 0);

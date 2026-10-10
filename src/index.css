@@ -6,15 +6,27 @@
     --color-golden-sand: #F1E194;
     --color-midnight: #111113;
     --color-espresso: #241719;
-    --color-warm-ivory: #FAF6EA;
-    --color-soft-sand: #E9D9B8;
+    --color-warm-ivory: #EFE9DD;
+    --color-soft-sand: #E5DEC9;
     --color-warm-gray: #8A8178;
     --color-cream-white: #FFF9E8;
+
+    /* Neumorphic Shadow Tokens (Light Theme: Cashmere Ivory) */
+    --neu-light-base: #EFE9DD;
+    --neu-light-surface: #F4EFE6;
+    --neu-light-sh-dark: rgba(182, 168, 148, 0.48);
+    --neu-light-sh-bright: rgba(255, 255, 255, 0.95);
+
+    /* Neumorphic Shadow Tokens (Dark Theme: Luxury Obsidian Espresso) */
+    --neu-dark-base: #1C1718;
+    --neu-dark-surface: #241D1F;
+    --neu-dark-sh-dark: rgba(0, 0, 0, 0.85);
+    --neu-dark-sh-bright: rgba(241, 225, 148, 0.08);
   }
 
   body {
     font-family: 'Plus Jakarta Sans', 'Noto Sans Devanagari', -apple-system, BlinkMacSystemFont, sans-serif;
-    background-color: #FAF6EA;
+    background-color: #EFE9DD;
     color: #111113;
     overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
@@ -29,6 +41,212 @@
     font-family: 'JetBrains Mono', monospace;
     font-variant-numeric: tabular-nums;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BARBERLOO NEUMORPHIC LUXURY DESIGN SYSTEM
+   Soft tactile extrusions, sculpted wells, & dual-shadow depth
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Light Cashmere Neumorphism ── */
+.neu-flat {
+  background: #F4EFE6;
+  box-shadow: 8px 8px 18px var(--neu-light-sh-dark), -8px -8px 18px var(--neu-light-sh-bright);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.neu-flat-sm {
+  background: #F4EFE6;
+  box-shadow: 4px 4px 10px var(--neu-light-sh-dark), -4px -4px 10px var(--neu-light-sh-bright);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.neu-pressed {
+  background: #E8E1D2;
+  box-shadow: inset 4px 4px 8px rgba(175, 161, 141, 0.55), inset -4px -4px 8px var(--neu-light-sh-bright);
+  border: 1px solid rgba(182, 168, 148, 0.25);
+}
+
+.neu-pressed-sm {
+  background: #E8E1D2;
+  box-shadow: inset 2.5px 2.5px 5px rgba(175, 161, 141, 0.5), inset -2.5px -2.5px 5px var(--neu-light-sh-bright);
+  border: 1px solid rgba(182, 168, 148, 0.2);
+}
+
+.neu-btn {
+  background: #F4EFE6;
+  color: #111113;
+  box-shadow: 5px 5px 12px var(--neu-light-sh-dark), -5px -5px 12px var(--neu-light-sh-bright);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neu-btn:hover {
+  box-shadow: 6px 6px 15px rgba(182, 168, 148, 0.6), -6px -6px 15px rgba(255, 255, 255, 1);
+  transform: translateY(-1px);
+}
+.neu-btn:active {
+  box-shadow: inset 3px 3px 7px rgba(175, 161, 141, 0.6), inset -3px -3px 7px var(--neu-light-sh-bright);
+  transform: translateY(1px);
+}
+
+.neu-btn-burgundy {
+  background: linear-gradient(135deg, #6E121A 0%, #460A0E 100%);
+  color: #F1E194;
+  box-shadow: 6px 6px 14px var(--neu-light-sh-dark), -6px -6px 14px var(--neu-light-sh-bright);
+  border: 1px solid rgba(241, 225, 148, 0.25);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neu-btn-burgundy:hover {
+  background: linear-gradient(135deg, #7D161F 0%, #520C11 100%);
+  box-shadow: 7px 7px 18px rgba(182, 168, 148, 0.65), -7px -7px 18px rgba(255, 255, 255, 1);
+  transform: translateY(-1px);
+}
+.neu-btn-burgundy:active {
+  box-shadow: inset 4px 4px 8px rgba(25, 2, 5, 0.8), inset -4px -4px 8px rgba(140, 25, 35, 0.35);
+  transform: translateY(1px);
+}
+
+.neu-btn-gold {
+  background: linear-gradient(135deg, #F6EAA6 0%, #E0C15F 100%);
+  color: #16120E;
+  box-shadow: 6px 6px 14px var(--neu-light-sh-dark), -6px -6px 14px var(--neu-light-sh-bright);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neu-btn-gold:hover {
+  background: linear-gradient(135deg, #FFF0B2 0%, #E8CA6B 100%);
+  box-shadow: 7px 7px 18px rgba(182, 168, 148, 0.65), -7px -7px 18px rgba(255, 255, 255, 1);
+  transform: translateY(-1px);
+}
+.neu-btn-gold:active {
+  box-shadow: inset 4px 4px 8px rgba(130, 100, 20, 0.65), inset -4px -4px 8px rgba(255, 255, 235, 0.9);
+  transform: translateY(1px);
+}
+
+.neu-input {
+  background: #E8E1D2;
+  box-shadow: inset 3.5px 3.5px 7px rgba(175, 161, 141, 0.55), inset -3.5px -3.5px 7px var(--neu-light-sh-bright);
+  border: 1px solid rgba(182, 168, 148, 0.3);
+  transition: all 0.2s ease;
+}
+.neu-input:focus {
+  border-color: #5B0E14;
+  box-shadow: inset 3.5px 3.5px 7px rgba(175, 161, 141, 0.55), inset -3.5px -3.5px 7px var(--neu-light-sh-bright), 0 0 0 2px rgba(91, 14, 20, 0.15);
+}
+
+.neu-badge {
+  background: #F4EFE6;
+  box-shadow: 3px 3px 7px var(--neu-light-sh-dark), -3px -3px 7px var(--neu-light-sh-bright);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+/* ── Dark Luxury Obsidian Neumorphism ── */
+.neu-dark-flat {
+  background: #231C1E;
+  box-shadow: 9px 9px 20px var(--neu-dark-sh-dark), -8px -8px 18px var(--neu-dark-sh-bright);
+  border: 1px solid rgba(241, 225, 148, 0.14);
+}
+
+.neu-dark-flat-sm {
+  background: #231C1E;
+  box-shadow: 5px 5px 12px var(--neu-dark-sh-dark), -4px -4px 10px var(--neu-dark-sh-bright);
+  border: 1px solid rgba(241, 225, 148, 0.1);
+}
+
+.neu-dark-pressed {
+  background: #171213;
+  box-shadow: inset 5px 5px 10px rgba(0, 0, 0, 0.9), inset -4px -4px 9px var(--neu-dark-sh-bright);
+  border: 1px solid rgba(0, 0, 0, 0.6);
+}
+
+.neu-dark-pressed-sm {
+  background: #171213;
+  box-shadow: inset 3px 3px 6px rgba(0, 0, 0, 0.9), inset -2.5px -2.5px 5px var(--neu-dark-sh-bright);
+  border: 1px solid rgba(0, 0, 0, 0.5);
+}
+
+.neu-dark-btn {
+  background: #241D1F;
+  color: #FFF9E8;
+  box-shadow: 5px 5px 12px var(--neu-dark-sh-dark), -4px -4px 10px var(--neu-dark-sh-bright);
+  border: 1px solid rgba(241, 225, 148, 0.16);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neu-dark-btn:hover {
+  box-shadow: 7px 7px 16px rgba(0, 0, 0, 0.95), -5px -5px 14px rgba(241, 225, 148, 0.12);
+  border-color: rgba(241, 225, 148, 0.3);
+  transform: translateY(-1px);
+}
+.neu-dark-btn:active {
+  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.95), inset -3px -3px 6px var(--neu-dark-sh-bright);
+  transform: translateY(1px);
+}
+
+.neu-dark-btn-gold {
+  background: linear-gradient(135deg, #F6EAA6 0%, #D8B752 100%);
+  color: #14100C;
+  box-shadow: 6px 6px 14px var(--neu-dark-sh-dark), -4px -4px 10px rgba(241, 225, 148, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neu-dark-btn-gold:hover {
+  background: linear-gradient(135deg, #FFF0B2 0%, #E2C25E 100%);
+  box-shadow: 8px 8px 18px rgba(0, 0, 0, 0.95), -5px -5px 14px rgba(241, 225, 148, 0.22);
+  transform: translateY(-1px);
+}
+.neu-dark-btn-gold:active {
+  box-shadow: inset 4px 4px 8px rgba(110, 80, 15, 0.7), inset -3px -3px 7px rgba(255, 255, 240, 0.85);
+  transform: translateY(1px);
+}
+
+.neu-dark-input {
+  background: #171213;
+  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.9), inset -3px -3px 7px var(--neu-dark-sh-bright);
+  border: 1px solid rgba(241, 225, 148, 0.15);
+  color: #FFF9E8;
+  transition: all 0.2s ease;
+}
+.neu-dark-input:focus {
+  border-color: #F1E194;
+  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.9), inset -3px -3px 7px var(--neu-dark-sh-bright), 0 0 0 2px rgba(241, 225, 148, 0.18);
+}
+
+.neu-dark-badge {
+  background: #241D1F;
+  box-shadow: 3px 3px 8px var(--neu-dark-sh-dark), -2.5px -2.5px 6px var(--neu-dark-sh-bright);
+  border: 1px solid rgba(241, 225, 148, 0.12);
+}
+
+/* Tactile Icon Circles */
+.neu-icon-btn {
+  background: #F4EFE6;
+  box-shadow: 4px 4px 9px var(--neu-light-sh-dark), -4px -4px 9px var(--neu-light-sh-bright);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  transition: all 0.2s ease;
+}
+.neu-icon-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 5px 5px 12px var(--neu-light-sh-dark), -5px -5px 12px rgba(255, 255, 255, 1);
+}
+.neu-icon-btn:active {
+  transform: translateY(1px);
+  box-shadow: inset 2.5px 2.5px 5px rgba(175, 161, 141, 0.6), inset -2.5px -2.5px 5px var(--neu-light-sh-bright);
+}
+
+.neu-dark-icon-btn {
+  background: #241D1F;
+  box-shadow: 4px 4px 10px var(--neu-dark-sh-dark), -3px -3px 8px var(--neu-dark-sh-bright);
+  border: 1px solid rgba(241, 225, 148, 0.14);
+  transition: all 0.2s ease;
+}
+.neu-dark-icon-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(241, 225, 148, 0.35);
+  box-shadow: 6px 6px 14px rgba(0, 0, 0, 0.95), -4px -4px 10px rgba(241, 225, 148, 0.1);
+}
+.neu-dark-icon-btn:active {
+  transform: translateY(1px);
+  box-shadow: inset 3px 3px 6px rgba(0, 0, 0, 0.95), inset -2.5px -2.5px 5px var(--neu-dark-sh-bright);
 }
 
 @media (prefers-reduced-motion: reduce) {

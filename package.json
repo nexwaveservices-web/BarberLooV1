@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && cp booking.html dist/booking.html",
+    "build": "vite build && cp dist/index.html dist/booking.html && mkdir -p wp-assets/assets && cp dist/assets/* wp-assets/assets/ && cp dist/index.html wp-assets/index.html",
     "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

@@ -6,6 +6,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   BarberItem,
+  INITIAL_BARBERS,
+  INITIAL_SERVICES,
+  INITIAL_SHOPS,
   OPENING_HOURS,
   PageView,
   ServiceItem,
@@ -71,9 +74,9 @@ export default function App() {
   const [currentUserProfile, setCurrentUserProfile] = useState<any | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
 
-  const [shops, setShops] = useState<any[]>([]);
-  const [barbers, setBarbers] = useState<any[]>([]);
-  const [services, setServices] = useState<any[]>([]);
+  const [shops, setShops] = useState<any[]>(INITIAL_SHOPS);
+  const [barbers, setBarbers] = useState<any[]>(INITIAL_BARBERS);
+  const [services, setServices] = useState<any[]>(INITIAL_SERVICES);
   const [selectedShop, setSelectedShop] = useState<ShopItem | null>(null);
   const [bookingService, setBookingService] = useState<ServiceItem | null>(null);
   const [bookingBarber, setBookingBarber] = useState<BarberItem | null>(null);
@@ -168,8 +171,22 @@ export default function App() {
 
       if (isBookingPath) {
         setCurrentPage('booking');
-      } else if (params.get('page') === 'shop' || params.get('shop')) {
+      } else if (
+        pathname.includes('shop') ||
+        params.get('page') === 'shop' ||
+        params.get('shop')
+      ) {
         setCurrentPage('shop');
+        const shopParam = params.get('shop') || params.get('shop_id');
+        if (shopParam && shops.length > 0) {
+          const matched = shops.find(
+            (s: any) =>
+              s.id === shopParam ||
+              s.qrCodeSlug === shopParam ||
+              String(s.name || '').toLowerCase() === shopParam.toLowerCase()
+          );
+          if (matched) setSelectedShop(matched);
+        }
       } else if (
         pathname.includes('admin') ||
         params.get('page') === 'admin-dashboard'
@@ -197,7 +214,7 @@ export default function App() {
     handleUrlRoute();
     window.addEventListener('popstate', handleUrlRoute);
     return () => window.removeEventListener('popstate', handleUrlRoute);
-  }, []);
+  }, [shops]);
 
   useEffect(() => {
     loadBootstrapState(activeUserUid);
@@ -380,6 +397,11 @@ export default function App() {
     if (!activeUserUid) {
       setAuthModalOpen(true);
       throw new Error('Please sign in to confirm your appointment.');
+    }
+    if (currentUserProfile?.role === 'barber' || currentUserProfile?.role === 'shop_owner') {
+      throw new Error(
+        'Barber accounts cannot create bookings. Appointments can only be booked by customer accounts.'
+      );
     }
     if (getBrowserNotificationPermission() === 'default') {
       requestBrowserNotificationPermission().catch(() => {});
@@ -619,17 +641,63 @@ export default function App() {
     </div>
   );
 
-  const handleNavigate = (page: PageView) => {
+  const handleNavigate = (page: PageView, targetShop?: any) => {
     if (page === 'shop') {
-      setSelectedShop(null); // Clicking Shops ALWAYS shows the Shop List! (Section 8)
+      if (targetShop !== undefined && targetShop !== null) {
+        let resolved = targetShop;
+        if (typeof targetShop === 'string') {
+          resolved = shops.find((s: any) => s?.id === targetShop) || { id: targetShop };
+        }
+        setSelectedShop(resolved);
+        const sId = resolved?.id || '';
+        if (sId) {
+          window.history.pushState(
+            {},
+            '',
+            `?page=shop&shop=${encodeURIComponent(sId)}`
+          );
+        } else {
+          window.history.pushState({}, '', '?page=shop');
+        }
+      } else {
+        setSelectedShop(null); // Clicking Shops in Nav shows the full Shop List (Section 8)
+        window.history.pushState({}, '', '?page=shop');
+      }
+    } else if (page === 'booking') {
+      const sid = (targetShop?.id || selectedShop?.id)
+        ? `&shop_id=${encodeURIComponent((targetShop?.id || selectedShop?.id))}`
+        : '';
+      window.history.pushState({}, '', `?page=booking${sid}`);
+    } else if (page === 'home') {
+      window.history.pushState({}, '', '/');
     }
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleSelectShop = (shop: any) => {
+    let resolvedShop = shop;
+    if (typeof shop === 'string') {
+      resolvedShop = shops.find((s: any) => s?.id === shop) || { id: shop };
+    }
+    setSelectedShop(resolvedShop);
+    setCurrentPage('shop');
+    const sId = resolvedShop?.id || (typeof shop === 'string' ? shop : '');
+    if (sId) {
+      window.history.pushState(
+        {},
+        '',
+        `?page=shop&shop=${encodeURIComponent(sId)}`
+      );
+    } else {
+      window.history.pushState({}, '', '?page=shop');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
     <LanguageProvider>
-      <div className="min-h-screen flex flex-col bg-[#FAF6EA] text-[#111113]">
+      <div className="min-h-screen flex flex-col bg-[#EFE9DD] text-[#111113] selection:bg-[#5B0E14] selection:text-[#FFF9E8]">
         <Navbar
           currentPage={currentPage}
           onNavigate={handleNavigate}
@@ -645,7 +713,7 @@ export default function App() {
               onNavigate={handleNavigate}
               onSelectServiceForBooking={(srv) => setBookingService(srv)}
               onSelectBarberForBooking={(brb) => setBookingBarber(brb)}
-              onSelectShop={(shop) => setSelectedShop(shop)}
+              onSelectShop={handleSelectShop}
               shops={shops}
               barbers={barbers}
               services={services}
@@ -660,7 +728,7 @@ export default function App() {
           {currentPage === 'shop' && (
             <ShopPage
               shop={selectedShop}
-              onSelectShop={(shop) => setSelectedShop(shop)}
+              onSelectShop={handleSelectShop}
               onNavigate={handleNavigate}
               onSelectServiceForBooking={(srv) => setBookingService(srv)}
               onSelectBarberForBooking={(brb) => setBookingBarber(brb)}
@@ -683,26 +751,32 @@ export default function App() {
             />
           )}
 
-          {currentPage === 'booking' && (
-            <BookingPage
-              initialService={bookingService}
-              initialBarber={bookingBarber}
-              initialShop={selectedShop}
-              initialShopId={selectedShop?.id}
-              onSelectShop={(shop) => setSelectedShop(shop)}
-              onConfirmBooking={handleConfirmBooking}
-              onNavigate={handleNavigate}
-              shops={shops}
-              services={services}
-              barbers={barbers}
-              coupons={coupons}
-              appointments={appointments}
-              workingHours={workingHours}
-              currentUserProfile={currentUserProfile}
-              platformSettings={platformSettings}
-              onOpenAuthModal={() => setAuthModalOpen(true)}
-            />
-          )}
+          {currentPage === 'booking' &&
+            (userRole === 'barber' || userRole === 'shop_owner' ? (
+              renderRoleGuard(
+                'Barber Account Detected',
+                'Barber accounts cannot create bookings. Appointments can only be scheduled by customers. Please use your Barber Console to manage appointments, or sign in with a Customer account.'
+              )
+            ) : (
+              <BookingPage
+                initialService={bookingService}
+                initialBarber={bookingBarber}
+                initialShop={selectedShop}
+                initialShopId={selectedShop?.id}
+                onSelectShop={(shop) => setSelectedShop(shop)}
+                onConfirmBooking={handleConfirmBooking}
+                onNavigate={handleNavigate}
+                shops={shops}
+                services={services}
+                barbers={barbers}
+                coupons={coupons}
+                appointments={appointments}
+                workingHours={workingHours}
+                currentUserProfile={currentUserProfile}
+                platformSettings={platformSettings}
+                onOpenAuthModal={() => setAuthModalOpen(true)}
+              />
+            ))}
 
           {(currentPage === 'customer-dashboard' || currentPage === 'profile') &&
             (canAccessCustomerPortal ? (

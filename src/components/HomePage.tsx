@@ -26,7 +26,7 @@ import {
 } from '../lib/locations';
 
 interface HomePageProps {
-  onNavigate: (page: PageView) => void;
+  onNavigate: (page: PageView, targetShop?: any) => void;
   onSelectServiceForBooking: (service: ServiceItem) => void;
   onSelectBarberForBooking: (barber: BarberItem) => void;
   onSelectShop: (shop: ShopItem) => void;
@@ -61,6 +61,8 @@ export const HomePage: React.FC<HomePageProps> = ({
     translateCategory,
     translateService,
   } = useLanguage();
+
+  const isBarber = currentUserProfile?.role === 'barber' || currentUserProfile?.role === 'shop_owner';
 
   const [selectedStateId, setSelectedStateId] = useState<string>(() => {
     return currentUserProfile?.stateId || currentUserProfile?.state_id || 'all';
@@ -206,9 +208,9 @@ export const HomePage: React.FC<HomePageProps> = ({
   };
 
   return (
-    <div className="bg-[#FAF6EA] text-[#111113]">
+    <div className="bg-[#EFE9DD] text-[#111113]">
       {/* 1. HERO SECTION */}
-      <section className="relative min-h-[84vh] flex items-end bg-[#111113] text-[#FFF9E8] overflow-hidden">
+      <section className="relative min-h-[84vh] flex items-end bg-[#1C1718] text-[#FFF9E8] overflow-hidden">
         <div className="absolute inset-0">
           <SmartImage
             src={ASSETS.heroCraft}
@@ -222,7 +224,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 'linear-gradient(105deg, rgba(17,17,19,0.95) 0%, rgba(36,23,25,0.78) 52%, rgba(17,17,19,0.35) 100%)',
             }}
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#111113] via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#1C1718] via-transparent to-transparent" />
         </div>
 
         <div className="relative z-10 max-w-[1360px] w-full mx-auto px-5 sm:px-8 pt-24 pb-20 lg:pb-28">
@@ -250,31 +252,32 @@ export const HomePage: React.FC<HomePageProps> = ({
             </p>
 
             <div className="flex flex-wrap items-center gap-4 pt-3">
-              <button
-                type="button"
-                onClick={() => {
-                  const targetShop = shops[0];
-                  if (targetShop) {
-                    onSelectShop(targetShop);
-                    window.history.pushState(
-                      {},
-                      '',
-                      `booking.html?shop_id=${encodeURIComponent(targetShop.id)}`
-                    );
-                  } else {
-                    window.history.pushState({}, '', 'booking.html');
-                  }
-                  onNavigate('booking');
-                }}
-                className="px-8 py-4 rounded-[20px] bg-[#5B0E14] text-[#FFF9E8] border border-[#F1E194]/30 text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase hover:bg-[#73121a] transition-all duration-200 shadow-xl cursor-pointer"
-              >
-                {tr('BOOK AN APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
-              </button>
+              {isBarber ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('barber-dashboard')}
+                  className="px-8 py-4 rounded-[20px] neu-btn-burgundy text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase cursor-pointer"
+                >
+                  {tr('BARBER CONSOLE', 'बार्बर कंसोल')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetShop = shops[0];
+                    if (targetShop) onSelectShop(targetShop);
+                    onNavigate('booking', targetShop);
+                  }}
+                  className="px-8 py-4 rounded-[20px] neu-btn-burgundy text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase cursor-pointer"
+                >
+                  {tr('BOOK AN APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
+                </button>
+              )}
 
               <button
                 type="button"
                 onClick={() => onNavigate('shop')}
-                className="px-8 py-4 rounded-[20px] bg-[#F1E194] text-[#111113] text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase hover:bg-[#FFF9E8] transition-all duration-200 shadow-xl inline-flex items-center gap-2.5 cursor-pointer"
+                className="px-8 py-4 rounded-[20px] neu-btn-gold text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase inline-flex items-center gap-2.5 cursor-pointer"
               >
                 <span>{tr('EXPLORE BARBERS', 'बार्बर देखें')}</span>
               </button>
@@ -285,12 +288,12 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       {/* 2. CLEAN SEARCH & DISCOVERY BAR */}
       <section className="relative z-20 -mt-10 max-w-[1360px] mx-auto px-5 sm:px-8">
-        <div className="rounded-[24px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/25 p-5 sm:p-6 shadow-2xl space-y-4">
+        <div className="rounded-[24px] neu-dark-flat p-5 sm:p-6 space-y-4">
           <form
             onSubmit={handleSearchSubmit}
             className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-center"
           >
-            <div className="md:col-span-3 flex items-center gap-3 px-3.5 py-3 rounded-[16px] bg-[#111113]/75 border border-[#F1E194]/15">
+            <div className="md:col-span-3 flex items-center gap-3 px-3.5 py-3 rounded-[16px] neu-dark-pressed">
               <MapPin className="w-4 h-4 text-[#F1E194] shrink-0" />
               <div className="w-full">
                 <label className="block text-[10px] uppercase tracking-[0.16em] text-[#8A8178]">
@@ -301,11 +304,11 @@ export const HomePage: React.FC<HomePageProps> = ({
                   onChange={(e) => handleStateSelect(e.target.value)}
                   className="w-full bg-transparent text-xs font-semibold text-[#FFF9E8] focus:outline-none cursor-pointer"
                 >
-                  <option value="all" className="bg-[#111113]">
+                  <option value="all" className="bg-[#1C1718]">
                     {tr('All States', 'सभी राज्य')}
                   </option>
                   {DEFAULT_STATES.map((s) => (
-                    <option key={s.id} value={s.id} className="bg-[#111113]">
+                    <option key={s.id} value={s.id} className="bg-[#1C1718]">
                       {s.name}
                     </option>
                   ))}
@@ -313,7 +316,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
             </div>
 
-            <div className="md:col-span-3 flex items-center gap-3 px-3.5 py-3 rounded-[16px] bg-[#111113]/75 border border-[#F1E194]/15">
+            <div className="md:col-span-3 flex items-center gap-3 px-3.5 py-3 rounded-[16px] neu-dark-pressed">
               <MapPin className="w-4 h-4 text-[#F1E194] shrink-0" />
               <div className="w-full">
                 <label className="block text-[10px] uppercase tracking-[0.16em] text-[#8A8178]">
@@ -324,13 +327,13 @@ export const HomePage: React.FC<HomePageProps> = ({
                   onChange={(e) => setSelectedCityId(e.target.value)}
                   className="w-full bg-transparent text-xs font-semibold text-[#FFF9E8] focus:outline-none cursor-pointer"
                 >
-                  <option value="all" className="bg-[#111113]">
+                  <option value="all" className="bg-[#1C1718]">
                     {selectedStateId !== 'all'
                       ? tr('All Cities in State', 'राज्य के सभी शहर')
                       : tr('All Indian Cities', 'सभी भारतीय शहर')}
                   </option>
                   {getCitiesForState(selectedStateId).map((c) => (
-                    <option key={c.id} value={c.id} className="bg-[#111113]">
+                    <option key={c.id} value={c.id} className="bg-[#1C1718]">
                       {c.name}
                     </option>
                   ))}
@@ -338,7 +341,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
             </div>
 
-            <div className="md:col-span-4 flex items-center gap-3 px-3.5 py-3 rounded-[16px] bg-[#111113]/75 border border-[#F1E194]/15">
+            <div className="md:col-span-4 flex items-center gap-3 px-3.5 py-3 rounded-[16px] neu-dark-pressed">
               <Search className="w-4 h-4 text-[#F1E194] shrink-0" />
               <div className="w-full">
                 <label className="block text-[10px] uppercase tracking-[0.16em] text-[#8A8178]">
@@ -360,7 +363,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             <div className="md:col-span-2">
               <button
                 type="submit"
-                className="w-full py-3.5 px-3 rounded-[16px] bg-[#5B0E14] hover:bg-[#75131b] text-[#FFF9E8] border border-[#F1E194]/25 text-xs font-semibold tracking-[0.14em] uppercase transition-colors cursor-pointer"
+                className="w-full py-3.5 px-3 rounded-[16px] neu-dark-btn-gold text-xs font-semibold tracking-[0.14em] uppercase cursor-pointer"
               >
                 {tr('DISCOVER', 'सैलून खोजें')}
               </button>
@@ -378,26 +381,26 @@ export const HomePage: React.FC<HomePageProps> = ({
               <select
                 value={minRatingFilter}
                 onChange={(e) => setMinRatingFilter(Number(e.target.value))}
-                className="px-3 py-1.5 rounded-[10px] bg-[#111113] border border-[#F1E194]/20 text-[#FFF9E8] text-xs cursor-pointer"
+                className="px-3 py-1.5 rounded-[12px] neu-dark-pressed text-[#FFF9E8] text-xs cursor-pointer focus:outline-none"
               >
-                <option value={0}>{tr('Any Rating', 'सभी रेटिंग')}</option>
-                <option value={4.5}>4.5★ &amp; {tr('Above', 'अधिक')}</option>
-                <option value={4.8}>4.8★ &amp; {tr('Above', 'अधिक')}</option>
+                <option value={0} className="bg-[#1C1718]">{tr('Any Rating', 'सभी रेटिंग')}</option>
+                <option value={4.5} className="bg-[#1C1718]">4.5★ &amp; {tr('Above', 'अधिक')}</option>
+                <option value={4.8} className="bg-[#1C1718]">4.8★ &amp; {tr('Above', 'अधिक')}</option>
               </select>
 
               <select
                 value={maxPriceFilter}
                 onChange={(e) => setMaxPriceFilter(Number(e.target.value))}
-                className="px-3 py-1.5 rounded-[10px] bg-[#111113] border border-[#F1E194]/20 text-[#FFF9E8] text-xs cursor-pointer"
+                className="px-3 py-1.5 rounded-[12px] neu-dark-pressed text-[#FFF9E8] text-xs cursor-pointer focus:outline-none"
               >
-                <option value={99999}>{tr('Any Price (INR)', 'कोई भी कीमत (₹)')}</option>
-                <option value={850}>
+                <option value={99999} className="bg-[#1C1718]">{tr('Any Price (INR)', 'कोई भी कीमत (₹)')}</option>
+                <option value={850} className="bg-[#1C1718]">
                   {tr('Up to', 'अधिकतम')} {formatINR(850)}
                 </option>
-                <option value={1500}>
+                <option value={1500} className="bg-[#1C1718]">
                   {tr('Up to', 'अधिकतम')} {formatINR(1500)}
                 </option>
-                <option value={2500}>
+                <option value={2500} className="bg-[#1C1718]">
                   {tr('Up to', 'अधिकतम')} {formatINR(2500)}
                 </option>
               </select>
@@ -410,10 +413,10 @@ export const HomePage: React.FC<HomePageProps> = ({
                   key={sKey}
                   type="button"
                   onClick={() => setSortBy(sKey)}
-                  className={`px-3 py-1.5 rounded-[10px] font-semibold capitalize cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-[12px] text-xs font-semibold capitalize cursor-pointer transition-all ${
                     sortBy === sKey
-                      ? 'bg-[#F1E194] text-[#111113]'
-                      : 'bg-[#111113] text-[#8A8178] hover:text-[#FFF9E8]'
+                      ? 'neu-dark-btn-gold text-[#14100C] font-bold'
+                      : 'neu-dark-btn text-[#8A8178] hover:text-[#FFF9E8]'
                   }`}
                 >
                   {sKey === 'distance'
@@ -430,7 +433,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       {/* 3. REAL-TIME PLATFORM STATISTICS */}
       <section className="max-w-[1360px] mx-auto px-5 sm:px-8 pt-14 pb-10">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 py-8 border-y border-[#5B0E14]/15">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           {[
             {
               num: String(shops.length),
@@ -448,17 +451,15 @@ export const HomePage: React.FC<HomePageProps> = ({
               num: avgRatingDisplay,
               label: tr('Average Rating', 'औसत रेटिंग'),
             },
-          ].map((stat, idx) => (
+          ].map((stat) => (
             <div
               key={stat.label}
-              className={`${
-                idx !== 0 ? 'lg:border-l lg:border-[#5B0E14]/12 lg:pl-8' : ''
-              }`}
+              className="rounded-[20px] neu-flat p-6 transition-all duration-300 hover:-translate-y-0.5"
             >
               <div className="font-display font-mono-num text-3xl sm:text-5xl font-bold text-[#5B0E14]">
                 {stat.num}
               </div>
-              <div className="text-xs sm:text-sm font-medium text-[#8A8178] mt-1 tracking-wide">
+              <div className="text-xs sm:text-sm font-semibold text-[#8A8178] mt-1.5 tracking-wide">
                 {stat.label}
               </div>
             </div>
@@ -546,10 +547,10 @@ export const HomePage: React.FC<HomePageProps> = ({
                   key={cat}
                   type="button"
                   onClick={() => setActiveServiceFilter(cat)}
-                  className={`px-4 py-2 rounded-[16px] text-xs font-semibold transition-colors cursor-pointer ${
+                  className={`px-4 py-2 rounded-[16px] text-xs font-semibold cursor-pointer ${
                     activeServiceFilter === cat
-                      ? 'bg-[#5B0E14] text-[#FFF9E8]'
-                      : 'bg-[#E9D9B8]/60 text-[#241719] hover:bg-[#E9D9B8]'
+                      ? 'neu-btn-burgundy'
+                      : 'neu-btn'
                   }`}
                 >
                   {cat === 'All'
@@ -564,7 +565,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             {filteredServices.map((service: any, index: number) => (
               <div
                 key={service.id}
-                className="group rounded-[22px] bg-[#E9D9B8]/55 hover:bg-[#E9D9B8]/90 border border-[#5B0E14]/12 p-7 flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5 shadow-sm"
+                className="group rounded-[22px] neu-flat p-7 flex flex-col justify-between transition-all duration-200 hover:-translate-y-1"
               >
                 <div>
                   <div className="flex items-center justify-between text-xs text-[#8A8178] mb-4">
@@ -597,28 +598,40 @@ export const HomePage: React.FC<HomePageProps> = ({
                     </span>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const targetShop =
-                        shops.find((sh: any) => sh.id === service.shopId) || shops[0];
-                      if (targetShop) onSelectShop(targetShop);
-                      onSelectServiceForBooking(service);
-                      const targetId = service.shopId || targetShop?.id;
-                      if (targetId) {
-                        window.history.pushState(
-                          {},
-                          '',
-                          `booking.html?shop_id=${encodeURIComponent(targetId)}`
-                        );
-                      }
-                      onNavigate('booking');
-                    }}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-[16px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold tracking-wider uppercase hover:bg-[#241719] transition-colors cursor-pointer"
-                  >
-                    <span>{tr('Select', 'बुक करें')}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
+                  {isBarber ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetShop =
+                          shops.find((sh: any) => sh.id === service.shopId) || shops[0];
+                        if (targetShop) {
+                          onSelectShop(targetShop);
+                          onNavigate('shop', targetShop);
+                        } else {
+                          onNavigate('shop');
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-[16px] neu-dark-btn text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                    >
+                      <span>{tr('View Salon', 'सैलून देखें')}</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetShop =
+                          shops.find((sh: any) => sh.id === service.shopId) || shops[0];
+                        if (targetShop) onSelectShop(targetShop);
+                        onSelectServiceForBooking(service);
+                        onNavigate('booking', targetShop);
+                      }}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-[16px] neu-btn-burgundy text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                    >
+                      <span>{tr('Select', 'बुक करें')}</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -705,7 +718,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               return (
                 <div
                   key={shop.id}
-                  className="rounded-[24px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/20 overflow-hidden flex flex-col justify-between shadow-xl group"
+                  className="rounded-[24px] neu-dark-flat overflow-hidden flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 group"
                 >
                   <div>
                     <div className="relative aspect-[16/10] overflow-hidden">
@@ -714,23 +727,23 @@ export const HomePage: React.FC<HomePageProps> = ({
                         alt={shop.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#241719] via-transparent to-transparent" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#231C1E] via-transparent to-transparent" />
                       <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
-                        <span className="px-3 py-1 rounded-[10px] bg-[#111113]/85 backdrop-blur-md text-xs font-semibold text-[#F1E194] border border-[#F1E194]/25">
+                        <span className="px-3 py-1 rounded-[10px] neu-dark-badge text-xs font-semibold text-[#F1E194]">
                           {translateCity(shop.district || shop.city)}
                         </span>
                         <div className="flex items-center gap-2">
-                          <span className="px-3 py-1 rounded-[10px] bg-[#111113]/85 backdrop-blur-md text-xs font-mono-num text-[#FFF9E8]">
+                          <span className="px-3 py-1 rounded-[10px] neu-dark-badge text-xs font-mono-num text-[#FFF9E8]">
                             {shop.rating}★ ({shop.reviewCount || 0})
                           </span>
                           {onToggleFavorite && (
                             <button
                               type="button"
                               onClick={() => onToggleFavorite('shop', shop.id)}
-                              className={`p-2 rounded-full backdrop-blur-md border cursor-pointer ${
+                              className={`p-2 rounded-full cursor-pointer transition-colors ${
                                 fav
-                                  ? 'bg-[#5B0E14] border-[#F1E194] text-[#F1E194]'
-                                  : 'bg-[#111113]/75 border-[#FFF9E8]/20 text-[#FFF9E8]'
+                                  ? 'bg-[#5B0E14] text-[#F1E194]'
+                                  : 'neu-dark-icon-btn text-[#FFF9E8]'
                               }`}
                             >
                               <Heart
@@ -769,27 +782,23 @@ export const HomePage: React.FC<HomePageProps> = ({
                         type="button"
                         onClick={() => {
                           onSelectShop(shop);
-                          onNavigate('shop');
                         }}
-                        className="px-4 py-2.5 rounded-[14px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 text-xs font-semibold cursor-pointer"
+                        className="px-4 py-2.5 rounded-[14px] neu-dark-btn text-xs font-semibold cursor-pointer"
                       >
                         {tr('View Shop', 'दुकान देखें')}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onSelectShop(shop);
-                          window.history.pushState(
-                            {},
-                            '',
-                            `booking.html?shop_id=${encodeURIComponent(shop.id)}`
-                          );
-                          onNavigate('booking');
-                        }}
-                        className="px-4 py-2.5 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold cursor-pointer"
-                      >
-                        {tr('Book', 'बुक करें')}
-                      </button>
+                      {!isBarber && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectShop(shop);
+                            onNavigate('booking', shop);
+                          }}
+                          className="px-4 py-2.5 rounded-[14px] neu-dark-btn-gold text-xs font-semibold cursor-pointer"
+                        >
+                          {tr('Book', 'बुक करें')}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -826,19 +835,19 @@ export const HomePage: React.FC<HomePageProps> = ({
                         alt={barber.name}
                         className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#241719] via-transparent to-transparent" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#231C1E] via-transparent to-transparent" />
                       <div className="absolute top-4 right-4 flex items-center gap-2">
-                        <div className="px-3 py-1 rounded-[12px] bg-[#111113]/85 backdrop-blur-md border border-[#F1E194]/30 text-xs font-mono-num font-semibold text-[#F1E194]">
+                        <div className="px-3 py-1 rounded-[12px] neu-dark-badge text-xs font-mono-num font-semibold text-[#F1E194]">
                           {barber.rating} ★ ({barber.reviews || 0})
                         </div>
                         {onToggleFavorite && (
                           <button
                             type="button"
                             onClick={() => onToggleFavorite('barber', barber.id)}
-                            className={`p-2 rounded-full backdrop-blur-md border cursor-pointer ${
+                            className={`p-2 rounded-full cursor-pointer transition-colors ${
                               fav
-                                ? 'bg-[#5B0E14] border-[#F1E194] text-[#F1E194]'
-                                : 'bg-[#111113]/75 border-[#FFF9E8]/20 text-[#FFF9E8]'
+                                ? 'bg-[#5B0E14] text-[#F1E194]'
+                                : 'neu-dark-icon-btn text-[#FFF9E8]'
                             }`}
                           >
                             <Heart
@@ -873,27 +882,38 @@ export const HomePage: React.FC<HomePageProps> = ({
                         {formatINR(barber.priceFrom)}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const targetShop =
-                          shops.find((sh: any) => sh.id === barber.shopId) || shops[0];
-                        if (targetShop) onSelectShop(targetShop);
-                        onSelectBarberForBooking(barber);
-                        const targetId = barber.shopId || targetShop?.id;
-                        if (targetId) {
-                          window.history.pushState(
-                            {},
-                            '',
-                            `booking.html?shop_id=${encodeURIComponent(targetId)}`
-                          );
-                        }
-                        onNavigate('booking');
-                      }}
-                      className="px-5 py-2.5 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold uppercase tracking-wider cursor-pointer"
-                    >
-                      {tr('Book Chair', 'चेयर बुक करें')}
-                    </button>
+                    {isBarber ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetShop =
+                            shops.find((sh: any) => sh.id === barber.shopId) || shops[0];
+                          if (targetShop) {
+                            onSelectShop(targetShop);
+                            onNavigate('shop', targetShop);
+                          } else {
+                            onNavigate('shop');
+                          }
+                        }}
+                        className="px-5 py-2.5 rounded-[14px] neu-dark-btn text-[#F1E194] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+                      >
+                        {tr('View Salon', 'सैलून देखें')}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetShop =
+                            shops.find((sh: any) => sh.id === barber.shopId) || shops[0];
+                          if (targetShop) onSelectShop(targetShop);
+                          onSelectBarberForBooking(barber);
+                          onNavigate('booking', targetShop);
+                        }}
+                        className="px-5 py-2.5 rounded-[14px] neu-dark-btn-gold text-xs font-semibold uppercase tracking-wider cursor-pointer"
+                      >
+                        {tr('Book Chair', 'चेयर बुक करें')}
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -915,27 +935,35 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {publishedReviews.slice(0, 3).map((rev: any) => (
-              <div
-                key={rev.id}
-                className="rounded-[22px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 flex flex-col justify-between"
-              >
-                <div>
-                  <div className="text-xs font-mono-num font-bold text-[#5B0E14] mb-3">
-                    {'★'.repeat(rev.rating || 5)}
+            {publishedReviews.slice(0, 3).map((rev: any) => {
+              const starsCount = Math.max(
+                1,
+                Math.min(5, Math.round(Number(rev?.rating) || 5))
+              );
+              return (
+                <div
+                  key={rev.id || Math.random()}
+                  className="rounded-[24px] neu-flat p-6 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1"
+                >
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-3">
+                      <span className="text-xs font-mono-num font-bold text-[#5B0E14] px-2.5 py-0.5 rounded-[8px] neu-badge">
+                        {'★'.repeat(starsCount)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-[#111113] leading-relaxed italic mb-6">
+                      “{rev.comment}”
+                    </p>
                   </div>
-                  <p className="text-sm text-[#111113] leading-relaxed italic mb-6">
-                    “{rev.comment}”
-                  </p>
+                  <div className="pt-4 border-t border-[#5B0E14]/10 text-xs">
+                    <p className="font-bold text-[#111113]">{rev.author}</p>
+                    <p className="text-[#8A8178]">
+                      {rev.service} · {rev.barber}
+                    </p>
+                  </div>
                 </div>
-                <div className="pt-4 border-t border-[#5B0E14]/10 text-xs">
-                  <p className="font-bold text-[#111113]">{rev.author}</p>
-                  <p className="text-[#8A8178]">
-                    {rev.service} · {rev.barber}
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

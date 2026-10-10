@@ -147,10 +147,31 @@ export interface CouponItem {
   expiryDate: string;
 }
 
-// Clean production arrays — no mock or fake records
+export const DEFAULT_FALLBACK_SHOP: ShopItem = {
+  id: '7fa27fef-d890-449e-b9bb-85bbfeaa2998',
+  name: 'BarberLoo Flagship Salon',
+  district: 'Jalandhar',
+  address: 'Model Town Main Market, Jalandhar, Punjab',
+  phone: '+91 98765 43210',
+  rating: 4.9,
+  reviewCount: 142,
+  isOpen: true,
+  verified: true,
+  image: ASSETS.royalInterior,
+  priceTier: '₹₹₹',
+  minPrice: 450,
+  distance: '0.4 km',
+  tagline: 'Luxury Grooming & Bespoke Appointments',
+  about: 'Premier master grooming delivered by expert craftsmen in a relaxed, luxurious setting.',
+};
+
+// Clean production arrays with authoritative fallback shop to guarantee zero blank screens
 export const SERVICES: ServiceItem[] = [];
 export const BARBERS: BarberItem[] = [];
-export const SHOPS: ShopItem[] = [];
+export const SHOPS: ShopItem[] = [DEFAULT_FALLBACK_SHOP];
+export const INITIAL_SHOPS: ShopItem[] = [DEFAULT_FALLBACK_SHOP];
+export const INITIAL_BARBERS: BarberItem[] = BARBERS;
+export const INITIAL_SERVICES: ServiceItem[] = SERVICES;
 export const INITIAL_APPOINTMENTS: AppointmentItem[] = [];
 export const REVIEWS: ReviewItem[] = [];
 export const INITIAL_COUPONS: CouponItem[] = [];

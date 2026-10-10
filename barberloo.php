@@ -39,6 +39,21 @@ add_action('init', function () {
         }
         exit;
     }
+
+    // Intercept deep routes directly on init to prevent blank screens or 404s
+    if (
+        $request_uri === '/booking.html' ||
+        $request_uri === '/booking' ||
+        $request_uri === '/shop' ||
+        $request_uri === '/shops' ||
+        isset($_GET['page']) ||
+        isset($_GET['shop']) ||
+        isset($_GET['shop_id'])
+    ) {
+        status_header(200);
+        echo barberloo_render_application(true);
+        exit;
+    }
 });
 
 function barberloo_render_application($full_viewport = true) {

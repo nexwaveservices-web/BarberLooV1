@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import {
   ASSETS,
   BarberItem,
+  INITIAL_SHOPS,
   OPENING_HOURS,
   PageView,
   ServiceItem,
@@ -32,7 +33,7 @@ import { SalonQrModal } from './SalonQrModal';
 interface ShopPageProps {
   shop: ShopItem | null;
   onSelectShop: (shop: ShopItem | null) => void;
-  onNavigate: (page: PageView) => void;
+  onNavigate: (page: PageView, targetShop?: any) => void;
   onSelectServiceForBooking: (service: ServiceItem) => void;
   onSelectBarberForBooking: (barber: BarberItem) => void;
   shops?: any[];
@@ -77,6 +78,9 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   platformSettings,
 }) => {
   const { tr, formatINR, translateCategory, translateService } = useLanguage();
+  const isBarber =
+    currentUserProfile?.role === 'barber' ||
+    currentUserProfile?.role === 'shop_owner';
   const [activeTab, setActiveTab] = useState<
     'services' | 'barbers' | 'reviews' | 'about' | 'gallery' | 'hours' | 'qr'
   >('services');
@@ -106,20 +110,65 @@ export const ShopPage: React.FC<ShopPageProps> = ({
 
   const [qrCopied, setQrCopied] = useState(false);
 
+  // Safe arrays to prevent any undefined/null crashes
+  const safeShops = Array.isArray(shops) && shops.length > 0 ? shops : INITIAL_SHOPS;
+  const safeServices = Array.isArray(services) ? services : [];
+  const safeBarbers = Array.isArray(barbers) ? barbers : [];
+  const safeReviews = Array.isArray(reviews) ? reviews : [];
+  const safeFavorites = Array.isArray(favorites) ? favorites : [];
+  const safeWorkingHours =
+    Array.isArray(workingHours) && workingHours.length > 0
+      ? workingHours
+      : OPENING_HOURS;
+  const safeShopGallery = Array.isArray(shopGallery) ? shopGallery : [];
+  const safeBarberGallery = Array.isArray(barberGallery) ? barberGallery : [];
+
+  const productionDomain = getProductionDomain(platformSettings);
+  const activeShopId = shop?.id || (safeShops[0]?.id ?? '7fa27fef-d890-449e-b9bb-85bbfeaa2998');
+  const qrDestinationUrl = activeShopId
+    ? getShopQrDestinationUrl(activeShopId, {
+        domain: productionDomain,
+      })
+    : `${productionDomain}/booking.html`;
+
+  useEffect(() => {
+    if (shop && activeTab === 'qr' && qrCanvasRef.current && qrDestinationUrl) {
+      QRCode.toCanvas(
+        qrCanvasRef.current,
+        qrDestinationUrl,
+        {
+          width: 220,
+          margin: 2,
+          color: {
+            dark: '#111113',
+            light: '#FFFFFF',
+          },
+          errorCorrectionLevel: 'H',
+        },
+        (err) => {
+          if (!err && qrCanvasRef.current) {
+            setQrDataUrl(qrCanvasRef.current.toDataURL('image/png'));
+          }
+        }
+      );
+    }
+  }, [shop, activeTab, qrDestinationUrl]);
+
   // When no specific shop is selected: Display the All Shops Listing (Section 8)
   if (!shop) {
-    const filteredShops = shops.filter((s: any) => {
+    const filteredShops = safeShops.filter((s: any) => {
+      if (!s) return false;
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
       return (
-        s.name?.toLowerCase().includes(q) ||
-        s.district?.toLowerCase().includes(q) ||
-        s.address?.toLowerCase().includes(q)
+        String(s.name || '').toLowerCase().includes(q) ||
+        String(s.district || '').toLowerCase().includes(q) ||
+        String(s.address || '').toLowerCase().includes(q)
       );
     });
 
     return (
-      <div className="bg-[#FAF6EA] min-h-[85vh] py-12 px-5 sm:px-8">
+      <div className="bg-[#EFE9DD] min-h-[85vh] py-12 px-5 sm:px-8">
         <div className="max-w-[1360px] mx-auto space-y-8">
           {/* Header */}
           <div className="text-center max-w-2xl mx-auto space-y-3">
@@ -133,7 +182,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               )}
             </p>
 
-            {/* Search Box */}
+            {/* Search Box in Neumorphic sculpted well */}
             <div className="pt-2 max-w-md mx-auto relative">
               <Search className="w-4 h-4 text-[#8A8178] absolute left-4 top-1/2 -translate-y-1/2" />
               <input
@@ -144,7 +193,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   'Search barber shops by name or area...',
                   'सैलून का नाम या इलाका खोजें...'
                 )}
-                className="w-full pl-11 pr-4 py-3 rounded-[16px] bg-white border border-[#111113]/15 text-xs text-[#111113] focus:outline-none focus:border-[#5B0E14] shadow-sm"
+                className="w-full pl-11 pr-4 py-3 rounded-[18px] neu-input text-xs text-[#111113] focus:outline-none"
               />
             </div>
           </div>
@@ -155,24 +204,24 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               {filteredShops.map((s: any) => {
                 const isClosed = s.status === 'closed' || s.isOpen === false;
                 const shopReviewCount =
-                  reviews.filter(
+                  safeReviews.filter(
                     (r: any) =>
-                      (r.shopId === s.id || r.shop_id === s.id) &&
-                      r.status !== 'hidden'
+                      (r?.shopId === s?.id || r?.shop_id === s?.id) &&
+                      r?.status !== 'hidden'
                   ).length ||
                   s.reviewCount ||
                   0;
 
                 return (
                   <div
-                    key={s.id}
-                    className="bg-white rounded-[22px] border border-[#111113]/10 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                    key={s.id || s.name}
+                    className="neu-flat rounded-[24px] overflow-hidden transition-all duration-300 hover:-translate-y-1 flex flex-col justify-between"
                   >
                     <div>
-                      <div className="relative h-48 bg-[#111113] overflow-hidden">
+                      <div className="relative h-48 bg-[#1C1718] overflow-hidden">
                         <SmartImage
                           src={s.image || ASSETS.royalInterior}
-                          alt={s.name}
+                          alt={s.name || 'Barber Shop'}
                           className="w-full h-full object-cover"
                         />
                         <div className="absolute top-3 right-3 flex items-center gap-1.5">
@@ -190,7 +239,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                         </div>
                         {s.verified && (
                           <div className="absolute bottom-3 left-3">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#111113]/90 text-[#F1E194] text-[11px] font-medium backdrop-blur-xs">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#1C1718]/90 text-[#F1E194] text-[11px] font-medium backdrop-blur-xs">
                               <ShieldCheck className="w-3.5 h-3.5" />
                               {tr('Verified', 'सत्यापित')}
                             </span>
@@ -200,9 +249,9 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                       <div className="p-6 space-y-3">
                         <div className="flex items-start justify-between gap-2">
                           <h2 className="font-display text-xl font-bold text-[#111113] leading-tight">
-                            {s.name}
+                            {s.name || 'Salon'}
                           </h2>
-                          <span className="shrink-0 px-2.5 py-1 rounded-lg bg-[#FAF6EA] text-xs font-semibold text-[#111113]">
+                          <span className="shrink-0 px-2.5 py-1 rounded-lg neu-badge text-xs font-semibold text-[#111113]">
                             ★ {s.rating || '4.9'} ({shopReviewCount})
                           </span>
                         </div>
@@ -223,50 +272,65 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                     <div className="p-6 pt-0 flex gap-3">
                       <button
                         type="button"
-                        onClick={() => onSelectShop(s)}
-                        className="flex-1 py-3 rounded-[14px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold tracking-wider uppercase cursor-pointer hover:bg-[#43090E] transition-colors"
+                        onClick={() => {
+                          onSelectShop(s);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="flex-1 py-3 rounded-[16px] neu-btn-burgundy text-xs font-semibold tracking-wider uppercase cursor-pointer"
                       >
                         {tr('View Shop', 'सैलून देखें')}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onSelectShop(s);
-                          window.history.pushState(
-                            {},
-                            '',
-                            `booking.html?shop_id=${encodeURIComponent(s.id)}`
-                          );
-                          onNavigate('booking');
-                        }}
-                        className="py-3 px-4 rounded-[14px] bg-[#FAF6EA] border border-[#111113]/15 text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer hover:bg-[#F1E194]/40 transition-colors"
-                      >
-                        {tr('Book', 'बुक करें')}
-                      </button>
+                      {!isBarber && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectShop(s);
+                            onNavigate('booking', s);
+                          }}
+                          className="py-3 px-4 rounded-[16px] neu-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                        >
+                          {tr('Book', 'बुक करें')}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="max-w-md mx-auto text-center py-16 rounded-[22px] bg-white border border-[#111113]/10 p-8 space-y-4">
-              <Store className="w-10 h-10 text-[#8A8178] mx-auto" />
+            <div className="max-w-md mx-auto text-center py-16 rounded-[24px] neu-flat p-8 space-y-4">
+              <Store className="w-10 h-10 text-[#5B0E14] mx-auto opacity-75" />
               <p className="text-sm font-semibold text-[#111113]">
-                {tr('No barber shops found', 'कोई सैलून नहीं मिला')}
+                {searchQuery
+                  ? tr('No barber shops match your filter', 'फ़िल्टर से कोई सैलून मेल नहीं खाता')
+                  : tr('Connecting to partner salons...', 'पार्टनर सैलून से जुड़ रहे हैं...')}
               </p>
               <p className="text-xs text-[#8A8178]">
-                {tr(
-                  'Try searching with a different name or clear the search filter.',
-                  'कृपया दूसरा नाम खोजें या फ़िल्टर हटाएँ।'
-                )}
+                {searchQuery
+                  ? tr(
+                      'Try searching with a different name or clear the search filter.',
+                      'कृपया दूसरा नाम खोजें या फ़िल्टर हटाएँ।'
+                    )
+                  : tr(
+                      'If salons do not load momentarily, return to home or refresh.',
+                      'कृपया प्रतीक्षा करें या होम पेज पर जाएं।'
+                    )}
               </p>
-              {searchQuery && (
+              {searchQuery ? (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="px-5 py-2.5 rounded-[12px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold uppercase cursor-pointer"
+                  className="px-5 py-2.5 rounded-[14px] neu-btn-burgundy text-xs font-semibold uppercase cursor-pointer"
                 >
                   {tr('Clear Search', 'फ़िल्टर हटाएं')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('home')}
+                  className="px-5 py-2.5 rounded-[14px] neu-btn text-xs font-semibold uppercase cursor-pointer"
+                >
+                  {tr('Back to Home', 'होम पर लौटें')}
                 </button>
               )}
             </div>
@@ -276,59 +340,53 @@ export const ShopPage: React.FC<ShopPageProps> = ({
     );
   }
 
-  const activeShop = shop;
+  // Safe fallback shop in case shop prop has missing properties
+  const fallbackShop = safeShops.find((s: any) => s?.id === shop?.id) || safeShops[0] || INITIAL_SHOPS[0];
 
-  const shopServices = services.filter(
+  const activeShop = {
+    ...fallbackShop,
+    ...(shop || {}),
+    name: (shop && shop.name) || fallbackShop.name,
+    address: (shop && shop.address) || fallbackShop.address,
+    district: (shop && shop.district) || fallbackShop.district,
+    phone: (shop && shop.phone) || fallbackShop.phone,
+    image: (shop && shop.image) || fallbackShop.image,
+    rating: (shop && shop.rating !== undefined) ? shop.rating : (fallbackShop.rating ?? 4.9),
+    reviewCount: (shop && shop.reviewCount !== undefined) ? shop.reviewCount : (fallbackShop.reviewCount ?? 0),
+    isOpen: (shop && shop.isOpen !== undefined) ? shop.isOpen : (fallbackShop.isOpen ?? true),
+    verified: (shop && shop.verified !== undefined) ? shop.verified : (fallbackShop.verified ?? true),
+    tagline: (shop && shop.tagline) || fallbackShop.tagline,
+    about: (shop && shop.about) || fallbackShop.about,
+  };
+
+  const shopServices = safeServices.filter(
     (s: any) =>
+      s &&
       s.active !== false &&
       s.is_active !== false &&
       (s.shopId === activeShop.id || s.shop_id === activeShop.id)
   );
-  const shopBarbers = barbers.filter(
+  const shopBarbers = safeBarbers.filter(
     (b: any) =>
+      b &&
       b.active !== false &&
       b.is_active !== false &&
       b.verificationStatus !== 'suspended' &&
       (b.shopId === activeShop.id || b.shop_id === activeShop.id)
   );
-  const shopReviews = reviews.filter(
+  const shopReviews = safeReviews.filter(
     (r: any) =>
+      r &&
       r.status !== 'hidden' &&
       (r.shopId === activeShop.id || r.shop_id === activeShop.id)
   );
-  const isShopFav = favorites.some(
-    (f) => f.targetType === 'shop' && f.targetId === activeShop.id
+  const isShopFav = safeFavorites.some(
+    (f) => f && f.targetType === 'shop' && f.targetId === activeShop.id
   );
   const isBarberFav = (barberId: string) =>
-    favorites.some((f) => f.targetType === 'barber' && f.targetId === barberId);
-
-  const productionDomain = getProductionDomain(platformSettings);
-  const qrDestinationUrl = getShopQrDestinationUrl(activeShop.id, {
-    domain: productionDomain,
-  });
-
-  useEffect(() => {
-    if (activeTab === 'qr' && qrCanvasRef.current) {
-      QRCode.toCanvas(
-        qrCanvasRef.current,
-        qrDestinationUrl,
-        {
-          width: 220,
-          margin: 2,
-          color: {
-            dark: '#111113',
-            light: '#FFFFFF',
-          },
-          errorCorrectionLevel: 'H',
-        },
-        (err) => {
-          if (!err && qrCanvasRef.current) {
-            setQrDataUrl(qrCanvasRef.current.toDataURL('image/png'));
-          }
-        }
-      );
-    }
-  }, [activeTab, qrDestinationUrl]);
+    safeFavorites.some(
+      (f) => f && f.targetType === 'barber' && f.targetId === barberId
+    );
 
   const handleCreateReview = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -412,24 +470,24 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   };
 
   const combinedGallery = [
-    ...shopGallery.map((g: any) => ({
-      id: g.id,
-      image: g.imageUrl || ASSETS.royalInterior,
-      title: g.title,
-      tag: g.caption || activeShop.name,
+    ...safeShopGallery.map((g: any) => ({
+      id: g?.id || Math.random().toString(),
+      image: g?.imageUrl || ASSETS.royalInterior,
+      title: g?.title || activeShop.name,
+      tag: g?.caption || activeShop.name,
     })),
-    ...barberGallery.map((g: any) => ({
-      id: g.id,
-      image: g.imageUrl || ASSETS.barberMarcus,
-      title: g.title,
-      tag: g.styleTag || 'Barber Portfolio',
+    ...safeBarberGallery.map((g: any) => ({
+      id: g?.id || Math.random().toString(),
+      image: g?.imageUrl || ASSETS.barberMarcus,
+      title: g?.title || 'Barber Portfolio',
+      tag: g?.styleTag || 'Signature Craft',
     })),
   ];
 
   return (
-    <div className="bg-[#FAF6EA] text-[#111113] pb-20">
+    <div className="bg-[#EFE9DD] text-[#111113] pb-20">
       {/* Top Bar with Back to All Shops and Switcher */}
-      <div className="bg-[#111113] border-b border-[#F1E194]/15 py-3.5 px-5 sm:px-8">
+      <div className="bg-[#1C1718] border-b border-[#F1E194]/15 py-3.5 px-5 sm:px-8">
         <div className="max-w-[1360px] mx-auto flex items-center justify-between gap-4">
           <button
             type="button"
@@ -449,10 +507,10 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   key={s.id}
                   type="button"
                   onClick={() => onSelectShop(s)}
-                  className={`px-3 py-1 rounded-[10px] text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors ${
+                  className={`px-3 py-1.5 rounded-[12px] text-xs font-semibold whitespace-nowrap cursor-pointer transition-all ${
                     s.id === activeShop.id
-                      ? 'bg-[#F1E194] text-[#111113]'
-                      : 'bg-[#241719] text-[#FFF9E8]/80 hover:text-[#FFF9E8]'
+                      ? 'neu-dark-btn-gold'
+                      : 'neu-dark-btn text-[#FFF9E8]/80'
                   }`}
                 >
                   {s.name}
@@ -464,28 +522,28 @@ export const ShopPage: React.FC<ShopPageProps> = ({
       </div>
 
       {/* Hero Cover */}
-      <div className="relative h-[420px] sm:h-[480px] bg-[#111113] overflow-hidden">
+      <div className="relative h-[420px] sm:h-[480px] bg-[#1C1718] overflow-hidden">
         <SmartImage
           src={activeShop.image || ASSETS.royalInterior}
           alt={activeShop.name}
           className="w-full h-full object-cover opacity-65"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#111113] via-[#111113]/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#1C1718] via-[#1C1718]/40 to-transparent" />
       </div>
 
       {/* Overlapping Info Card */}
       <div className="max-w-[1360px] mx-auto px-5 sm:px-8 -mt-32 relative z-10">
-        <div className="rounded-[24px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/30 p-7 sm:p-10 shadow-2xl">
+        <div className="rounded-[24px] neu-dark-flat p-7 sm:p-10">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2.5">
                 {activeShop.verified && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[10px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold">
-                    <ShieldCheck className="w-3.5 h-3.5" />
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[10px] neu-dark-badge text-[#F1E194] text-xs font-semibold">
+                    <ShieldCheck className="w-3.5 h-3.5 text-[#F1E194]" />
                     {tr('Verified Salon', 'सत्यापित सैलून')}
                   </span>
                 )}
-                <span className="px-3 py-1 rounded-[10px] bg-[#111113] text-xs font-mono-num text-[#F1E194]">
+                <span className="px-3 py-1 rounded-[10px] neu-dark-badge text-xs font-mono-num text-[#F1E194]">
                   {activeShop.rating}★ ({shopReviews.length || activeShop.reviewCount || 0}{' '}
                   {tr('reviews', 'समीक्षाएं')})
                 </span>
@@ -521,10 +579,10 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   type="button"
                   title={tr('Save Salon to Favorites', 'पसंदीदा में सहेजें')}
                   onClick={() => onToggleFavorite('shop', activeShop.id)}
-                  className={`p-3.5 rounded-[16px] border cursor-pointer ${
+                  className={`p-3.5 rounded-[16px] cursor-pointer transition-colors ${
                     isShopFav
-                      ? 'bg-[#5B0E14] border-[#F1E194] text-[#F1E194]'
-                      : 'bg-[#111113] border-[#F1E194]/25 text-[#FFF9E8]'
+                      ? 'bg-[#5B0E14] text-[#F1E194]'
+                      : 'neu-dark-icon-btn text-[#FFF9E8]'
                   }`}
                 >
                   <Heart
@@ -536,7 +594,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 type="button"
                 title={tr('Salon QR Check-In', 'सैलून QR')}
                 onClick={() => setActiveTab('qr')}
-                className="p-3.5 rounded-[16px] bg-[#111113] border border-[#F1E194]/25 text-[#F1E194] cursor-pointer"
+                className="p-3.5 rounded-[16px] neu-dark-icon-btn text-[#F1E194] cursor-pointer"
               >
                 <QrCode className="w-4 h-4" />
               </button>
@@ -546,7 +604,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 onClick={() =>
                   openReportModal('shop', activeShop.id, activeShop.name)
                 }
-                className="p-3.5 rounded-[16px] bg-[#111113] border border-[#F1E194]/20 text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+                className="p-3.5 rounded-[16px] neu-dark-icon-btn text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
               >
                 <Flag className="w-4 h-4" />
               </button>
@@ -556,25 +614,30 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   const srvElem = document.getElementById('shop-services-list');
                   if (srvElem) srvElem.scrollIntoView({ behavior: 'smooth' });
                 }}
-                className="px-6 py-3.5 rounded-[16px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                className="px-6 py-3.5 rounded-[16px] neu-dark-btn text-xs font-semibold tracking-wider uppercase cursor-pointer"
               >
                 {tr('VIEW SERVICES', 'सेवाएं देखें')}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onSelectShop) onSelectShop(activeShop);
-                  window.history.pushState(
-                    {},
-                    '',
-                    `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
-                  );
-                  onNavigate('booking');
-                }}
-                className="px-6 py-3.5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
-              >
-                {tr('BOOK APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
-              </button>
+              {isBarber ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('barber-dashboard')}
+                  className="px-6 py-3.5 rounded-[16px] neu-dark-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                >
+                  {tr('BARBER CONSOLE', 'बार्बर कंसोल')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onSelectShop) onSelectShop(activeShop);
+                    onNavigate('booking', activeShop);
+                  }}
+                  className="px-6 py-3.5 rounded-[16px] neu-dark-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                >
+                  {tr('BOOK APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
+                </button>
+              )}
             </div>
           </div>
 
@@ -586,7 +649,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex gap-2 mt-8 border-b border-[#5B0E14]/15 pb-3 overflow-x-auto">
+        <div id="shop-services-list" className="flex gap-2.5 mt-8 border-b border-[#5B0E14]/15 pb-4 overflow-x-auto">
           {[
             { id: 'services', label: tr('Services', 'सेवाएं') },
             { id: 'barbers', label: tr('Barbers', 'बार्बर टीम') },
@@ -600,10 +663,10 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               key={t.id}
               type="button"
               onClick={() => setActiveTab(t.id as any)}
-              className={`px-5 py-2.5 rounded-[14px] text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+              className={`px-5 py-2.5 rounded-[14px] text-xs font-semibold whitespace-nowrap cursor-pointer ${
                 activeTab === t.id
-                  ? 'bg-[#5B0E14] text-[#FFF9E8]'
-                  : 'bg-[#E9D9B8]/55 text-[#241719] hover:bg-[#E9D9B8]'
+                  ? 'neu-btn-burgundy'
+                  : 'neu-btn'
               }`}
             >
               {t.label}
@@ -626,7 +689,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 shopServices.map((srv: any) => (
                   <div
                     key={srv.id}
-                    className="rounded-[20px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 flex items-center justify-between gap-4"
+                    className="rounded-[20px] neu-flat p-6 flex items-center justify-between gap-4 transition-all duration-200 hover:-translate-y-0.5"
                   >
                     <div>
                       <span className="text-[11px] font-semibold text-[#5B0E14] uppercase">
@@ -645,22 +708,19 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                       <span className="font-mono-num text-2xl font-bold text-[#5B0E14] block">
                         {formatINR(srv.price)}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (onSelectShop) onSelectShop(activeShop);
-                          onSelectServiceForBooking(srv);
-                          window.history.pushState(
-                            {},
-                            '',
-                            `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
-                          );
-                          onNavigate('booking');
-                        }}
-                        className="mt-2 px-4 py-2 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer"
-                      >
-                        {tr('Book', 'बुक करें')}
-                      </button>
+                      {!isBarber && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onSelectShop) onSelectShop(activeShop);
+                            onSelectServiceForBooking(srv);
+                            onNavigate('booking', activeShop);
+                          }}
+                          className="mt-2 px-4 py-2 rounded-[12px] neu-btn-burgundy text-xs font-semibold cursor-pointer"
+                        >
+                          {tr('Book', 'बुक करें')}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))
@@ -680,7 +740,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   return (
                     <div
                       key={brb.id}
-                      className="rounded-[22px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/20 p-6 flex flex-col justify-between"
+                      className="rounded-[22px] neu-dark-flat p-6 flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5"
                     >
                       <div>
                         <div className="flex items-start justify-between gap-3">
@@ -691,7 +751,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                               className="w-16 h-16 rounded-full object-cover border border-[#F1E194]/40"
                             />
                             <div>
-                              <h3 className="font-display text-2xl font-bold">
+                              <h3 className="font-display text-2xl font-bold text-[#FFF9E8]">
                                 {brb.name}
                               </h3>
                               <p className="text-xs text-[#F1E194]">{brb.role}</p>
@@ -705,7 +765,11 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                               <button
                                 type="button"
                                 onClick={() => onToggleFavorite('barber', brb.id)}
-                                className="p-2 rounded-[10px] bg-[#111113] border border-[#F1E194]/20 text-[#F1E194] cursor-pointer"
+                                className={`p-2 rounded-[10px] cursor-pointer transition-colors ${
+                                  fav
+                                    ? 'bg-[#5B0E14] text-[#F1E194]'
+                                    : 'neu-dark-icon-btn text-[#FFF9E8]'
+                                }`}
                               >
                                 <Heart
                                   className={`w-3.5 h-3.5 ${
@@ -720,7 +784,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                               onClick={() =>
                                 openReportModal('barber', brb.id, brb.name)
                               }
-                              className="p-2 rounded-[10px] bg-[#111113] border border-[#F1E194]/15 text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+                              className="p-2 rounded-[10px] neu-dark-icon-btn text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
                             >
                               <Flag className="w-3.5 h-3.5" />
                             </button>
@@ -739,22 +803,19 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                         <span className="font-mono-num text-sm font-bold text-[#F1E194]">
                           {formatINR(brb.priceFrom)}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (onSelectShop) onSelectShop(activeShop);
-                            onSelectBarberForBooking(brb);
-                            window.history.pushState(
-                              {},
-                              '',
-                              `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
-                            );
-                            onNavigate('booking');
-                          }}
-                          className="px-4 py-2 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold cursor-pointer"
-                        >
-                          {tr('Book Barber', 'बार्बर चुनें')}
-                        </button>
+                        {!isBarber && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (onSelectShop) onSelectShop(activeShop);
+                              onSelectBarberForBooking(brb);
+                              onNavigate('booking', activeShop);
+                            }}
+                            className="px-4 py-2 rounded-[12px] neu-dark-btn-gold text-xs font-semibold cursor-pointer"
+                          >
+                            {tr('Book Barber', 'बार्बर चुनें')}
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -790,7 +851,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               ).map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-[22px] overflow-hidden bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/20"
+                  className="rounded-[22px] overflow-hidden neu-dark-flat text-[#FFF9E8] transition-all duration-200 hover:-translate-y-0.5"
                 >
                   <div className="h-56 overflow-hidden">
                     <SmartImage
@@ -803,7 +864,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                     <span className="text-[10px] uppercase tracking-widest text-[#F1E194]">
                       {item.tag}
                     </span>
-                    <h3 className="font-display text-xl font-bold mt-0.5">
+                    <h3 className="font-display text-xl font-bold mt-0.5 text-[#FFF9E8]">
                       {item.title}
                     </h3>
                   </div>
@@ -816,23 +877,29 @@ export const ShopPage: React.FC<ShopPageProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-7 space-y-4">
                 {shopReviews.length === 0 ? (
-                  <p className="text-sm text-[#8A8178] py-6">
+                  <div className="neu-flat rounded-[20px] p-8 text-center text-sm text-[#8A8178]">
                     {tr('No reviews submitted yet.', 'अभी तक कोई समीक्षा नहीं है।')}
-                  </p>
+                  </div>
                 ) : (
                   shopReviews.map((rev: any) => {
                     const isMyReview =
                       currentUserProfile &&
-                      (rev.customerUid === currentUserProfile.uid ||
-                        rev.author === currentUserProfile.name);
+                      (rev?.customerUid === currentUserProfile.uid ||
+                        rev?.author === currentUserProfile.name);
+                    const starsCount = Math.max(
+                      1,
+                      Math.min(5, Math.round(Number(rev?.rating) || 5))
+                    );
                     return (
                       <div
-                        key={rev.id}
-                        className="rounded-[20px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-5 space-y-2"
+                        key={rev.id || Math.random()}
+                        className="rounded-[22px] neu-flat p-5 space-y-2.5 transition-all hover:-translate-y-0.5"
                       >
                         <div className="flex items-center justify-between">
                           <div>
-                            <span className="font-bold text-sm">{rev.author}</span>
+                            <span className="font-bold text-sm text-[#111113]">
+                              {rev.author || tr('Customer', 'ग्राहक')}
+                            </span>
                             {rev.date && (
                               <span className="text-[11px] text-[#8A8178] ml-2">
                                 · {rev.date}
@@ -840,18 +907,18 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="font-mono-num text-xs text-[#5B0E14] font-bold">
-                              {'★'.repeat(rev.rating || 5)}
+                            <span className="font-mono-num text-xs text-[#5B0E14] font-bold px-2 py-0.5 rounded-[8px] neu-badge">
+                              {'★'.repeat(starsCount)}
                             </span>
                             {isMyReview && onUpdateReview && (
                               <button
                                 type="button"
                                 onClick={() => {
                                   setEditingReviewId(rev.id);
-                                  setEditReviewComment(rev.comment);
+                                  setEditReviewComment(rev.comment || '');
                                   setEditReviewRating(Number(rev.rating) || 5);
                                 }}
-                                className="p-1.5 rounded-lg bg-[#FAF6EA] text-[#5B0E14] text-xs cursor-pointer"
+                                className="p-1.5 rounded-[10px] neu-btn text-[#5B0E14] text-xs cursor-pointer"
                                 title={tr('Edit Review', 'समीक्षा संपादित करें')}
                               >
                                 <Edit3 className="w-3.5 h-3.5" />
@@ -863,10 +930,10 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                                 openReportModal(
                                   'review',
                                   rev.id,
-                                  `Review by ${rev.author}`
+                                  `Review by ${rev.author || 'User'}`
                                 )
                               }
-                              className="p-1.5 rounded-lg bg-[#FAF6EA] text-[#8A8178] hover:text-[#5B0E14] text-xs cursor-pointer"
+                              className="p-1.5 rounded-[10px] neu-btn text-[#8A8178] hover:text-[#5B0E14] text-xs cursor-pointer"
                               title={tr('Report Review', 'समीक्षा की रिपोर्ट करें')}
                             >
                               <Flag className="w-3.5 h-3.5" />
@@ -875,13 +942,13 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                         </div>
 
                         {editingReviewId === rev.id ? (
-                          <div className="space-y-2 pt-2">
+                          <div className="space-y-2.5 pt-2">
                             <select
                               value={editReviewRating}
                               onChange={(e) =>
                                 setEditReviewRating(Number(e.target.value))
                               }
-                              className="px-3 py-1.5 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs"
+                              className="px-3.5 py-2 rounded-[12px] neu-input text-xs text-[#111113] focus:outline-none"
                             >
                               {[5, 4, 3, 2, 1].map((n) => (
                                 <option key={n} value={n}>
@@ -893,27 +960,27 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                               rows={2}
                               value={editReviewComment}
                               onChange={(e) => setEditReviewComment(e.target.value)}
-                              className="w-full px-3 py-2 rounded-[10px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs"
+                              className="w-full px-3.5 py-2 rounded-[12px] neu-input text-xs text-[#111113] focus:outline-none"
                             />
                             <div className="flex gap-2">
                               <button
                                 type="button"
                                 onClick={() => handleSaveEditedReview(rev.id)}
-                                className="px-3.5 py-1.5 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer"
+                                className="px-4 py-2 rounded-[12px] neu-btn-burgundy text-[#FFF9E8] text-xs font-semibold cursor-pointer"
                               >
                                 {tr('Save', 'सहेजें')}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setEditingReviewId(null)}
-                                className="px-3.5 py-1.5 rounded-[10px] bg-[#FAF6EA] text-xs cursor-pointer"
+                                className="px-4 py-2 rounded-[12px] neu-btn text-xs font-semibold cursor-pointer"
                               >
                                 {tr('Cancel', 'रद्द करें')}
                               </button>
                             </div>
                           </div>
                         ) : (
-                          <p className="text-xs text-[#241719] leading-relaxed">
+                          <p className="text-xs text-[#241719]/90 leading-relaxed">
                             {rev.comment}
                           </p>
                         )}
@@ -926,19 +993,19 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               <div className="lg:col-span-5">
                 <form
                   onSubmit={handleCreateReview}
-                  className="rounded-[22px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/25 p-6 space-y-4"
+                  className="rounded-[24px] neu-dark-flat p-6 sm:p-7 space-y-4"
                 >
-                  <h3 className="font-display text-2xl font-bold">
+                  <h3 className="font-display text-2xl font-bold text-[#FFF9E8]">
                     {tr('Leave a Verified Review', 'सत्यापित समीक्षा लिखें')}
                   </h3>
                   <div>
-                    <label className="block text-xs text-[#8A8178] mb-1">
+                    <label className="block text-xs text-[#8A8178] mb-1.5 font-medium">
                       {tr('Rating (1-5)', 'रेटिंग (1-5)')}
                     </label>
                     <select
                       value={newReviewRating}
                       onChange={(e) => setNewReviewRating(Number(e.target.value))}
-                      className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
+                      className="w-full px-3.5 py-2.5 rounded-[14px] neu-dark-input text-xs focus:outline-none"
                     >
                       {[5, 4, 3, 2, 1].map((n) => (
                         <option key={n} value={n}>
@@ -948,7 +1015,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-[#8A8178] mb-1">
+                    <label className="block text-xs text-[#8A8178] mb-1.5 font-medium">
                       {tr('Your Experience', 'आपका अनुभव')}
                     </label>
                     <textarea
@@ -956,7 +1023,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                       required
                       value={newReviewComment}
                       onChange={(e) => setNewReviewComment(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
+                      placeholder={tr('Write your review...', 'समीक्षा लिखें...')}
+                      className="w-full px-3.5 py-2.5 rounded-[14px] neu-dark-input text-xs focus:outline-none"
                     />
                   </div>
                   {reviewMessage && (
@@ -964,7 +1032,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   )}
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+                    className="w-full py-3 rounded-[16px] neu-dark-btn-gold text-xs font-semibold uppercase tracking-wider cursor-pointer"
                   >
                     {tr('Submit Review', 'समीक्षा सबमिट करें')}
                   </button>
@@ -974,12 +1042,12 @@ export const ShopPage: React.FC<ShopPageProps> = ({
           )}
 
           {activeTab === 'about' && (
-            <div className="rounded-[24px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/25 p-8 max-w-3xl space-y-6">
+            <div className="rounded-[24px] neu-dark-flat p-8 max-w-3xl space-y-6">
               <div>
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-[#F1E194]">
                   {tr('About This Salon', 'सैलून के बारे में')}
                 </span>
-                <h3 className="font-display text-3xl font-bold mt-1">
+                <h3 className="font-display text-3xl font-bold text-[#FFF9E8] mt-1">
                   {activeShop.name}
                 </h3>
                 <p className="text-sm text-[#FFF9E8]/80 mt-3 leading-relaxed">
@@ -994,7 +1062,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-[#F1E194]/15 text-xs">
                 <div className="space-y-1">
-                  <span className="text-[#8A8178] uppercase text-[10px] tracking-wider block">
+                  <span className="text-[#8A8178] uppercase text-[10px] tracking-wider block font-semibold">
                     {tr('Location & Address', 'स्थान और पता')}
                   </span>
                   <p className="font-medium text-[#FFF9E8]">
@@ -1004,7 +1072,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 </div>
 
                 <div className="space-y-1">
-                  <span className="text-[#8A8178] uppercase text-[10px] tracking-wider block">
+                  <span className="text-[#8A8178] uppercase text-[10px] tracking-wider block font-semibold">
                     {tr('Direct Phone Contact', 'सीधा संपर्क नंबर')}
                   </span>
                   <p className="font-mono-num font-medium text-[#F1E194]">
@@ -1016,30 +1084,27 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-[#F1E194]/15">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onSelectShop) onSelectShop(activeShop);
-                    window.history.pushState(
-                      {},
-                      '',
-                      `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
-                    );
-                    onNavigate('booking');
-                  }}
-                  className="w-full sm:w-auto px-8 py-3.5 rounded-[14px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer hover:bg-[#FFE57F] transition-colors"
-                >
-                  {tr('Book Appointment', 'अपॉइंटमेंट बुक करें')}
-                </button>
-              </div>
+              {!isBarber && (
+                <div className="pt-4 border-t border-[#F1E194]/15">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onSelectShop) onSelectShop(activeShop);
+                      onNavigate('booking', activeShop);
+                    }}
+                    className="w-full sm:w-auto px-8 py-3.5 rounded-[16px] neu-dark-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                  >
+                    {tr('Book Appointment', 'अपॉइंटमेंट बुक करें')}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
           {activeTab === 'hours' && (
-            <div className="rounded-[22px] bg-[#E9D9B8]/55 border border-[#5B0E14]/15 p-6 max-w-2xl space-y-3">
-              <div className="flex items-center justify-between border-b border-[#5B0E14]/15 pb-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[#5B0E14] flex items-center gap-1.5">
+            <div className="rounded-[24px] neu-flat p-7 max-w-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-[#5B0E14]/12 pb-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[#5B0E14] flex items-center gap-2">
                   <Clock className="w-4 h-4" />
                   {tr(
                     'Operating Hours (IST • UTC+5:30)',
@@ -1047,50 +1112,50 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   )}
                 </span>
               </div>
-              {(workingHours.length ? workingHours : OPENING_HOURS).map(
-                (wh: any) => (
+              <div className="space-y-2">
+                {safeWorkingHours.map((wh: any) => (
                   <div
-                    key={wh.id || wh.day}
-                    className="flex items-center justify-between text-xs py-2 border-b border-[#5B0E14]/10 last:border-0"
+                    key={wh.id || wh.day || Math.random()}
+                    className="flex items-center justify-between text-xs py-2 px-3 rounded-[12px] hover:bg-[#E8E1D2]/40 transition-colors"
                   >
                     <span className="font-semibold text-[#111113]">
                       {wh.dayOfWeek || wh.day}
                     </span>
-                    <span className="font-mono-num text-[#241719]">
+                    <span className="font-mono-num font-medium text-[#241719]">
                       {wh.isDayOff
                         ? tr('Closed', 'बंद')
-                        : wh.hours || `${wh.startTime} – ${wh.endTime} IST`}
+                        : wh.hours || `${wh.startTime || '09:30'} – ${wh.endTime || '21:30'} IST`}
                     </span>
                   </div>
-                )
-              )}
+                ))}
+              </div>
             </div>
           )}
 
           {activeTab === 'qr' && (
-            <div className="rounded-[24px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/30 p-6 sm:p-8 max-w-xl space-y-6">
+            <div className="rounded-[24px] neu-dark-flat p-6 sm:p-8 max-w-xl space-y-6">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-[16px] bg-[#5B0E14] text-[#F1E194] flex items-center justify-center">
-                    <QrCode className="w-6 h-6" />
+                  <div className="w-12 h-12 rounded-[16px] neu-dark-btn-gold flex items-center justify-center">
+                    <QrCode className="w-6 h-6 text-[#111113]" />
                   </div>
                   <div>
                     <span className="text-[11px] font-semibold uppercase tracking-widest text-[#F1E194]">
                       {tr('INSTANT SALON QR DESTINATION', 'इंस्टेंट सैलून QR पास')}
                     </span>
-                    <h3 className="font-display text-2xl font-bold">
+                    <h3 className="font-display text-2xl font-bold text-[#FFF9E8]">
                       {activeShop.name}
                     </h3>
                   </div>
                 </div>
-                <span className="hidden sm:inline-flex px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
+                <span className="hidden sm:inline-flex px-3 py-1 rounded-full neu-dark-badge text-emerald-300 text-[10px] font-bold uppercase tracking-wider">
                   barberloo.in ✓
                 </span>
               </div>
 
               {/* Scannable High-Res QR Code Preview */}
-              <div className="rounded-[20px] bg-[#FAF6EA] p-5 flex flex-col items-center justify-center text-center border-2 border-[#F1E194]/40 shadow-inner">
-                <div className="p-2.5 bg-white rounded-[16px] shadow-md border border-[#111113]/10">
+              <div className="rounded-[20px] neu-flat p-5 flex flex-col items-center justify-center text-center">
+                <div className="p-3 bg-white rounded-[18px] neu-pressed-sm">
                   <canvas ref={qrCanvasRef} className="rounded-[10px]" />
                 </div>
                 <p className="text-xs text-[#5B0E14] font-semibold mt-3">
@@ -1108,12 +1173,12 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                     barberloo.in
                   </span>
                 </div>
-                <div className="p-3.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 font-mono-num text-xs text-[#F1E194] break-all select-all">
+                <div className="p-3.5 rounded-[14px] neu-dark-pressed font-mono-num text-xs text-[#F1E194] break-all select-all">
                   {qrDestinationUrl}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
                 <button
                   type="button"
                   onClick={() => {
@@ -1121,7 +1186,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                     setQrCopied(true);
                     setTimeout(() => setQrCopied(false), 2500);
                   }}
-                  className="py-2.5 px-3 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 shadow-sm hover:bg-[#FFF9E8] transition-colors"
+                  className="py-2.5 px-3 rounded-[14px] neu-dark-btn-gold text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5"
                 >
                   {qrCopied ? (
                     <>
@@ -1147,7 +1212,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                     a.click();
                     document.body.removeChild(a);
                   }}
-                  className="py-2.5 px-3 rounded-[12px] bg-[#241719] border border-[#F1E194]/25 hover:bg-[#322023] text-[#FFF9E8] text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-colors"
+                  className="py-2.5 px-3 rounded-[14px] neu-dark-btn text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5"
                 >
                   <Download className="w-3.5 h-3.5 text-[#F1E194]" />
                   <span>{tr('PNG', 'PNG')}</span>
@@ -1156,27 +1221,24 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 <button
                   type="button"
                   onClick={() => setQrModalOpen(true)}
-                  className="py-2.5 px-3 rounded-[12px] bg-[#241719] border border-[#F1E194]/25 hover:bg-[#322023] text-[#FFF9E8] text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-colors"
+                  className="py-2.5 px-3 rounded-[14px] neu-dark-btn text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5"
                 >
                   <Printer className="w-3.5 h-3.5 text-[#F1E194]" />
                   <span>{tr('Standee', 'स्टैंडी')}</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onSelectShop) onSelectShop(activeShop);
-                    window.history.pushState(
-                      {},
-                      '',
-                      `booking.html?shop_id=${encodeURIComponent(activeShop.id)}`
-                    );
-                    onNavigate('booking');
-                  }}
-                  className="py-2.5 px-3 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] hover:bg-[#73121a] text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-colors"
-                >
-                  <span>{tr('Book Now', 'बुक करें')}</span>
-                </button>
+                {!isBarber && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onSelectShop) onSelectShop(activeShop);
+                      onNavigate('booking', activeShop);
+                    }}
+                    className="py-2.5 px-3 rounded-[14px] neu-btn-burgundy text-[#F1E194] text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5"
+                  >
+                    <span>{tr('Book Now', 'बुक करें')}</span>
+                  </button>
+                )}
               </div>
             </div>
           )}

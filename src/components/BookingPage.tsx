@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
+  ASSETS,
   BarberItem,
   PageView,
   ServiceItem,
@@ -85,6 +86,8 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     translateService,
   } = useLanguage();
 
+  const isBarber = currentUserProfile?.role === 'barber' || currentUserProfile?.role === 'shop_owner';
+
   const istDates = useMemo(() => getUpcomingISTDates(6, lang), [lang]);
   const istNowDisplay = useMemo(() => getCurrentISTDisplay(lang), [lang]);
 
@@ -168,6 +171,21 @@ export const BookingPage: React.FC<BookingPageProps> = ({
       setSelectedShopId(candidate);
     }
   }, [initialShopId, initialShop]);
+
+  // Sync client profile details when authenticated session becomes available
+  useEffect(() => {
+    if (currentUserProfile) {
+      if (!clientName && currentUserProfile.name) {
+        setClientName(currentUserProfile.name);
+      }
+      if (!clientPhone && currentUserProfile.phone) {
+        setClientPhone(currentUserProfile.phone);
+      }
+      if (!clientNotes && currentUserProfile.preferredNotes) {
+        setClientNotes(currentUserProfile.preferredNotes);
+      }
+    }
+  }, [currentUserProfile]);
 
   // Load shop, services, and barbers strictly from Supabase for this shop_id
   useEffect(() => {
@@ -310,6 +328,26 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     };
   }, [currentService?.id, appliedCouponCode]);
 
+  const selectedDaySchedule = useMemo(() => {
+    try {
+      const [y, m, d] = selectedDate.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1, 12, 0, 0));
+      const dayName = new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        timeZone: 'Asia/Kolkata',
+      }).format(dt);
+      const matched = workingHours.find(
+        (wh: any) =>
+          String(wh.dayOfWeek || wh.day || '').toLowerCase() ===
+            dayName.toLowerCase() &&
+          (!wh.barberId || wh.barberId === currentBarber?.id || wh.barberId === 'brb-1')
+      );
+      return matched || null;
+    } catch {
+      return null;
+    }
+  }, [selectedDate, workingHours, currentBarber]);
+
   const steps = [
     { num: 1, label: tr('Select Service', 'सेवा चुनें') },
     { num: 2, label: tr('Select Barber', 'बार्बर चुनें') },
@@ -321,7 +359,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   // CASE A: shop_id is missing - Show "Choose a barber shop" and shop list (Rule 9)
   if (!selectedShopId || shopError === 'missing_shop') {
     return (
-      <div className="min-h-[78vh] bg-[#FAF6EA] py-12 px-5 sm:px-8">
+      <div className="min-h-[82vh] bg-[#EFE9DD] py-12 px-5 sm:px-8">
         <div className="max-w-[1200px] mx-auto space-y-8">
           {/* Header */}
           <div className="text-center max-w-xl mx-auto space-y-2">
@@ -344,18 +382,18 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                 return (
                   <div
                     key={s.id}
-                    className="bg-white rounded-[20px] border border-[#111113]/10 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                    className="neu-flat rounded-[24px] overflow-hidden flex flex-col justify-between transition-all duration-300 hover:-translate-y-1"
                   >
                     <div>
-                      <div className="relative h-44 bg-[#111113] overflow-hidden">
+                      <div className="relative h-48 bg-[#1C1718] overflow-hidden">
                         <SmartImage
-                          src={s.image || '/default-shop.jpg'}
+                          src={s.image || ASSETS.royalInterior}
                           alt={s.name}
                           className="w-full h-full object-cover"
                         />
                         <div className="absolute top-3 right-3 flex items-center gap-1.5">
                           <span
-                            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide ${
+                            className={`px-3 py-1 rounded-full text-[11px] font-semibold tracking-wide ${
                               isClosed
                                 ? 'bg-red-500/90 text-white'
                                 : 'bg-[#5B0E14] text-[#F1E194]'
@@ -365,12 +403,12 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                           </span>
                         </div>
                       </div>
-                      <div className="p-5 space-y-3">
+                      <div className="p-6 space-y-3">
                         <div className="flex items-center justify-between gap-2">
                           <h2 className="font-display text-xl font-bold text-[#111113] truncate">
                             {s.name}
                           </h2>
-                          <span className="shrink-0 px-2.5 py-1 rounded-lg bg-[#FAF6EA] text-xs font-semibold text-[#111113]">
+                          <span className="shrink-0 px-2.5 py-1 rounded-lg neu-badge text-xs font-semibold text-[#111113]">
                             ★ {s.rating || '4.9'}
                           </span>
                         </div>
@@ -381,7 +419,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                       </div>
                     </div>
 
-                    <div className="p-5 pt-0">
+                    <div className="p-6 pt-0">
                       <button
                         type="button"
                         onClick={() => {
@@ -390,7 +428,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                           setLoadedShop(s);
                           setShopError(null);
                         }}
-                        className="w-full py-3 rounded-[14px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold tracking-wider uppercase cursor-pointer hover:bg-[#43090E] transition-colors"
+                        className="w-full py-3.5 rounded-[16px] neu-btn-burgundy text-xs font-semibold tracking-wider uppercase cursor-pointer"
                       >
                         {tr('Choose Shop', 'सैलून चुनें')}
                       </button>
@@ -400,7 +438,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
               })}
             </div>
           ) : (
-            <div className="max-w-md mx-auto text-center py-12 rounded-[20px] bg-white border border-[#111113]/10 p-8 space-y-4">
+            <div className="max-w-md mx-auto text-center py-14 rounded-[24px] neu-flat p-8 space-y-4">
               <p className="text-sm text-[#8A8178]">
                 {tr(
                   'No barber shops are currently available. Please check back soon.',
@@ -410,7 +448,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
               <button
                 type="button"
                 onClick={() => onNavigate('home')}
-                className="px-6 py-2.5 rounded-[12px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold uppercase cursor-pointer"
+                className="px-6 py-2.5 rounded-[14px] neu-btn text-xs font-semibold uppercase cursor-pointer"
               >
                 {tr('Back to Home', 'होम पर वापस जाएं')}
               </button>
@@ -525,28 +563,6 @@ export const BookingPage: React.FC<BookingPageProps> = ({
       </div>
     );
   }
-
-
-
-  const selectedDaySchedule = useMemo(() => {
-    try {
-      const [y, m, d] = selectedDate.split('-').map(Number);
-      const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1, 12, 0, 0));
-      const dayName = new Intl.DateTimeFormat('en-US', {
-        weekday: 'long',
-        timeZone: 'Asia/Kolkata',
-      }).format(dt);
-      const matched = workingHours.find(
-        (wh: any) =>
-          String(wh.dayOfWeek || wh.day || '').toLowerCase() ===
-            dayName.toLowerCase() &&
-          (!wh.barberId || wh.barberId === currentBarber?.id || wh.barberId === 'brb-1')
-      );
-      return matched || null;
-    } catch {
-      return null;
-    }
-  }, [selectedDate, workingHours, currentBarber]);
 
   const isSlotOutsideSchedule = (timeStr: string): string | null => {
     const srvDuration = Number(
@@ -710,11 +726,21 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     if (isSubmitting) return;
     setBookingError('');
 
+    if (isBarber) {
+      setBookingError(
+        tr(
+          'Barber accounts cannot create bookings. Appointments can only be booked by customer accounts.',
+          'बार्बर खाता बुकिंग नहीं कर सकता। केवल ग्राहक खाते ही अपॉइंटमेंट बुक कर सकते हैं।'
+        )
+      );
+      return;
+    }
+
     if (!currentUserProfile) {
       if (onOpenAuthModal) onOpenAuthModal();
       setBookingError(
         tr(
-          'Please sign in or create a Customer account to confirm your appointment.',
+          'Please sign in to confirm your appointment.',
           'अपॉइंटमेंट बुक करने के लिए कृपया साइन इन करें।'
         )
       );
@@ -961,8 +987,36 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   }
 
   return (
-    <div className="min-h-screen bg-[#FAF6EA] py-10 sm:py-14">
+    <div className="min-h-screen bg-[#EFE9DD] py-10 sm:py-14">
       <div className="max-w-[1360px] mx-auto px-5 sm:px-8">
+        {isBarber && (
+          <div className="mb-6 p-5 rounded-[20px] neu-dark-flat text-[#FFF9E8] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-[14px] neu-dark-icon-btn text-[#F1E194] flex items-center justify-center shrink-0">
+                <Scissors className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="font-bold text-sm text-[#F1E194]">
+                  {tr('Barber Account Detected (Booking Disabled)', 'बार्बर खाता पहचाना गया (बुकिंग अक्षम)')}
+                </p>
+                <p className="text-xs text-[#8A8178]">
+                  {tr(
+                    'Barber accounts cannot create bookings. Bookings can only be scheduled by customers.',
+                    'बार्बर खाते बुकिंग नहीं कर सकते। अपॉइंटमेंट केवल ग्राहकों द्वारा बुक किए जा सकते हैं।'
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('barber-dashboard')}
+              className="px-4 py-2.5 rounded-[14px] neu-dark-btn-gold text-xs font-bold uppercase tracking-wider shrink-0 cursor-pointer"
+            >
+              {tr('Go To Barber Console', 'बार्बर कंसोल पर जाएं')}
+            </button>
+          </div>
+        )}
+
         {/* Header & Multi-Step Progress Bar */}
         <div className="mb-9">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -979,7 +1033,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
             </div>
 
             {/* Clean IST Timezone & INR Pill */}
-            <div className="inline-flex items-center gap-3 px-4 py-2.5 rounded-[16px] bg-[#E9D9B8]/60 border border-[#5B0E14]/15 text-xs">
+            <div className="inline-flex items-center gap-3 px-4 py-2.5 rounded-[16px] neu-flat text-xs">
               <Globe className="w-4 h-4 text-[#5B0E14] shrink-0" />
               <div>
                 <p className="font-semibold text-[#111113]">
@@ -996,7 +1050,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
           </div>
 
           {/* 5-Step Progress Indicator */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {steps.map((s) => {
               const isActive = step === s.num;
               const isDone = step > s.num;
@@ -1005,12 +1059,12 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   key={s.num}
                   type="button"
                   onClick={() => setStep(s.num)}
-                  className={`flex items-center gap-3 p-3.5 rounded-[18px] border text-left transition-all cursor-pointer ${
+                  className={`flex items-center gap-3 p-3.5 rounded-[18px] text-left transition-all cursor-pointer ${
                     isActive
-                      ? 'bg-[#5B0E14] text-[#FFF9E8] border-[#5B0E14] shadow-md'
+                      ? 'neu-btn-burgundy text-[#F1E194]'
                       : isDone
-                      ? 'bg-[#241719] text-[#F1E194] border-[#241719]'
-                      : 'bg-[#E9D9B8]/45 text-[#8A8178] border-[#5B0E14]/12 hover:bg-[#E9D9B8]/80'
+                      ? 'neu-dark-flat-sm text-[#F1E194]'
+                      : 'neu-btn text-[#8A8178]'
                   }`}
                 >
                   <span
@@ -1019,7 +1073,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                         ? 'bg-[#F1E194] text-[#111113]'
                         : isDone
                         ? 'bg-[#F1E194]/20 text-[#F1E194]'
-                        : 'bg-[#FAF6EA] text-[#111113]'
+                        : 'neu-badge text-[#111113]'
                     }`}
                   >
                     {isDone ? <Check className="w-3.5 h-3.5" /> : `0${s.num}`}
@@ -1556,7 +1610,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
             {step === 5 && (
               <form
                 onSubmit={handleCompleteBooking}
-                className="rounded-[24px] bg-[#E9D9B8]/55 border border-[#5B0E14]/20 p-6 sm:p-8 space-y-6"
+                className="rounded-[24px] neu-flat p-6 sm:p-8 space-y-6"
               >
                 <div className="flex items-center justify-between border-b border-[#5B0E14]/12 pb-4">
                   <div>
@@ -1584,7 +1638,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                 </div>
 
                 {!currentUserProfile && (
-                  <div className="p-4 rounded-[16px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="p-4 rounded-[18px] neu-dark-flat text-[#FFF9E8] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold text-[#F1E194]">
                         {tr(
@@ -1603,7 +1657,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                       <button
                         type="button"
                         onClick={() => onOpenAuthModal && onOpenAuthModal()}
-                        className="px-4 py-2 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                        className="px-4 py-2 rounded-[14px] neu-dark-btn-gold text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                       >
                         <LogIn className="w-3.5 h-3.5" />
                         <span>{tr('LOGIN', 'साइन इन')}</span>
@@ -1611,7 +1665,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                       <button
                         type="button"
                         onClick={() => onOpenAuthModal && onOpenAuthModal()}
-                        className="px-4 py-2 rounded-[12px] border border-[#F1E194]/40 text-[#F1E194] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer hover:bg-[#F1E194]/10"
+                        className="px-4 py-2 rounded-[14px] neu-dark-btn text-[#F1E194] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                       >
                         <span>{tr('CREATE ACCOUNT', 'खाता बनाएं')}</span>
                       </button>
@@ -1637,7 +1691,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                       value={clientName}
                       onChange={(e) => setClientName(e.target.value)}
                       placeholder={tr('Your full name', 'अपना नाम लिखें')}
-                      className="w-full px-4 py-3 rounded-[14px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-sm text-[#111113]"
+                      className="w-full px-4 py-3 rounded-[16px] neu-input text-xs text-[#111113] focus:outline-none"
                     />
                   </div>
                   <div>
@@ -1650,17 +1704,17 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                       value={clientPhone}
                       onChange={(e) => setClientPhone(e.target.value)}
                       placeholder="+91 98XXXXXXXX"
-                      className="w-full px-4 py-3 rounded-[14px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-sm text-[#111113]"
+                      className="w-full px-4 py-3 rounded-[16px] neu-input text-xs text-[#111113] focus:outline-none"
                     />
                   </div>
                 </div>
 
                 {/* Online Payment Method (Razorpay UPI / Cards / NetBanking) */}
                 <div className="pt-2">
-                  <div className="p-4 rounded-[16px] bg-[#FAF6EA] border border-[#5B0E14]/25 shadow-sm space-y-2">
+                  <div className="p-4 rounded-[18px] neu-pressed-sm space-y-2">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-8 h-8 rounded-full bg-[#241719] flex items-center justify-center text-[#F1E194]">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-full neu-btn-burgundy flex items-center justify-center text-[#F1E194]">
                           <Zap className="w-4 h-4 fill-[#F1E194]" />
                         </span>
                         <div>
@@ -1672,8 +1726,8 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                           </p>
                         </div>
                       </div>
-                      <span className="text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">
-                        Instant & Secure
+                      <span className="text-[10px] uppercase font-mono font-bold px-2.5 py-1 rounded-[8px] bg-emerald-950 text-emerald-300 border border-emerald-500/30">
+                        Instant &amp; Secure
                       </span>
                     </div>
                     <div className="pt-2 border-t border-[#5B0E14]/10 flex items-center justify-between text-xs text-[#241719]">
@@ -1699,7 +1753,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                       'Any specific haircut or beard instructions...',
                       'हेयरकट या बियर्ड के लिए कोई विशेष निर्देश...'
                     )}
-                    className="w-full px-4 py-3 rounded-[14px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs text-[#111113]"
+                    className="w-full px-4 py-3 rounded-[16px] neu-input text-xs text-[#111113] focus:outline-none"
                   />
                 </div>
 
@@ -1714,12 +1768,12 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                         value={couponInput}
                         onChange={(e) => setCouponInput(e.target.value)}
                         placeholder={tr('Enter coupon code', 'कूपन कोड दर्ज करें')}
-                        className="flex-1 px-4 py-2.5 rounded-[14px] bg-[#FAF6EA] border border-[#5B0E14]/20 text-xs uppercase font-mono-num"
+                        className="flex-1 px-4 py-2.5 rounded-[14px] neu-input text-xs uppercase font-mono-num focus:outline-none"
                       />
                       <button
                         type="button"
                         onClick={handleApplyCoupon}
-                        className="px-5 py-2.5 rounded-[14px] bg-[#241719] text-[#F1E194] text-xs font-semibold cursor-pointer"
+                        className="px-5 py-2.5 rounded-[14px] neu-btn-burgundy text-xs font-semibold cursor-pointer"
                       >
                         {tr('Apply', 'लागू करें')}
                       </button>
@@ -1732,38 +1786,50 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   </div>
                 )}
 
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-4 px-6 rounded-[18px] bg-[#5B0E14] text-[#FFF9E8] text-sm font-bold tracking-[0.14em] uppercase hover:bg-[#241719] transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xl"
-                >
-                  <Sparkles className="w-4 h-4 text-[#F1E194]" />
-                  <span>
-                    {isSubmitting
-                      ? tr('PROCESSING RESERVATION...', 'प्रक्रिया जारी है...')
-                      : tr(
-                          `PAY ${formatINR(finalCustomerPayment)}`,
-                          `${formatINR(finalCustomerPayment)} भुगतान करें`
-                        )}
-                  </span>
-                </button>
+                {isBarber ? (
+                  <div className="p-4 rounded-[16px] bg-[#241719] border border-amber-500/40 text-amber-200 text-xs text-center space-y-1">
+                    <p className="font-semibold">{tr('Barber Account Detected', 'बार्बर खाता पाया गया')}</p>
+                    <p className="text-[11px] text-[#8A8178]">
+                      {tr(
+                        'Barbers cannot create bookings. Appointments can only be booked by customer accounts.',
+                        'बार्बर खाता बुकिंग नहीं कर सकता। केवल ग्राहक खाते ही अपॉइंटमेंट बुक कर सकते हैं।'
+                      )}
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-4 px-6 rounded-[18px] neu-btn-burgundy text-sm font-bold tracking-[0.14em] uppercase transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4 text-[#F1E194]" />
+                    <span>
+                      {isSubmitting
+                        ? tr('PROCESSING RESERVATION...', 'प्रक्रिया जारी है...')
+                        : tr(
+                            `PAY ${formatINR(finalCustomerPayment)}`,
+                            `${formatINR(finalCustomerPayment)} भुगतान करें`
+                          )}
+                    </span>
+                  </button>
+                )}
               </form>
             )}
           </div>
 
           {/* Right Live Booking Summary Card with Locale INR + GST Breakdown */}
           <div className="lg:col-span-4">
-            <div className="sticky top-28 rounded-[24px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/25 p-6 sm:p-7 space-y-6 shadow-2xl">
+            <div className="sticky top-28 rounded-[24px] neu-dark-flat p-6 sm:p-7 space-y-6">
               <div className="border-b border-[#F1E194]/15 pb-4 flex items-center justify-between">
                 <div>
                   <p className="text-[11px] font-semibold tracking-[0.2em] uppercase text-[#F1E194]">
                     {tr('BOOKING DOSSIER', 'बुकिंग सारांश')}
                   </p>
-                  <h3 className="font-display text-2xl font-bold mt-1">
+                  <h3 className="font-display text-2xl font-bold mt-1 text-[#FFF9E8]">
                     {currentBarber.shopName}
                   </h3>
                 </div>
-                <span className="text-[11px] font-mono-num px-2.5 py-1 rounded-[10px] bg-[#241719] text-[#F1E194] border border-[#F1E194]/20">
+                <span className="text-[11px] font-mono-num px-2.5 py-1 rounded-[10px] neu-dark-badge text-[#F1E194]">
                   INR (₹)
                 </span>
               </div>
@@ -1850,12 +1916,18 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                 <button
                   type="button"
                   onClick={handleCompleteBooking}
-                  disabled={isSubmitting}
-                  className="w-full mt-3 py-3.5 px-5 rounded-[16px] bg-[#F1E194] text-[#111113] text-xs font-bold tracking-[0.14em] uppercase hover:bg-[#FFF9E8] transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+                  disabled={isSubmitting || isBarber}
+                  className={`w-full mt-3 py-3.5 px-5 rounded-[16px] text-xs font-bold tracking-[0.14em] uppercase transition-all flex items-center justify-center gap-2 ${
+                    isBarber
+                      ? 'neu-dark-pressed text-[#8A8178] cursor-not-allowed opacity-60'
+                      : 'neu-dark-btn-gold text-[#14100C] cursor-pointer'
+                  }`}
                 >
-                  <Sparkles className="w-3.5 h-3.5 fill-[#111113]" />
+                  <Sparkles className="w-3.5 h-3.5 fill-[#14100C]" />
                   <span>
-                    {isSubmitting
+                    {isBarber
+                      ? tr('BOOKING DISABLED FOR BARBERS', 'बार्बर के लिए बुकिंग अक्षम')
+                      : isSubmitting
                       ? tr('PROCESSING...', 'प्रक्रिया जारी है...')
                       : tr(
                           `PAY ${formatINR(finalCustomerPayment)}`,

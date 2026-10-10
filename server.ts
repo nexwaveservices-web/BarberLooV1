@@ -423,10 +423,28 @@ async function startServer() {
         .where(eq(profiles.uid, requester.uid))
         .limit(1);
 
+      // Barbers and shop owners cannot create bookings; bookings are strictly for customers
+      if (
+        requester.role === 'barber' ||
+        userProf?.role === 'barber' ||
+        requester.role === 'shop_owner' ||
+        userProf?.role === 'shop_owner'
+      ) {
+        return res.status(403).json({
+          error:
+            'Barber accounts cannot create bookings. Bookings can only be scheduled by customer accounts.',
+        });
+      }
+
       const clientName =
-        userProf?.name || requester.name || req.body.clientName || 'Valued Client';
+        (req.body.clientName && String(req.body.clientName).trim()) ||
+        userProf?.name ||
+        requester.name ||
+        'Valued Client';
       const clientPhone =
-        userProf?.phone || req.body.clientPhone || '+91';
+        (req.body.clientPhone && String(req.body.clientPhone).trim()) ||
+        userProf?.phone ||
+        '+91';
 
       const created = await createBookingInDb({
         id: aptId,
