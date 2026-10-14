@@ -198,6 +198,7 @@ async function startServer() {
         'header.php',
         'footer.php',
         'barberloo.php',
+        '.htaccess',
         'public/sw.js',
         'public/CNAME',
         'wp-assets/assets/barberloo.css',
@@ -1230,11 +1231,25 @@ async function startServer() {
       const cleanId = (req.params.id || '').trim();
       if (!cleanId) return res.status(400).json({ error: 'Shop ID required' });
 
-      const [shopRecord] = await db
+      let [shopRecord] = await db
         .select()
         .from(shops)
         .where(or(eq(shops.id, cleanId), eq(shops.qrCodeSlug, cleanId)))
         .limit(1);
+
+      if (!shopRecord) {
+        // Fallback: match by slugified name or case-insensitive
+        const allShops = await db.select().from(shops);
+        shopRecord = allShops.find(
+          (s) =>
+            s.id.toLowerCase() === cleanId.toLowerCase() ||
+            (s.qrCodeSlug && s.qrCodeSlug.toLowerCase() === cleanId.toLowerCase()) ||
+            s.name
+              ?.toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/(^-|-$)/g, '') === cleanId.toLowerCase()
+        );
+      }
 
       if (!shopRecord) {
         return res.status(404).json({ error: 'Shop not found' });
@@ -1242,6 +1257,13 @@ async function startServer() {
 
       const pSettings = await getPlatformSettings();
       const domain = pSettings?.customDomain || 'https://barberloo.in';
+      const cleanSlug =
+        shopRecord.qrCodeSlug ||
+        shopRecord.name
+          ?.toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)/g, '') ||
+        shopRecord.id;
 
       const shopServices = await db
         .select()
@@ -1256,7 +1278,10 @@ async function startServer() {
       res.json({
         shop: {
           ...shopRecord,
-          qrCodeUrl: `${domain}/booking.html?shop_id=${encodeURIComponent(shopRecord.id)}`,
+          slug: cleanSlug,
+          permalink: `${domain}/shop/${cleanSlug}/`,
+          qrCodeUrl: `${domain}/shop/${cleanSlug}/`,
+          legacyBookingUrl: `${domain}/booking.html?shop_id=${encodeURIComponent(shopRecord.id)}`,
         },
         services: shopServices,
         barbers: shopBarbers,

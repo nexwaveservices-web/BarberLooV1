@@ -20,6 +20,87 @@ define('BARBERLOO_DOMAIN', 'https://barberloo.in');
 define('BARBERLOO_GITHUB_REPO', 'https://github.com/nexwaveservices-web/BarberLooV1');
 define('BARBERLOO_SUPABASE_URL', 'https://ddusvfylhifoniobzmcq.supabase.co');
 
+/**
+ * Guard to verify if the incoming request is for WordPress Administration,
+ * WP Pusher plugin management, system crons, AJAX, REST API, or WooCommerce endpoints.
+ * When true, BarberLoo strictly prevents hijacking or redirecting the request.
+ */
+if (!function_exists('barberloo_is_admin_or_system_request')) {
+    function barberloo_is_admin_or_system_request() {
+        if (is_admin()) {
+            return true;
+        }
+        if (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
+            return true;
+        }
+        if (function_exists('wp_doing_cron') && wp_doing_cron()) {
+            return true;
+        }
+        if (defined('DOING_CRON') && DOING_CRON) {
+            return true;
+        }
+        if (defined('DOING_AJAX') && DOING_AJAX) {
+            return true;
+        }
+
+        $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+        $path = strtok($uri, '?');
+
+        // Strictly protect WordPress admin dashboard, WP Pusher, login, and core files
+        if (
+            strpos($path, '/wp-admin') !== false ||
+            strpos($path, 'wp-login.php') !== false ||
+            strpos($path, 'wp-register.php') !== false ||
+            strpos($path, 'wp-signup.php') !== false ||
+            strpos($path, 'wp-trackback.php') !== false ||
+            strpos($path, 'xmlrpc.php') !== false ||
+            strpos($path, 'wp-cron.php') !== false ||
+            strpos($path, '/wp-json/') !== false ||
+            strpos($path, '/wc-api/') !== false ||
+            strpos($path, '/wp-content/') !== false ||
+            strpos($path, '/wp-includes/') !== false
+        ) {
+            return true;
+        }
+
+        // Native WordPress escape parameter for testing/debugging
+        if (isset($_GET['wp_native']) && $_GET['wp_native'] === '1') {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+// 1. Permalinks & Rewrite Rules Setup
+add_action('init', function () {
+    // Register query variables for BarberLoo clean permalinks
+    add_rewrite_tag('%barberloo_route%', '([^&]+)');
+    add_rewrite_tag('%barberloo_slug%', '([^&]+)');
+
+    // Professional clean permalinks
+    add_rewrite_rule('^shops/?$', 'index.php?barberloo_route=shops', 'top');
+    add_rewrite_rule('^shop/([^/]+)/?$', 'index.php?barberloo_route=shop&barberloo_slug=$matches[1]', 'top');
+    add_rewrite_rule('^book-appointment/?$', 'index.php?barberloo_route=booking', 'top');
+    add_rewrite_rule('^signup/?$', 'index.php?barberloo_route=signup', 'top');
+    add_rewrite_rule('^login/?$', 'index.php?barberloo_route=login', 'top');
+    add_rewrite_rule('^my-bookings/?$', 'index.php?barberloo_route=my-bookings', 'top');
+    add_rewrite_rule('^my-account/?$', 'index.php?barberloo_route=my-account', 'top');
+    add_rewrite_rule('^partner/register/?$', 'index.php?barberloo_route=partner-register', 'top');
+    add_rewrite_rule('^partner/?$', 'index.php?barberloo_route=partner-register', 'top');
+    add_rewrite_rule('^barber/dashboard/?$', 'index.php?barberloo_route=barber-dashboard', 'top');
+    add_rewrite_rule('^barber/services/?$', 'index.php?barberloo_route=barber-services', 'top');
+    add_rewrite_rule('^barber/appointments/?$', 'index.php?barberloo_route=barber-appointments', 'top');
+    add_rewrite_rule('^admin-dashboard/?$', 'index.php?barberloo_route=admin-dashboard', 'top');
+    add_rewrite_rule('^admin/?$', 'index.php?barberloo_route=admin-dashboard', 'top');
+});
+
+add_filter('query_vars', function ($vars) {
+    $vars[] = 'barberloo_route';
+    $vars[] = 'barberloo_slug';
+    return $vars;
+});
+
 // Serve /sw.js Service Worker at the root of barberloo.in
 add_action('init', function () {
     $request_uri = isset($_SERVER['REQUEST_URI']) ? strtok($_SERVER['REQUEST_URI'], '?') : '';
@@ -40,16 +121,46 @@ add_action('init', function () {
         exit;
     }
 
-    // Intercept deep routes directly on init to prevent blank screens or 404s
-    if (
+    // CRITICAL FIX: If this is a WordPress admin, WP Pusher, or system request, DO NOT INTERCEPT!
+    if (barberloo_is_admin_or_system_request()) {
+        return;
+    }
+
+    // Only intercept recognized BarberLoo frontend query page parameters
+    $allowed_frontend_pages = [
+        'shop',
+        'shops',
+        'booking',
+        'book-appointment',
+        'my-bookings',
+        'customer-dashboard',
+        'barber-dashboard',
+        'admin-dashboard',
+        'profile',
+        'my-account',
+        'signup',
+        'login',
+        'partner',
+    ];
+    $is_recognized_frontend_page = isset($_GET['page']) && in_array(strtolower(trim($_GET['page'])), $allowed_frontend_pages, true);
+
+    // Deep-route interception for frontend single-page application
+    $is_frontend_deep_route = (
         $request_uri === '/booking.html' ||
         $request_uri === '/booking' ||
+        $request_uri === '/book-appointment' ||
         $request_uri === '/shop' ||
         $request_uri === '/shops' ||
-        isset($_GET['page']) ||
+        strpos($request_uri, '/shop/') === 0 ||
+        strpos($request_uri, '/barber/') === 0 ||
+        strpos($request_uri, '/my-bookings') === 0 ||
+        strpos($request_uri, '/my-account') === 0 ||
+        $is_recognized_frontend_page ||
         isset($_GET['shop']) ||
         isset($_GET['shop_id'])
-    ) {
+    );
+
+    if ($is_frontend_deep_route) {
         status_header(200);
         echo barberloo_render_application(true);
         exit;
@@ -107,17 +218,11 @@ add_shortcode('barberloo_app', function () {
 });
 
 add_action('template_redirect', function () {
-    if (is_admin() || wp_doing_ajax() || wp_doing_cron()) {
+    if (barberloo_is_admin_or_system_request()) {
         return;
     }
-    if (isset($_GET['wp_native']) && $_GET['wp_native'] === '1') {
-        return;
-    }
-    // Allow WooCommerce checkout, cart, API, and Razorpay webhook passthrough
-    $uri = $_SERVER['REQUEST_URI'] ?? '';
-    if (strpos($uri, '/wc-api/') !== false || strpos($uri, '/wp-json/') !== false) {
-        return;
-    }
+
+    // Allow WooCommerce checkout, cart, API, and native account pages
     if (function_exists('is_checkout') && (is_checkout() || is_cart() || is_account_page())) {
         return;
     }

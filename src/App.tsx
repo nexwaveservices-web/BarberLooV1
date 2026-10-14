@@ -58,6 +58,7 @@ import {
   getPersistedSupabaseUser,
 } from './lib/supabase';
 import { LanguageProvider } from './lib/i18n';
+import { getShopSlug, findShopBySlugOrId } from './lib/domain';
 import {
   registerNotificationServiceWorker,
   checkAndNotifyAppointmentReminders,
@@ -164,50 +165,133 @@ export default function App() {
     const handleUrlRoute = () => {
       const pathname = window.location.pathname.toLowerCase();
       const params = new URLSearchParams(window.location.search);
+
+      // CRITICAL: Never intercept or rewrite WordPress administration or login paths
+      if (
+        pathname.startsWith('/wp-admin') ||
+        pathname.includes('/wp-admin/') ||
+        pathname.includes('wp-login') ||
+        pathname.includes('wp-cron') ||
+        pathname.includes('wp-json')
+      ) {
+        return;
+      }
+
+      // 1. Direct Modal Triggers (Signup / Login)
+      if (pathname === '/signup' || pathname === '/signup/' || params.get('page') === 'signup') {
+        setCurrentPage('home');
+        setAuthModalOpen(true);
+        return;
+      }
+      if (pathname === '/login' || pathname === '/login/' || params.get('page') === 'login') {
+        setCurrentPage('home');
+        setAuthModalOpen(true);
+        return;
+      }
+
+      // 2. Booking URLs: /book-appointment/, /book-appointment/?shop=..., /booking.html, ?page=booking
       const isBookingPath =
+        pathname === '/book-appointment' ||
+        pathname.startsWith('/book-appointment/') ||
+        pathname === '/booking' ||
+        pathname === '/booking.html' ||
         pathname.includes('booking') ||
         params.get('page') === 'booking' ||
         (Boolean(params.get('shop_id')) && params.get('page') !== 'shop');
 
       if (isBookingPath) {
         setCurrentPage('booking');
-      } else if (
-        pathname.includes('shop') ||
-        params.get('page') === 'shop' ||
-        params.get('shop')
+        const shopParam = params.get('shop') || params.get('shop_id');
+        if (shopParam && shops.length > 0) {
+          const matched = findShopBySlugOrId(shops, shopParam);
+          if (matched) setSelectedShop(matched);
+        }
+        return;
+      }
+
+      // 3. Shop Details: /shop/:slug/ or legacy ?page=shop&shop=...
+      if (pathname.startsWith('/shop/') && pathname !== '/shops' && pathname !== '/shops/') {
+        const rawSlug = pathname.replace(/^\/shop\//, '').replace(/\/+$/, '');
+        setCurrentPage('shop');
+        if (rawSlug && shops.length > 0) {
+          const matched = findShopBySlugOrId(shops, rawSlug);
+          if (matched) setSelectedShop(matched);
+        }
+        return;
+      }
+
+      // 4. Shops Directory: /shops or /shops/ or legacy ?page=shop (without shop param)
+      if (
+        pathname === '/shops' ||
+        pathname === '/shops/' ||
+        (pathname === '/shop' && !params.get('shop') && !params.get('shop_id')) ||
+        (params.get('page') === 'shop' && !params.get('shop') && !params.get('shop_id'))
       ) {
+        setCurrentPage('shop');
+        setSelectedShop(null);
+        return;
+      }
+
+      // 4b. Legacy ?page=shop with shop param
+      if (params.get('page') === 'shop' || params.get('shop')) {
         setCurrentPage('shop');
         const shopParam = params.get('shop') || params.get('shop_id');
         if (shopParam && shops.length > 0) {
-          const matched = shops.find(
-            (s: any) =>
-              s.id === shopParam ||
-              s.qrCodeSlug === shopParam ||
-              String(s.name || '').toLowerCase() === shopParam.toLowerCase()
-          );
+          const matched = findShopBySlugOrId(shops, shopParam);
           if (matched) setSelectedShop(matched);
         }
-      } else if (
-        pathname.includes('admin') ||
-        params.get('page') === 'admin-dashboard'
-      ) {
-        setCurrentPage('admin-dashboard');
-      } else if (
-        pathname.includes('barber') ||
+        return;
+      }
+
+      // 5. Barber Console & Sub-routes: /barber/dashboard/, /barber/services/, /barber/appointments/, /partner/register/
+      if (
+        pathname === '/barber/dashboard' ||
+        pathname.startsWith('/barber/') ||
+        pathname === '/partner/register' ||
+        pathname.startsWith('/partner/') ||
         params.get('page') === 'barber-dashboard'
       ) {
         setCurrentPage('barber-dashboard');
-      } else if (
-        pathname.includes('profile') ||
-        params.get('page') === 'profile'
-      ) {
-        setCurrentPage('profile');
-      } else if (
-        pathname.includes('account') ||
+        return;
+      }
+
+      // 6. Customer Appointments & Account: /my-bookings/, /my-account/, /profile
+      if (
+        pathname === '/my-bookings' ||
+        pathname === '/my-bookings/' ||
         pathname.includes('bookings') ||
         params.get('page') === 'customer-dashboard'
       ) {
         setCurrentPage('customer-dashboard');
+        return;
+      }
+      if (
+        pathname === '/my-account' ||
+        pathname === '/my-account/' ||
+        pathname === '/profile' ||
+        pathname.includes('account') ||
+        params.get('page') === 'profile'
+      ) {
+        setCurrentPage('profile');
+        return;
+      }
+
+      // 7. App Administration: /admin or /admin-dashboard (strictly excluding /wp-admin)
+      if (
+        (pathname === '/admin' || pathname === '/admin/' || pathname === '/admin-dashboard' || pathname === '/admin-dashboard/') &&
+        !pathname.includes('wp-admin')
+      ) {
+        setCurrentPage('admin-dashboard');
+        return;
+      }
+      if (params.get('page') === 'admin-dashboard') {
+        setCurrentPage('admin-dashboard');
+        return;
+      }
+
+      // 8. Homepage default
+      if (pathname === '/' || pathname === '' || params.get('page') === 'home') {
+        setCurrentPage('home');
       }
     };
 
@@ -646,30 +730,36 @@ export default function App() {
       if (targetShop !== undefined && targetShop !== null) {
         let resolved = targetShop;
         if (typeof targetShop === 'string') {
-          resolved = shops.find((s: any) => s?.id === targetShop) || { id: targetShop };
+          resolved = findShopBySlugOrId(shops, targetShop) || { id: targetShop };
         }
         setSelectedShop(resolved);
-        const sId = resolved?.id || '';
-        if (sId) {
-          window.history.pushState(
-            {},
-            '',
-            `?page=shop&shop=${encodeURIComponent(sId)}`
-          );
-        } else {
-          window.history.pushState({}, '', '?page=shop');
-        }
+        const slug = getShopSlug(resolved);
+        window.history.pushState(
+          {},
+          '',
+          slug ? `/shop/${slug}/` : `/shop/${encodeURIComponent(resolved?.id || '')}/`
+        );
       } else {
-        setSelectedShop(null); // Clicking Shops in Nav shows the full Shop List (Section 8)
-        window.history.pushState({}, '', '?page=shop');
+        setSelectedShop(null); // Clicking Shops in Nav shows the full Shop List
+        window.history.pushState({}, '', '/shops/');
       }
     } else if (page === 'booking') {
-      const sid = (targetShop?.id || selectedShop?.id)
-        ? `&shop_id=${encodeURIComponent((targetShop?.id || selectedShop?.id))}`
-        : '';
-      window.history.pushState({}, '', `?page=booking${sid}`);
+      const target = targetShop || selectedShop;
+      const slug = getShopSlug(target);
+      const url = slug
+        ? `/book-appointment/?shop=${encodeURIComponent(slug)}`
+        : '/book-appointment/';
+      window.history.pushState({}, '', url);
     } else if (page === 'home') {
       window.history.pushState({}, '', '/');
+    } else if (page === 'customer-dashboard') {
+      window.history.pushState({}, '', '/my-bookings/');
+    } else if (page === 'profile') {
+      window.history.pushState({}, '', '/my-account/');
+    } else if (page === 'barber-dashboard') {
+      window.history.pushState({}, '', '/barber/dashboard/');
+    } else if (page === 'admin-dashboard') {
+      window.history.pushState({}, '', '/admin-dashboard/');
     }
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -678,20 +768,16 @@ export default function App() {
   const handleSelectShop = (shop: any) => {
     let resolvedShop = shop;
     if (typeof shop === 'string') {
-      resolvedShop = shops.find((s: any) => s?.id === shop) || { id: shop };
+      resolvedShop = findShopBySlugOrId(shops, shop) || { id: shop };
     }
     setSelectedShop(resolvedShop);
     setCurrentPage('shop');
-    const sId = resolvedShop?.id || (typeof shop === 'string' ? shop : '');
-    if (sId) {
-      window.history.pushState(
-        {},
-        '',
-        `?page=shop&shop=${encodeURIComponent(sId)}`
-      );
-    } else {
-      window.history.pushState({}, '', '?page=shop');
-    }
+    const slug = getShopSlug(resolvedShop);
+    window.history.pushState(
+      {},
+      '',
+      slug ? `/shop/${slug}/` : `/shop/${encodeURIComponent(resolvedShop?.id || '')}/`
+    );
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 

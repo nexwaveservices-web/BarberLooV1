@@ -8,6 +8,10 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+if (function_exists('barberloo_is_admin_or_system_request') && barberloo_is_admin_or_system_request()) {
+    return;
+}
+
 status_header(200);
 
 if (function_exists('barberloo_theme_render_app')) {

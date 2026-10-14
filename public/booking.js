@@ -11,7 +11,19 @@
 
   function parseShopId() {
     const params = new URLSearchParams(window.location.search);
-    return params.get('shop_id') || params.get('shop') || '';
+    const query = params.get('shop') || params.get('shop_id');
+    if (query && query.trim()) return query.trim();
+
+    const pathname = window.location.pathname.toLowerCase();
+    if (pathname.startsWith('/shop/')) {
+      const slug = pathname.replace(/^\/shop\//, '').replace(/\/.*$/, '').trim();
+      if (slug) return slug;
+    }
+    if (pathname.startsWith('/book-appointment/')) {
+      const slug = pathname.replace(/^\/book-appointment\//, '').replace(/\/.*$/, '').trim();
+      if (slug) return slug;
+    }
+    return '';
   }
 
   async function loadBookingData(shopId) {
@@ -27,12 +39,21 @@
 
     const supa = getSupabaseClient();
     if (supa) {
-      // 1. Load shop
-      const { data: shop, error: shopErr } = await supa
+      // 1. Load shop by ID or qr_code_slug
+      let { data: shop, error: shopErr } = await supa
         .from('shops')
         .select('*')
         .eq('id', cleanId)
         .maybeSingle();
+
+      if (!shop) {
+        const { data: slugShop } = await supa
+          .from('shops')
+          .select('*')
+          .eq('qr_code_slug', cleanId)
+          .maybeSingle();
+        if (slugShop) shop = slugShop;
+      }
 
       if (!shopErr && shop) {
         // 2. Load services

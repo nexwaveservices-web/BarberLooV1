@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { ASSETS, BarberItem, ServiceItem, ShopItem } from '../data/barberlooData';
-import { getShopQrDestinationUrl } from './domain';
+import { getShopQrDestinationUrl, findShopBySlugOrId } from './domain';
 
 export interface BookingLoadResult {
   shop: ShopItem | null;
@@ -12,8 +12,23 @@ export interface BookingLoadResult {
 export function parseShopIdFromUrl(): string {
   if (typeof window === 'undefined') return '';
   const params = new URLSearchParams(window.location.search);
-  const shopId = params.get('shop_id') || params.get('shop') || '';
-  return shopId.trim();
+  const queryShop = params.get('shop') || params.get('shop_id');
+  if (queryShop && queryShop.trim()) {
+    return queryShop.trim();
+  }
+
+  // Parse path slug from /shop/:slug or /book-appointment/:slug
+  const pathname = window.location.pathname.toLowerCase();
+  if (pathname.startsWith('/shop/')) {
+    const slug = pathname.replace(/^\/shop\//, '').replace(/\/.*$/, '').trim();
+    if (slug) return slug;
+  }
+  if (pathname.startsWith('/book-appointment/')) {
+    const slug = pathname.replace(/^\/book-appointment\//, '').replace(/\/.*$/, '').trim();
+    if (slug) return slug;
+  }
+
+  return '';
 }
 
 export function mapSupabaseServiceRecord(s: any): ServiceItem {
@@ -129,7 +144,7 @@ export async function loadShopForBooking(
   }
 
   if (!rawShop) {
-    rawShop = fallbackShops.find((s) => s.id === cleanId || s.qrCodeSlug === cleanId);
+    rawShop = findShopBySlugOrId(fallbackShops, cleanId);
   }
 
   // Resilient fallback to backend /api/shops/:id

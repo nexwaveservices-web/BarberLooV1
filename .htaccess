@@ -1,0 +1,38 @@
+# BEGIN BarberLoo WordPress Permalinks
+# Production rewrite rules for barberloo.in supporting /%postname%/ and clean SPA routing
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+
+# 1. Do NOT rewrite real existing files or directories
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# 2. Never rewrite WordPress Administration, login, or system scripts to index.php directly
+RewriteCond %{REQUEST_URI} ^/wp-admin [NC,OR]
+RewriteCond %{REQUEST_URI} ^/wp-login\.php [NC,OR]
+RewriteCond %{REQUEST_URI} ^/wp-cron\.php [NC,OR]
+RewriteCond %{REQUEST_URI} ^/xmlrpc\.php [NC,OR]
+RewriteCond %{REQUEST_URI} ^/wp-json [NC]
+RewriteRule ^ - [L]
+
+# 3. Standard WordPress Permalink Dispatcher
+RewriteRule ^index\.php$ - [L]
+RewriteRule . /index.php [L]
+</IfModule>
+# END BarberLoo WordPress Permalinks
+
+# MIME Type Enhancements for Modern JS Modules and Web Fonts
+<IfModule mod_mime.c>
+AddType application/javascript js mjs
+AddType image/svg+xml svg svgz
+AddType font/woff2 woff2
+AddType font/woff woff
+</IfModule>
+
+# Security: Block sensitive file inspection
+<FilesMatch "^\.">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

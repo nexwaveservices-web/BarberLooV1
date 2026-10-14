@@ -58,26 +58,111 @@ export function getProductionDomain(platformSettings?: any): string {
 }
 
 /**
- * Generates the authoritative Salon QR Destination URL for a given shop ID.
- * Example: https://barberloo.in/booking.html?shop_id=shop-1790996769501
+ * Generates a clean, URL-safe slug from any string.
+ * Example: "Pawan Hair Saloon" -> "pawan-hair-saloon"
+ */
+export function slugify(text: string): string {
+  return String(text || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Returns a stable, human-readable slug for a shop.
+ * Prefers qrCodeSlug, then slugified shop name, then shop ID.
+ */
+export function getShopSlug(shop: { id?: string; name?: string; qrCodeSlug?: string } | null | undefined): string {
+  if (!shop) return '';
+  if (shop.qrCodeSlug && typeof shop.qrCodeSlug === 'string' && shop.qrCodeSlug.trim()) {
+    return slugify(shop.qrCodeSlug);
+  }
+  if (shop.name && typeof shop.name === 'string' && shop.name.trim()) {
+    return slugify(shop.name);
+  }
+  return shop.id ? slugify(shop.id) : '';
+}
+
+/**
+ * Resolves a shop from an array of shops by matching slug, qrCodeSlug, id, or name.
+ */
+export function findShopBySlugOrId(shops: any[], slugOrId: string): any {
+  if (!slugOrId || !Array.isArray(shops) || shops.length === 0) return null;
+  const target = decodeURIComponent(slugOrId).toLowerCase().trim().replace(/^\/+|\/+$/g, '');
+  if (!target) return null;
+
+  return (
+    shops.find((s) => s?.id && s.id.toLowerCase() === target) ||
+    shops.find((s) => s?.qrCodeSlug && s.qrCodeSlug.toLowerCase() === target) ||
+    shops.find((s) => getShopSlug(s) === target) ||
+    shops.find((s) => slugify(s?.name || '') === target) ||
+    shops.find((s) => String(s?.name || '').toLowerCase() === target) ||
+    null
+  );
+}
+
+/**
+ * Generates the clean permalink URL for a shop details page.
+ * Example: https://barberloo.in/shop/royal-gents-salon/
+ */
+export function getShopPermalinkUrl(shop: any, domain?: string): string {
+  const base = normalizeDomain(domain || DEFAULT_CANONICAL_DOMAIN);
+  const slug = getShopSlug(shop);
+  return slug ? `${base}/shop/${slug}/` : `${base}/shops/`;
+}
+
+/**
+ * Generates the clean permalink URL for booking.
+ * Example: https://barberloo.in/book-appointment/ or https://barberloo.in/book-appointment/?shop=royal-gents-salon
+ */
+export function getBookingPermalinkUrl(shop?: any, domain?: string): string {
+  const base = normalizeDomain(domain || DEFAULT_CANONICAL_DOMAIN);
+  if (shop) {
+    const slug = getShopSlug(shop);
+    return slug ? `${base}/book-appointment/?shop=${slug}` : `${base}/book-appointment/`;
+  }
+  return `${base}/book-appointment/`;
+}
+
+/**
+ * Generates the authoritative Salon QR Destination URL for a given shop.
+ * Example: https://barberloo.in/shop/pawan-hair-saloon-ludhiana/
+ * Fully backwards compatible with legacy ?shop_id= parameters.
  */
 export function getShopQrDestinationUrl(
-  shopId: string,
+  shopIdOrShop: string | any,
   options?: {
     domain?: string;
     useHomeFormat?: boolean;
+    useLegacyFormat?: boolean;
   }
 ): string {
-  const cleanId = (shopId || '').trim();
   const domain = normalizeDomain(options?.domain || DEFAULT_CANONICAL_DOMAIN);
 
-  if (!cleanId) {
-    return `${domain}/booking.html`;
+  let cleanId = '';
+  let slug = '';
+  if (typeof shopIdOrShop === 'string') {
+    cleanId = shopIdOrShop.trim();
+    slug = slugify(cleanId);
+  } else if (shopIdOrShop && typeof shopIdOrShop === 'object') {
+    cleanId = (shopIdOrShop.id || '').trim();
+    slug = getShopSlug(shopIdOrShop);
+  }
+
+  if (!cleanId && !slug) {
+    return `${domain}/book-appointment/`;
+  }
+
+  if (options?.useLegacyFormat) {
+    return `${domain}/booking.html?shop_id=${encodeURIComponent(cleanId || slug)}`;
   }
 
   if (options?.useHomeFormat) {
-    return `${domain}/?shop_id=${encodeURIComponent(cleanId)}`;
+    return `${domain}/?shop_id=${encodeURIComponent(cleanId || slug)}`;
   }
 
-  return `${domain}/booking.html?shop_id=${encodeURIComponent(cleanId)}`;
+  // Authoritative clean shop permalink
+  return `${domain}/shop/${slug || cleanId}/`;
 }
