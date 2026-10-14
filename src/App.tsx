@@ -787,10 +787,10 @@ export default function App() {
                 )}
                 onCancelAppointment={handleCancelAppointment}
                 onRescheduleAppointment={handleRescheduleAppointment}
-                onNavigate={setCurrentPage}
+                onNavigate={handleNavigate}
                 onSelectServiceForBooking={(srv) => setBookingService(srv)}
                 onSelectBarberForBooking={(brb) => setBookingBarber(brb)}
-                onSelectShop={(shop) => setSelectedShop(shop)}
+                onSelectShop={handleSelectShop}
                 barbers={barbers}
                 shops={shops}
                 services={services}

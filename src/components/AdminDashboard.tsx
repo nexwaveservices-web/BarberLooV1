@@ -1424,6 +1424,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <p className="text-[11px] font-mono-num text-[#F1E194]/80 mt-1 break-all">
                         QR Destination: {getShopQrDestinationUrl(s.id, { domain: getProductionDomain(platformSettings) })}
                       </p>
+                      {s.latitude && s.longitude ? (
+                        <p className="text-[11px] text-emerald-400 mt-0.5 flex items-center gap-1 font-mono">
+                          <span>📍 GPS Mapped: {s.latitude}, {s.longitude}</span>
+                          {s.pinCode ? ` · PIN ${s.pinCode}` : ''}
+                          {s.landmark ? ` · Near ${s.landmark}` : ''}
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-amber-400/90 mt-0.5">
+                          📍 No GPS coordinates mapped yet
+                        </p>
+                      )}
                     </div>
                     {onUpdateShop && (
                       <div className="flex flex-wrap gap-2">

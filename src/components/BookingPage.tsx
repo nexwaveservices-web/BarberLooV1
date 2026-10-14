@@ -22,7 +22,9 @@ import {
   RefreshCw,
   Globe,
   LogIn,
+  Navigation,
 } from 'lucide-react';
+import { GetDirectionsModal } from './GetDirectionsModal';
 import {
   useLanguage,
   getUpcomingISTDates,
@@ -152,6 +154,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const [bookingError, setBookingError] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [bookingComplete, setBookingComplete] = useState<any | null>(null);
+  const [directionsModalOpen, setDirectionsModalOpen] = useState<boolean>(false);
 
   // Authoritative server-side price calculation state
   const [serverPricing, setServerPricing] = useState<{
@@ -869,10 +872,14 @@ export const BookingPage: React.FC<BookingPageProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-[#241719] rounded-[20px] p-6 border border-[#F1E194]/15">
             <div>
               <p className="text-xs text-[#8A8178]">
-                {tr('Shop', 'सैलून')}
+                {tr('Shop & Address', 'सैलून और पता')}
               </p>
               <p className="font-display text-xl font-bold text-[#FFF9E8] mt-1">
                 {currentBarber.shopName}
+              </p>
+              <p className="text-xs text-[#8A8178] mt-1 flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-[#F1E194] shrink-0" />
+                <span>{currentShop?.address || currentShop?.district || 'Model Town, Punjab'}</span>
               </p>
             </div>
             <div>
@@ -968,10 +975,18 @@ export const BookingPage: React.FC<BookingPageProps> = ({
           <div className="flex flex-col sm:flex-row gap-3.5 pt-2">
             <button
               type="button"
-              onClick={() => onNavigate('customer-dashboard')}
-              className="flex-1 py-4 px-6 rounded-[18px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#FFF9E8] transition-colors cursor-pointer"
+              onClick={() => setDirectionsModalOpen(true)}
+              className="flex-1 py-4 px-6 rounded-[18px] bg-[#5B0E14] text-[#F1E194] border border-[#F1E194]/30 text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#4A0B10] transition-colors cursor-pointer flex items-center justify-center gap-2"
             >
-              {tr('View My Booking', 'मेरी बुकिंग देखें')}
+              <Navigation className="w-4 h-4 text-[#F1E194]" />
+              <span>{tr('Get Directions', 'दिशा-निर्देश')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('customer-dashboard')}
+              className="flex-1 py-4 px-6 rounded-[18px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-[0.14em] uppercase hover:bg-[#FFF9E8] transition-colors cursor-pointer text-center"
+            >
+              {tr('View Booking', 'बुकिंग देखें')}
             </button>
             <button
               type="button"
@@ -981,6 +996,20 @@ export const BookingPage: React.FC<BookingPageProps> = ({
               {tr('Back to Home', 'होम पर वापस जाएं')}
             </button>
           </div>
+
+          {/* Directions Modal for Confirmed Appointment */}
+          <GetDirectionsModal
+            isOpen={directionsModalOpen}
+            onClose={() => setDirectionsModalOpen(false)}
+            shopName={currentBarber.shopName}
+            shopAddress={currentShop?.address || currentShop?.district || 'Model Town, Punjab'}
+            shopCity={currentShop?.city || currentShop?.district}
+            shopState={currentShop?.state}
+            shopPinCode={currentShop?.pinCode || currentShop?.pin_code}
+            shopLandmark={currentShop?.landmark}
+            latitude={currentShop?.latitude}
+            longitude={currentShop?.longitude}
+          />
         </div>
       </div>
     );

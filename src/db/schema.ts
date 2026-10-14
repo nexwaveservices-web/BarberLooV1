@@ -77,6 +77,10 @@ export const shops = pgTable('shops', {
   tagline: text('tagline').notNull(),
   about: text('about').notNull(),
   qrCodeSlug: text('qr_code_slug').notNull().default('the-royal-barber-mayfair'),
+  latitude: text('latitude').default(''),
+  longitude: text('longitude').default(''),
+  pinCode: text('pin_code').default(''),
+  landmark: text('landmark').default(''),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

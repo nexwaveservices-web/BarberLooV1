@@ -19,7 +19,9 @@ import {
   Check,
   RotateCcw,
   Settings as SettingsIcon,
+  Navigation,
 } from 'lucide-react';
+import { GetDirectionsModal } from './GetDirectionsModal';
 import {
   useLanguage,
   getUpcomingISTDates,
@@ -164,6 +166,24 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [browserAlertsOn, setBrowserAlertsOn] = useState<boolean>(() =>
     areBrowserAlertsEnabled()
   );
+  const [directionsModalOpen, setDirectionsModalOpen] = useState(false);
+  const [directionsTargetShop, setDirectionsTargetShop] = useState<any | null>(null);
+
+  const handleOpenDirectionsForApt = (apt: AppointmentItem) => {
+    const matchedShop = (shops || []).find(
+      (s: any) => s.id === apt.shopId || s.name === apt.shopName
+    );
+    if (matchedShop) {
+      setDirectionsTargetShop(matchedShop);
+    } else {
+      setDirectionsTargetShop({
+        name: apt.shopName || 'Partner Salon',
+        address: 'Model Town, Punjab',
+        district: 'Punjab',
+      });
+    }
+    setDirectionsModalOpen(true);
+  };
 
   const upcomingAppointments = appointments.filter(
     (a) =>
@@ -726,7 +746,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     <div className="text-xs text-[#8A8178]">
                       {nextAppointment.shopName}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDirectionsForApt(nextAppointment)}
+                        className="px-4 py-2 rounded-[14px] bg-[#5B0E14] text-xs font-semibold text-[#F1E194] border border-[#F1E194]/25 hover:bg-[#4A0B10] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        <Navigation className="w-3.5 h-3.5 text-[#F1E194]" />
+                        <span>{tr('Get Directions', 'दिशा-निर्देश')}</span>
+                      </button>
                       <button
                         type="button"
                         onClick={() =>
@@ -744,7 +772,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => setCancellingApt(nextAppointment)}
-                        className="px-4 py-2 rounded-[14px] bg-[#5B0E14] text-xs font-semibold text-[#FFF9E8] hover:bg-[#75131b] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                        className="px-4 py-2 rounded-[14px] bg-[#241719] text-xs font-semibold text-[#FFF9E8] hover:bg-[#342224] transition-colors cursor-pointer inline-flex items-center gap-1.5"
                       >
                         <XCircle className="w-3.5 h-3.5" />
                         <span>{tr('Cancel', 'रद्द करें')}</span>
@@ -900,6 +928,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             {!isCompleted &&
                               String(apt.status).toLowerCase() !== 'cancelled' && (
                                 <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenDirectionsForApt(apt)}
+                                    className="px-3 py-1.5 rounded-[10px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer hover:bg-[#4A0B10]"
+                                  >
+                                    <Navigation className="w-3 h-3 text-[#F1E194]" />
+                                    <span>{tr('Directions', 'दिशा-निर्देश')}</span>
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -1392,8 +1428,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            if (onSelectShop) onSelectShop(s);
-                            onNavigate('shop');
+                            if (onSelectShop) {
+                              onSelectShop(s);
+                            } else {
+                              onNavigate('shop');
+                            }
                           }}
                           className="px-3 py-1.5 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer hover:bg-[#241719]"
                         >
@@ -1674,6 +1713,25 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             })()}
           </div>
         </div>
+      )}
+
+      {/* Get Directions Modal */}
+      {directionsTargetShop && (
+        <GetDirectionsModal
+          isOpen={directionsModalOpen}
+          onClose={() => {
+            setDirectionsModalOpen(false);
+            setDirectionsTargetShop(null);
+          }}
+          shopName={directionsTargetShop.name}
+          shopAddress={directionsTargetShop.address}
+          shopCity={directionsTargetShop.city || directionsTargetShop.district}
+          shopState={directionsTargetShop.state}
+          shopPinCode={directionsTargetShop.pinCode || directionsTargetShop.pin_code}
+          shopLandmark={directionsTargetShop.landmark}
+          latitude={directionsTargetShop.latitude}
+          longitude={directionsTargetShop.longitude}
+        />
       )}
     </div>
   );

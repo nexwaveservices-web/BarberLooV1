@@ -37,6 +37,7 @@ import {
 import { getShopQrDestinationUrl, getProductionDomain } from '../lib/domain';
 import { SalonQrModal } from './SalonQrModal';
 import { apiCreateReport } from '../lib/api';
+import { BarberLocationPicker } from './BarberLocationPicker';
 
 interface BarberDashboardProps {
   appointments: AppointmentItem[];
@@ -167,6 +168,12 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   const [editShopName, setEditShopName] = useState('');
   const [editShopDistrict, setEditShopDistrict] = useState('');
   const [editShopAddress, setEditShopAddress] = useState('');
+  const [editShopCity, setEditShopCity] = useState('Ludhiana');
+  const [editShopState, setEditShopState] = useState('Punjab');
+  const [editShopPinCode, setEditShopPinCode] = useState('');
+  const [editShopLandmark, setEditShopLandmark] = useState('');
+  const [editShopLatitude, setEditShopLatitude] = useState('');
+  const [editShopLongitude, setEditShopLongitude] = useState('');
   const [editShopPhone, setEditShopPhone] = useState('');
   const [editShopClosesAt, setEditShopClosesAt] = useState('21:30');
   const [editShopImage, setEditShopImage] = useState('');
@@ -209,8 +216,14 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   const [newShopName, setNewShopName] = useState('');
   const [newShopStateId, setNewShopStateId] = useState('st-pb');
   const [newShopCityId, setNewShopCityId] = useState('ct-jal');
+  const [newShopCity, setNewShopCity] = useState('Jalandhar');
+  const [newShopState, setNewShopState] = useState('Punjab');
   const [newShopDistrict, setNewShopDistrict] = useState('Jalandhar, Punjab');
   const [newShopAddress, setNewShopAddress] = useState('');
+  const [newShopPinCode, setNewShopPinCode] = useState('');
+  const [newShopLandmark, setNewShopLandmark] = useState('');
+  const [newShopLatitude, setNewShopLatitude] = useState('');
+  const [newShopLongitude, setNewShopLongitude] = useState('');
   const [newShopPhone, setNewShopPhone] = useState(
     currentUserProfile?.phone || '+91 '
   );
@@ -222,9 +235,12 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
 
   const handleNewShopStateChange = (stId: string) => {
     setNewShopStateId(stId);
+    const stateObj = DEFAULT_STATES.find((s) => s.id === stId);
+    if (stateObj) setNewShopState(stateObj.name);
     const validCities = getCitiesForState(stId);
     if (validCities.length > 0) {
       setNewShopCityId(validCities[0].id);
+      setNewShopCity(validCities[0].name);
     }
   };
 
@@ -455,18 +471,26 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
       name: newShopName.trim(),
       stateId: newShopStateId,
       cityId: cityObj?.id || 'ct-jal',
-      state: stateObj?.name || 'Punjab',
-      city: cityObj?.name || 'Jalandhar',
-      district: `${cityObj?.name || 'Jalandhar'}, ${stateObj?.name || 'Punjab'}`,
+      state: stateObj?.name || newShopState || 'Punjab',
+      city: cityObj?.name || newShopCity || 'Jalandhar',
+      district: `${cityObj?.name || newShopCity || 'Jalandhar'}, ${stateObj?.name || newShopState || 'Punjab'}`,
       address: newShopAddress.trim(),
       phone: newShopPhone.trim(),
       minPrice: Number(newShopMinPrice) || 500,
       priceTier: `₹${newShopMinPrice} – ₹2,500`,
       tagline: newShopTagline.trim(),
       about: newShopAbout.trim(),
+      pinCode: newShopPinCode.trim(),
+      landmark: newShopLandmark.trim(),
+      latitude: newShopLatitude.trim(),
+      longitude: newShopLongitude.trim(),
     });
     setNewShopName('');
     setNewShopAddress('');
+    setNewShopPinCode('');
+    setNewShopLandmark('');
+    setNewShopLatitude('');
+    setNewShopLongitude('');
     setNewShopAbout('');
   };
 
@@ -2351,6 +2375,12 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                                 setEditShopName(s.name || '');
                                 setEditShopDistrict(s.district || '');
                                 setEditShopAddress(s.address || '');
+                                setEditShopCity(s.city || (s.district ? s.district.split(',')[0].trim() : 'Ludhiana'));
+                                setEditShopState(s.state || 'Punjab');
+                                setEditShopPinCode(s.pinCode || s.pin_code || '');
+                                setEditShopLandmark(s.landmark || '');
+                                setEditShopLatitude(s.latitude || '');
+                                setEditShopLongitude(s.longitude || '');
                                 setEditShopPhone(s.phone || '');
                                 setEditShopClosesAt(s.closesAt || '21:30');
                                 setEditShopImage(s.image || '');
@@ -2384,7 +2414,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                       {editingShopId === s.id && (
                         <div className="pt-4 border-t border-[#F1E194]/15 space-y-4 text-xs">
                           {onUpdateShop && (
-                            <div className="space-y-2.5">
+                            <div className="space-y-4">
                               <p className="font-semibold text-[#F1E194] uppercase tracking-wider">
                                 {tr('Update Salon Details & Cover Image', 'सैलून विवरण अपडेट करें')}
                               </p>
@@ -2411,14 +2441,33 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                                   className="px-3 py-2 rounded-[10px] bg-[#241719] text-[#FFF9E8]"
                                 />
                               </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                <input
-                                  type="text"
-                                  value={editShopAddress}
-                                  onChange={(e) => setEditShopAddress(e.target.value)}
-                                  placeholder={tr('Address', 'पता')}
-                                  className="px-3 py-2 rounded-[10px] bg-[#241719] text-[#FFF9E8]"
+
+                              {/* Interactive Location Picker for Owner */}
+                              <div className="p-4 rounded-2xl bg-[#1C1718] border border-[#F1E194]/20 space-y-2">
+                                <p className="font-semibold text-[#F1E194] uppercase tracking-wider text-xs">
+                                  {tr('Shop Location Setup & Entrance Pin', 'सैलून स्थान और मैप पिन')}
+                                </p>
+                                <BarberLocationPicker
+                                  address={editShopAddress}
+                                  city={editShopCity}
+                                  state={editShopState}
+                                  pinCode={editShopPinCode}
+                                  landmark={editShopLandmark}
+                                  latitude={editShopLatitude}
+                                  longitude={editShopLongitude}
+                                  onChange={(fields) => {
+                                    if (fields.address !== undefined) setEditShopAddress(fields.address);
+                                    if (fields.city !== undefined) setEditShopCity(fields.city);
+                                    if (fields.state !== undefined) setEditShopState(fields.state);
+                                    if (fields.pinCode !== undefined) setEditShopPinCode(fields.pinCode);
+                                    if (fields.landmark !== undefined) setEditShopLandmark(fields.landmark);
+                                    if (fields.latitude !== undefined) setEditShopLatitude(fields.latitude);
+                                    if (fields.longitude !== undefined) setEditShopLongitude(fields.longitude);
+                                  }}
                                 />
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <input
                                   type="text"
                                   value={editShopClosesAt}
@@ -2467,11 +2516,14 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                                   onClick={async () => {
                                     await onUpdateShop(s.id, {
                                       name: editShopName.trim(),
-                                      district: editShopDistrict.trim(),
-                                      city:
-                                        editShopDistrict.split(',')[1]?.trim() ||
-                                        editShopDistrict.trim(),
+                                      district: editShopDistrict.trim() || `${editShopCity.trim()}, ${editShopState.trim()}`,
+                                      city: editShopCity.trim(),
+                                      state: editShopState.trim(),
                                       address: editShopAddress.trim(),
+                                      pinCode: editShopPinCode.trim(),
+                                      landmark: editShopLandmark.trim(),
+                                      latitude: editShopLatitude.trim(),
+                                      longitude: editShopLongitude.trim(),
                                       phone: editShopPhone.trim(),
                                       closesAt: editShopClosesAt.trim(),
                                       image: editShopImage.trim(),
@@ -2479,9 +2531,9 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                                     });
                                     setEditingShopId(null);
                                   }}
-                                  className="px-4 py-2 rounded-[10px] bg-[#F1E194] text-[#111113] font-semibold cursor-pointer"
+                                  className="px-5 py-2.5 rounded-[12px] bg-[#F1E194] text-[#111113] font-bold cursor-pointer hover:bg-[#FFF9E8] transition shadow"
                                 >
-                                  {tr('Save Salon', 'सैलून सहेजें')}
+                                  {tr('Save Salon & Location', 'सैलून व लोकेशन सहेजें')}
                                 </button>
                               </div>
                             </div>
@@ -2734,7 +2786,11 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                     </label>
                     <select
                       value={newShopCityId}
-                      onChange={(e) => setNewShopCityId(e.target.value)}
+                      onChange={(e) => {
+                        setNewShopCityId(e.target.value);
+                        const c = getCitiesForState(newShopStateId).find((ct) => ct.id === e.target.value);
+                        if (c) setNewShopCity(c.name);
+                      }}
                       className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8] cursor-pointer"
                     >
                       {getCitiesForState(newShopStateId).map((c) => (
@@ -2745,17 +2801,29 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                     </select>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs text-[#8A8178] mb-1">
-                    {tr('Full Street Address', 'पूरा पता')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newShopAddress}
-                    onChange={(e) => setNewShopAddress(e.target.value)}
-                    placeholder="14 Pali Hill Road, Bandra West"
-                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#FFF9E8]"
+
+                {/* Interactive Location Picker & Map Preview for Registration */}
+                <div className="p-4 rounded-2xl bg-[#1C1718] border border-[#F1E194]/20 space-y-2">
+                  <p className="font-semibold text-[#F1E194] uppercase tracking-wider text-xs">
+                    {tr('Shop Location Setup & Entrance Pin', 'सैलून स्थान और मैप पिन')}
+                  </p>
+                  <BarberLocationPicker
+                    address={newShopAddress}
+                    city={newShopCity}
+                    state={newShopState}
+                    pinCode={newShopPinCode}
+                    landmark={newShopLandmark}
+                    latitude={newShopLatitude}
+                    longitude={newShopLongitude}
+                    onChange={(fields) => {
+                      if (fields.address !== undefined) setNewShopAddress(fields.address);
+                      if (fields.city !== undefined) setNewShopCity(fields.city);
+                      if (fields.state !== undefined) setNewShopState(fields.state);
+                      if (fields.pinCode !== undefined) setNewShopPinCode(fields.pinCode);
+                      if (fields.landmark !== undefined) setNewShopLandmark(fields.landmark);
+                      if (fields.latitude !== undefined) setNewShopLatitude(fields.latitude);
+                      if (fields.longitude !== undefined) setNewShopLongitude(fields.longitude);
+                    }}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">

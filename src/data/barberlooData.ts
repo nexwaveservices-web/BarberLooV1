@@ -10,14 +10,14 @@ export type PageView =
   | 'auth';
 
 export const ASSETS = {
-  heroCraft: '/src/assets/images/hero_barber_craft_1790869666069.jpg',
-  royalInterior: '/src/assets/images/royal_barber_shop_1790869681010.jpg',
-  barberMarcus: '/src/assets/images/barber_portrait_marcus_1790869694473.jpg',
-  barberJulian: '/src/assets/images/barber_portrait_julian_1790869707086.jpg',
-  barberDevon: '/src/assets/images/barber_portrait_marcus_1790869694473.jpg',
-  serviceHotTowel: '/src/assets/images/signature_hot_towel_shave_1790869718147.jpg',
-  serviceSkinFade: '/src/assets/images/hero_barber_craft_1790869666069.jpg',
-  shopSovereign: '/src/assets/images/royal_barber_shop_1790869681010.jpg',
+  heroCraft: '/assets/images/hero_barber_craft_1790869666069.jpg',
+  royalInterior: '/assets/images/royal_barber_shop_1790869681010.jpg',
+  barberMarcus: '/assets/images/barber_portrait_marcus_1790869694473.jpg',
+  barberJulian: '/assets/images/barber_portrait_julian_1790869707086.jpg',
+  barberDevon: '/assets/images/barber_portrait_marcus_1790869694473.jpg',
+  serviceHotTowel: '/assets/images/signature_hot_towel_shave_1790869718147.jpg',
+  serviceSkinFade: '/assets/images/hero_barber_craft_1790869666069.jpg',
+  shopSovereign: '/assets/images/royal_barber_shop_1790869681010.jpg',
 };
 
 export interface ServiceItem {
@@ -62,6 +62,8 @@ export interface ShopItem {
   ownerUid?: string;
   name: string;
   district: string;
+  city?: string;
+  state?: string;
   address: string;
   phone?: string;
   rating: number;
@@ -77,6 +79,10 @@ export interface ShopItem {
   tagline: string;
   about?: string;
   qrCodeUrl?: string;
+  latitude?: string;
+  longitude?: string;
+  pinCode?: string;
+  landmark?: string;
 }
 
 export interface AppointmentItem {
@@ -163,6 +169,10 @@ export const DEFAULT_FALLBACK_SHOP: ShopItem = {
   distance: '0.4 km',
   tagline: 'Luxury Grooming & Bespoke Appointments',
   about: 'Premier master grooming delivered by expert craftsmen in a relaxed, luxurious setting.',
+  latitude: '31.3130',
+  longitude: '75.5866',
+  pinCode: '144003',
+  landmark: 'Near Model Town Market Square',
 };
 
 // Clean production arrays with authoritative fallback shop to guarantee zero blank screens

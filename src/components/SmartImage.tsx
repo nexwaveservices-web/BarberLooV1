@@ -11,20 +11,33 @@ interface SmartImageProps {
 
 function resolveValidImageSrc(rawSrc: string): string {
   if (!rawSrc) return '';
-  if (rawSrc.includes('royal_shop_interior_') || rawSrc.includes('shop_sovereign_lounge_')) {
+  if (
+    rawSrc.includes('royal_shop_interior_') ||
+    rawSrc.includes('shop_sovereign_lounge_') ||
+    rawSrc.includes('royal_barber_shop_')
+  ) {
     return ASSETS.royalInterior;
   }
-  if (rawSrc.includes('barber_portrait_marcus_') || rawSrc.includes('barber_portrait_devon_')) {
+  if (
+    rawSrc.includes('barber_portrait_marcus_') ||
+    rawSrc.includes('barber_portrait_devon_')
+  ) {
     return ASSETS.barberMarcus;
   }
   if (rawSrc.includes('barber_portrait_julian_')) {
     return ASSETS.barberJulian;
   }
-  if (rawSrc.includes('service_hot_towel_shave_')) {
+  if (
+    rawSrc.includes('service_hot_towel_shave_') ||
+    rawSrc.includes('signature_hot_towel_shave_')
+  ) {
     return ASSETS.serviceHotTowel;
   }
-  if (rawSrc.includes('service_skin_fade_')) {
-    return ASSETS.serviceSkinFade;
+  if (
+    rawSrc.includes('service_skin_fade_') ||
+    rawSrc.includes('hero_barber_craft_')
+  ) {
+    return ASSETS.heroCraft;
   }
   return rawSrc;
 }

@@ -25,10 +25,19 @@ import {
   Copy,
   Search,
   ArrowLeft,
+  Navigation,
+  List,
+  Map as MapIcon,
+  SlidersHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 import { useLanguage } from '../lib/i18n';
 import { getShopQrDestinationUrl, getProductionDomain } from '../lib/domain';
 import { SalonQrModal } from './SalonQrModal';
+import { ShopMapView } from './ShopMapView';
+import { LocationSelector, UserLocation } from './LocationSelector';
+import { GetDirectionsModal } from './GetDirectionsModal';
+import { calculateDistanceKm, formatDistance, parseCoordinates } from '../lib/geoUtils';
 
 interface ShopPageProps {
   shop: ShopItem | null;
@@ -154,22 +163,102 @@ export const ShopPage: React.FC<ShopPageProps> = ({
     }
   }, [shop, activeTab, qrDestinationUrl]);
 
+  // Map View / List View mode
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  // Customer Location state
+  const [customerLocation, setCustomerLocation] = useState<UserLocation | null>(null);
+  // Sort state: 'default' | 'distance' | 'rating' | 'price'
+  const [sortBy, setSortBy] = useState<'distance' | 'rating' | 'price' | 'default'>('default');
+  // Filter states
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [filterOpenOnly, setFilterOpenOnly] = useState<boolean>(false);
+  const [selectedPriceTier, setSelectedPriceTier] = useState<string>('all');
+  // Directions modal state
+  const [directionsModalOpen, setDirectionsModalOpen] = useState(false);
+  const [directionsTargetShop, setDirectionsTargetShop] = useState<any | null>(null);
+
+  const handleOpenDirections = (targetShop: any) => {
+    setDirectionsTargetShop(targetShop);
+    setDirectionsModalOpen(true);
+  };
+
   // When no specific shop is selected: Display the All Shops Listing (Section 8)
   if (!shop) {
-    const filteredShops = safeShops.filter((s: any) => {
-      if (!s) return false;
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase();
-      return (
-        String(s.name || '').toLowerCase().includes(q) ||
-        String(s.district || '').toLowerCase().includes(q) ||
-        String(s.address || '').toLowerCase().includes(q)
-      );
-    });
+    const filteredShops = safeShops
+      .filter((s: any) => {
+        if (!s) return false;
+        // Search query (name, district, city, address, pinCode, landmark)
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          const matchName = String(s.name || '').toLowerCase().includes(q);
+          const matchDistrict = String(s.district || '').toLowerCase().includes(q);
+          const matchCity = String(s.city || '').toLowerCase().includes(q);
+          const matchAddress = String(s.address || '').toLowerCase().includes(q);
+          const matchPin = String(s.pinCode || s.pin_code || '').toLowerCase().includes(q);
+          const matchLandmark = String(s.landmark || '').toLowerCase().includes(q);
+          if (!matchName && !matchDistrict && !matchCity && !matchAddress && !matchPin && !matchLandmark) {
+            return false;
+          }
+        }
+        // Open only filter
+        if (filterOpenOnly && (s.isOpen === false || s.status === 'closed')) {
+          return false;
+        }
+        // Price tier filter
+        const price = s.minPrice || 0;
+        if (selectedPriceTier === 'budget' && price > 500) return false;
+        if (selectedPriceTier === 'mid' && (price <= 500 || price > 1000)) return false;
+        if (selectedPriceTier === 'luxury' && price <= 1000) return false;
+
+        // Category filter
+        if (selectedCategory !== 'all') {
+          const hasCat = safeServices.some(
+            (srv: any) =>
+              (srv.shopId === s.id || srv.shop_id === s.id) &&
+              String(srv.category || '').toLowerCase() === selectedCategory.toLowerCase()
+          );
+          if (!hasCat) return false;
+        }
+
+        return true;
+      })
+      .map((s: any) => {
+        const coords = parseCoordinates(s.latitude, s.longitude);
+        const distKm =
+          customerLocation && coords
+            ? calculateDistanceKm(
+                customerLocation.lat,
+                customerLocation.lng,
+                coords.lat,
+                coords.lng
+              )
+            : null;
+        return {
+          ...s,
+          calculatedDistanceKm: distKm,
+          hasValidCoords: coords !== null,
+        };
+      })
+      .sort((a: any, b: any) => {
+        if (sortBy === 'distance' || (customerLocation && sortBy === 'default')) {
+          if (a.calculatedDistanceKm !== null && b.calculatedDistanceKm !== null) {
+            return a.calculatedDistanceKm - b.calculatedDistanceKm;
+          }
+          if (a.calculatedDistanceKm !== null) return -1;
+          if (b.calculatedDistanceKm !== null) return 1;
+        }
+        if (sortBy === 'rating') {
+          return (parseFloat(b.rating) || 0) - (parseFloat(a.rating) || 0);
+        }
+        if (sortBy === 'price') {
+          return (a.minPrice || 0) - (b.minPrice || 0);
+        }
+        return 0;
+      });
 
     return (
-      <div className="bg-[#EFE9DD] min-h-[85vh] py-12 px-5 sm:px-8">
-        <div className="max-w-[1360px] mx-auto space-y-8">
+      <div className="bg-[#EFE9DD] min-h-[85vh] py-10 px-4 sm:px-8">
+        <div className="max-w-[1360px] mx-auto space-y-6">
           {/* Header */}
           <div className="text-center max-w-2xl mx-auto space-y-3">
             <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#111113]">
@@ -177,165 +266,350 @@ export const ShopPage: React.FC<ShopPageProps> = ({
             </h1>
             <p className="text-sm text-[#8A8178]">
               {tr(
-                'Browse verified local barber shops and select one to book your appointment.',
-                'सत्यापित सैलून देखें और अपनी अपॉइंटमेंट बुक करने के लिए एक चुनें।'
+                'Browse verified local barber shops, explore interactive maps, and find nearby master craftsmen.',
+                'सत्यापित सैलून देखें, इंटरएक्टिव मानचित्र पर खोजें और नजदीकी सैलून खोजें।'
               )}
             </p>
+          </div>
 
-            {/* Search Box in Neumorphic sculpted well */}
-            <div className="pt-2 max-w-md mx-auto relative">
-              <Search className="w-4 h-4 text-[#8A8178] absolute left-4 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={tr(
-                  'Search barber shops by name or area...',
-                  'सैलून का नाम या इलाका खोजें...'
+          {/* Navigation Controls Bar: Search, Location Selector, View Switch, Sort & Filters */}
+          <div className="p-4 sm:p-5 rounded-[24px] neu-flat space-y-4">
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              {/* Search Box in Neumorphic sculpted well */}
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 text-[#8A8178] absolute left-4 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={tr(
+                    'Search barber shops by name, area, or PIN...',
+                    'सैलून का नाम, इलाका या पिन कोड खोजें...'
+                  )}
+                  className="w-full pl-11 pr-4 py-3 rounded-[18px] neu-input text-xs text-[#111113] focus:outline-none"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-[#8A8178] hover:text-[#111113]"
+                  >
+                    ×
+                  </button>
                 )}
-                className="w-full pl-11 pr-4 py-3 rounded-[18px] neu-input text-xs text-[#111113] focus:outline-none"
+              </div>
+
+              {/* Customer Location Selector */}
+              <LocationSelector
+                currentLocation={customerLocation}
+                onSelectLocation={(loc) => {
+                  setCustomerLocation(loc);
+                  if (loc && sortBy === 'default') {
+                    setSortBy('distance');
+                  }
+                }}
               />
+
+              {/* View Switcher: Map View / List View */}
+              <div className="flex items-center p-1 rounded-2xl bg-[#E5DEC9]/50 border border-[#E5DEC9] shrink-0 self-start md:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition ${
+                    viewMode === 'list'
+                      ? 'bg-[#5B0E14] text-[#F1E194] shadow'
+                      : 'text-[#524B45] hover:text-[#111113]'
+                  }`}
+                  aria-label="Switch to List View"
+                >
+                  <List className="w-4 h-4" />
+                  <span>List View</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('map')}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition ${
+                    viewMode === 'map'
+                      ? 'bg-[#5B0E14] text-[#F1E194] shadow'
+                      : 'text-[#524B45] hover:text-[#111113]'
+                  }`}
+                  aria-label="Switch to Map View"
+                >
+                  <MapIcon className="w-4 h-4" />
+                  <span>Map View</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter & Sort Chips Row */}
+            <div className="pt-2 border-t border-[#5B0E14]/10 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold text-[#8A8178] uppercase flex items-center gap-1">
+                  <SlidersHorizontal className="w-3 h-3" />
+                  <span>Filter:</span>
+                </span>
+
+                {/* Open Now Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setFilterOpenOnly(!filterOpenOnly)}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-medium transition ${
+                    filterOpenOnly
+                      ? 'bg-[#5B0E14] text-[#F1E194] border-[#5B0E14]'
+                      : 'bg-[#F4EFE6] text-[#524B45] border-[#E5DEC9] hover:bg-[#EAE4D7]'
+                  }`}
+                >
+                  Open Now
+                </button>
+
+                {/* Price Range Filter */}
+                <select
+                  value={selectedPriceTier}
+                  onChange={(e) => setSelectedPriceTier(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-xl bg-[#F4EFE6] border border-[#E5DEC9] text-xs text-[#524B45] focus:outline-none"
+                >
+                  <option value="all">Price: All Tiers</option>
+                  <option value="budget">Budget (≤ ₹500)</option>
+                  <option value="mid">Mid Tier (₹500 - ₹1,000)</option>
+                  <option value="luxury">Luxury (&gt; ₹1,000)</option>
+                </select>
+
+                {/* Service Category */}
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-xl bg-[#F4EFE6] border border-[#E5DEC9] text-xs text-[#524B45] focus:outline-none"
+                >
+                  <option value="all">Services: All Categories</option>
+                  <option value="hair">Hair Services</option>
+                  <option value="beard">Beard & Shave</option>
+                  <option value="facial">Facial & Skin</option>
+                  <option value="styling">Styling</option>
+                </select>
+              </div>
+
+              {/* Sort Selector */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold text-[#8A8178] uppercase">
+                  Sort By:
+                </span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className="px-3 py-1.5 rounded-xl bg-[#F4EFE6] border border-[#E5DEC9] text-xs font-semibold text-[#111113] focus:outline-none"
+                >
+                  <option value="default">Default Featured</option>
+                  {customerLocation && (
+                    <option value="distance">Distance (Nearest First)</option>
+                  )}
+                  <option value="rating">Rating (Highest First)</option>
+                  <option value="price">Starting Price (Lowest First)</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Shop Listing Grid */}
-          {filteredShops.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredShops.map((s: any) => {
-                const isClosed = s.status === 'closed' || s.isOpen === false;
-                const shopReviewCount =
-                  safeReviews.filter(
-                    (r: any) =>
-                      (r?.shopId === s?.id || r?.shop_id === s?.id) &&
-                      r?.status !== 'hidden'
-                  ).length ||
-                  s.reviewCount ||
-                  0;
-
-                return (
-                  <div
-                    key={s.id || s.name}
-                    className="neu-flat rounded-[24px] overflow-hidden transition-all duration-300 hover:-translate-y-1 flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="relative h-48 bg-[#1C1718] overflow-hidden">
-                        <SmartImage
-                          src={s.image || ASSETS.royalInterior}
-                          alt={s.name || 'Barber Shop'}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute top-3 right-3 flex items-center gap-1.5">
-                          <span
-                            className={`px-3 py-1 rounded-full text-[11px] font-semibold tracking-wide ${
-                              isClosed
-                                ? 'bg-red-500/90 text-white'
-                                : 'bg-[#5B0E14] text-[#F1E194]'
-                            }`}
-                          >
-                            {isClosed
-                              ? tr('Closed', 'बंद है')
-                              : tr('Open Now', 'खुला है')}
-                          </span>
-                        </div>
-                        {s.verified && (
-                          <div className="absolute bottom-3 left-3">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#1C1718]/90 text-[#F1E194] text-[11px] font-medium backdrop-blur-xs">
-                              <ShieldCheck className="w-3.5 h-3.5" />
-                              {tr('Verified', 'सत्यापित')}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="p-6 space-y-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <h2 className="font-display text-xl font-bold text-[#111113] leading-tight">
-                            {s.name || 'Salon'}
-                          </h2>
-                          <span className="shrink-0 px-2.5 py-1 rounded-lg neu-badge text-xs font-semibold text-[#111113]">
-                            ★ {s.rating || '4.9'} ({shopReviewCount})
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-[#8A8178]">
-                          <MapPin className="w-3.5 h-3.5 text-[#5B0E14] shrink-0" />
-                          <span className="truncate">
-                            {s.address || s.district || 'City Center'}
-                          </span>
-                        </div>
-                        {s.tagline && (
-                          <p className="text-xs text-[#8A8178] line-clamp-2">
-                            {s.tagline}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="p-6 pt-0 flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onSelectShop(s);
-                          window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }}
-                        className="flex-1 py-3 rounded-[16px] neu-btn-burgundy text-xs font-semibold tracking-wider uppercase cursor-pointer"
-                      >
-                        {tr('View Shop', 'सैलून देखें')}
-                      </button>
-                      {!isBarber && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onSelectShop(s);
-                            onNavigate('booking', s);
-                          }}
-                          className="py-3 px-4 rounded-[16px] neu-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
-                        >
-                          {tr('Book', 'बुक करें')}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+          {/* Active View Display: Map View or List View */}
+          {viewMode === 'map' ? (
+            <div className="space-y-4">
+              <ShopMapView
+                shops={filteredShops}
+                customerLocation={customerLocation}
+                onSelectShop={(s) => {
+                  onSelectShop(s);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onOpenDirections={(s) => handleOpenDirections(s)}
+              />
             </div>
           ) : (
-            <div className="max-w-md mx-auto text-center py-16 rounded-[24px] neu-flat p-8 space-y-4">
-              <Store className="w-10 h-10 text-[#5B0E14] mx-auto opacity-75" />
-              <p className="text-sm font-semibold text-[#111113]">
-                {searchQuery
-                  ? tr('No barber shops match your filter', 'फ़िल्टर से कोई सैलून मेल नहीं खाता')
-                  : tr('Connecting to partner salons...', 'पार्टनर सैलून से जुड़ रहे हैं...')}
-              </p>
-              <p className="text-xs text-[#8A8178]">
-                {searchQuery
-                  ? tr(
-                      'Try searching with a different name or clear the search filter.',
-                      'कृपया दूसरा नाम खोजें या फ़िल्टर हटाएँ।'
-                    )
-                  : tr(
-                      'If salons do not load momentarily, return to home or refresh.',
-                      'कृपया प्रतीक्षा करें या होम पेज पर जाएं।'
-                    )}
-              </p>
-              {searchQuery ? (
+            /* Shop Listing Grid (List View) */
+            filteredShops.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredShops.map((s: any) => {
+                  const isClosed = s.status === 'closed' || s.isOpen === false;
+                  const shopReviewCount =
+                    safeReviews.filter(
+                      (r: any) =>
+                        (r?.shopId === s?.id || r?.shop_id === s?.id) &&
+                        r?.status !== 'hidden'
+                    ).length ||
+                    s.reviewCount ||
+                    0;
+
+                  return (
+                    <div
+                      key={s.id || s.name}
+                      className="neu-flat rounded-[24px] overflow-hidden transition-all duration-300 hover:-translate-y-1 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="relative h-48 bg-[#1C1718] overflow-hidden">
+                          <SmartImage
+                            src={s.image || ASSETS.royalInterior}
+                            alt={s.name || 'Barber Shop'}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                            <span
+                              className={`px-3 py-1 rounded-full text-[11px] font-semibold tracking-wide ${
+                                isClosed
+                                  ? 'bg-red-500/90 text-white'
+                                  : 'bg-[#5B0E14] text-[#F1E194]'
+                              }`}
+                            >
+                              {isClosed
+                                ? tr('Closed', 'बंद है')
+                                : tr('Open Now', 'खुला है')}
+                            </span>
+                          </div>
+                          {s.verified && (
+                            <div className="absolute bottom-3 left-3">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#1C1718]/90 text-[#F1E194] text-[11px] font-medium backdrop-blur-xs">
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                {tr('Verified', 'सत्यापित')}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="p-6 space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <h2 className="font-display text-xl font-bold text-[#111113] leading-tight">
+                              {s.name || 'Salon'}
+                            </h2>
+                            <span className="shrink-0 px-2.5 py-1 rounded-lg neu-badge text-xs font-semibold text-[#111113]">
+                              ★ {s.rating || '4.9'} ({shopReviewCount})
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-[#8A8178]">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <MapPin className="w-3.5 h-3.5 text-[#5B0E14] shrink-0" />
+                              <span className="truncate">
+                                {s.address || s.district || 'City Center'}
+                              </span>
+                            </div>
+
+                            {/* Distance Badge: Only shown if coordinates are valid and customer location is selected */}
+                            {s.calculatedDistanceKm !== null && s.hasValidCoords && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#F1E194]/50 text-[#5B0E14] text-[11px] font-semibold">
+                                <Navigation className="w-3 h-3" />
+                                <span>{formatDistance(s.calculatedDistanceKm)}</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {s.tagline && (
+                            <p className="text-xs text-[#8A8178] line-clamp-2">
+                              {s.tagline}
+                            </p>
+                          )}
+
+                          {s.minPrice && (
+                            <div className="pt-2 flex items-center justify-between text-xs border-t border-[#5B0E14]/10">
+                              <span className="text-[#8A8178]">Starting from</span>
+                              <span className="font-bold text-[#5B0E14]">
+                                ₹{s.minPrice}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-6 pt-0 flex flex-col gap-2.5">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectShop(s);
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="flex-1 py-3 rounded-[16px] neu-btn-burgundy text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                          >
+                            {tr('View Shop', 'सैलून देखें')}
+                          </button>
+                          {!isBarber && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectShop(s);
+                                onNavigate('booking', s);
+                              }}
+                              className="py-3 px-4 rounded-[16px] neu-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                            >
+                              {tr('Book', 'बुक करें')}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Direct Get Directions Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDirections(s)}
+                          className="w-full py-2 px-3 rounded-[14px] bg-[#F4EFE6] hover:bg-[#EAE4D7] border border-[#E5DEC9] text-xs font-semibold text-[#5B0E14] flex items-center justify-center gap-1.5 transition"
+                        >
+                          <Navigation className="w-3.5 h-3.5" />
+                          <span>{tr('Get Directions', 'दिशा-निर्देश प्राप्त करें')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="max-w-md mx-auto text-center py-16 rounded-[24px] neu-flat p-8 space-y-4">
+                <Store className="w-10 h-10 text-[#5B0E14] mx-auto opacity-75" />
+                <p className="text-sm font-semibold text-[#111113]">
+                  {searchQuery || filterOpenOnly || selectedCategory !== 'all' || selectedPriceTier !== 'all'
+                    ? tr('No barber shops match your filters', 'फ़िल्टर से कोई सैलून मेल नहीं खाता')
+                    : tr('Connecting to partner salons...', 'पार्टनर सैलून से जुड़ रहे हैं...')}
+                </p>
+                <p className="text-xs text-[#8A8178]">
+                  {searchQuery || filterOpenOnly || selectedCategory !== 'all' || selectedPriceTier !== 'all'
+                    ? tr(
+                        'Try clearing your search query or reset filter options.',
+                        'कृपया दूसरा नाम खोजें या फ़िल्टर हटाएँ।'
+                      )
+                    : tr(
+                        'If salons do not load momentarily, return to home or refresh.',
+                        'कृपया प्रतीक्षा करें या होम पेज पर जाएं।'
+                      )}
+                </p>
                 <button
                   type="button"
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => {
+                    setSearchQuery('');
+                    setFilterOpenOnly(false);
+                    setSelectedCategory('all');
+                    setSelectedPriceTier('all');
+                  }}
                   className="px-5 py-2.5 rounded-[14px] neu-btn-burgundy text-xs font-semibold uppercase cursor-pointer"
                 >
-                  {tr('Clear Search', 'फ़िल्टर हटाएं')}
+                  {tr('Clear All Filters', 'सभी फ़िल्टर हटाएं')}
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onNavigate('home')}
-                  className="px-5 py-2.5 rounded-[14px] neu-btn text-xs font-semibold uppercase cursor-pointer"
-                >
-                  {tr('Back to Home', 'होम पर लौटें')}
-                </button>
-              )}
-            </div>
+              </div>
+            )
           )}
         </div>
+
+        {/* Global Get Directions Modal */}
+        {directionsTargetShop && (
+          <GetDirectionsModal
+            isOpen={directionsModalOpen}
+            onClose={() => {
+              setDirectionsModalOpen(false);
+              setDirectionsTargetShop(null);
+            }}
+            shopName={directionsTargetShop.name}
+            shopAddress={directionsTargetShop.address}
+            shopCity={directionsTargetShop.city || directionsTargetShop.district}
+            shopState={directionsTargetShop.state}
+            shopPinCode={directionsTargetShop.pinCode || directionsTargetShop.pin_code}
+            shopLandmark={directionsTargetShop.landmark}
+            latitude={directionsTargetShop.latitude}
+            longitude={directionsTargetShop.longitude}
+            customerCoords={customerLocation ? { lat: customerLocation.lat, lng: customerLocation.lng } : null}
+          />
+        )}
       </div>
     );
   }
@@ -617,6 +891,18 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 className="px-6 py-3.5 rounded-[16px] neu-dark-btn text-xs font-semibold tracking-wider uppercase cursor-pointer"
               >
                 {tr('VIEW SERVICES', 'सेवाएं देखें')}
+              </button>
+              <button
+                type="button"
+                title={tr('Get Directions', 'दिशा-निर्देश प्राप्त करें')}
+                onClick={() => {
+                  setDirectionsTargetShop(activeShop);
+                  setDirectionsModalOpen(true);
+                }}
+                className="px-5 py-3.5 rounded-[16px] neu-dark-btn text-[#F1E194] text-xs font-semibold tracking-wider uppercase cursor-pointer flex items-center gap-2 hover:bg-[#5B0E14] transition-colors"
+              >
+                <Navigation className="w-4 h-4 text-[#F1E194]" />
+                <span>{tr('GET DIRECTIONS', 'दिशा-निर्देश')}</span>
               </button>
               {isBarber ? (
                 <button
@@ -1084,20 +1370,31 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 </div>
               </div>
 
-              {!isBarber && (
-                <div className="pt-4 border-t border-[#F1E194]/15">
+                <div className="pt-4 border-t border-[#F1E194]/15 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={() => {
-                      if (onSelectShop) onSelectShop(activeShop);
-                      onNavigate('booking', activeShop);
+                      setDirectionsTargetShop(activeShop);
+                      setDirectionsModalOpen(true);
                     }}
-                    className="w-full sm:w-auto px-8 py-3.5 rounded-[16px] neu-dark-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                    className="w-full sm:w-auto px-6 py-3.5 rounded-[16px] neu-dark-btn text-[#F1E194] text-xs font-semibold tracking-wider uppercase cursor-pointer flex items-center justify-center gap-2 hover:bg-[#5B0E14] transition-colors"
                   >
-                    {tr('Book Appointment', 'अपॉइंटमेंट बुक करें')}
+                    <Navigation className="w-4 h-4 text-[#F1E194]" />
+                    <span>{tr('Get Directions to Salon', 'सैलून के लिए दिशा-निर्देश')}</span>
                   </button>
+                  {!isBarber && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onSelectShop) onSelectShop(activeShop);
+                        onNavigate('booking', activeShop);
+                      }}
+                      className="w-full sm:w-auto px-8 py-3.5 rounded-[16px] neu-dark-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                    >
+                      {tr('Book Appointment', 'अपॉइंटमेंट बुक करें')}
+                    </button>
+                  )}
                 </div>
-              )}
             </div>
           )}
 
@@ -1313,6 +1610,26 @@ export const ShopPage: React.FC<ShopPageProps> = ({
         onClose={() => setQrModalOpen(false)}
         platformSettings={platformSettings}
       />
+
+      {/* Get Directions Modal for Active Shop */}
+      {directionsTargetShop && (
+        <GetDirectionsModal
+          isOpen={directionsModalOpen}
+          onClose={() => {
+            setDirectionsModalOpen(false);
+            setDirectionsTargetShop(null);
+          }}
+          shopName={directionsTargetShop.name}
+          shopAddress={directionsTargetShop.address}
+          shopCity={directionsTargetShop.city || directionsTargetShop.district}
+          shopState={directionsTargetShop.state}
+          shopPinCode={directionsTargetShop.pinCode || directionsTargetShop.pin_code}
+          shopLandmark={directionsTargetShop.landmark}
+          latitude={directionsTargetShop.latitude}
+          longitude={directionsTargetShop.longitude}
+          customerCoords={customerLocation ? { lat: customerLocation.lat, lng: customerLocation.lng } : null}
+        />
+      )}
     </div>
   );
 };

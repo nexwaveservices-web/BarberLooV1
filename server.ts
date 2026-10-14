@@ -42,6 +42,53 @@ import {
 } from './src/middleware/auth.ts';
 import { ASSETS } from './src/data/barberlooData.ts';
 
+function validateCoordinates(lat?: any, lng?: any): { valid: boolean; lat?: string; lng?: string; error?: string } {
+  if (lat === undefined && lng === undefined) return { valid: true };
+  if (!lat && !lng) return { valid: true, lat: '', lng: '' };
+  const numLat = parseFloat(lat);
+  const numLng = parseFloat(lng);
+  if (isNaN(numLat) || isNaN(numLng)) {
+    return { valid: false, error: 'Latitude and Longitude must be valid numbers.' };
+  }
+  if (numLat < -90 || numLat > 90) {
+    return { valid: false, error: 'Latitude must be between -90 and 90 degrees.' };
+  }
+  if (numLng < -180 || numLng > 180) {
+    return { valid: false, error: 'Longitude must be between -180 and 180 degrees.' };
+  }
+  return { valid: true, lat: numLat.toFixed(6), lng: numLng.toFixed(6) };
+}
+
+// In-memory geocode cache to avoid repeated external requests
+const geocodeCache = new Map<string, any[]>();
+
+const KNOWN_INDIAN_LOCATIONS: Record<string, { lat: number; lng: number; displayName: string }> = {
+  'ludhiana': { lat: 30.9010, lng: 75.8573, displayName: 'Ludhiana, Punjab, India' },
+  'maha luxmi nagar': { lat: 30.8987, lng: 75.8645, displayName: 'Maha Luxmi Nagar, Ludhiana, Punjab' },
+  'model town ludhiana': { lat: 30.8872, lng: 75.8344, displayName: 'Model Town, Ludhiana, Punjab' },
+  'sarabha nagar': { lat: 30.8824, lng: 75.8115, displayName: 'Sarabha Nagar, Ludhiana, Punjab' },
+  'civil lines ludhiana': { lat: 30.9124, lng: 75.8398, displayName: 'Civil Lines, Ludhiana, Punjab' },
+  'jalandhar': { lat: 31.3260, lng: 75.5762, displayName: 'Jalandhar, Punjab, India' },
+  'model town jalandhar': { lat: 31.3130, lng: 75.5866, displayName: 'Model Town, Jalandhar, Punjab' },
+  'amritsar': { lat: 31.6340, lng: 74.8723, displayName: 'Amritsar, Punjab, India' },
+  'chandigarh': { lat: 30.7333, lng: 76.7794, displayName: 'Chandigarh, India' },
+  'sector 17 chandigarh': { lat: 30.7415, lng: 76.7790, displayName: 'Sector 17, Chandigarh' },
+  'delhi': { lat: 28.6139, lng: 77.2090, displayName: 'New Delhi, Delhi NCR, India' },
+  'connaught place': { lat: 28.6315, lng: 77.2167, displayName: 'Connaught Place, New Delhi' },
+  'gurugram': { lat: 28.4595, lng: 77.0266, displayName: 'Gurugram, Haryana, India' },
+  'bengaluru': { lat: 12.9716, lng: 77.5946, displayName: 'Bengaluru, Karnataka, India' },
+  'mumbai': { lat: 19.0760, lng: 72.8777, displayName: 'Mumbai, Maharashtra, India' },
+  'patiala': { lat: 30.3398, lng: 76.3869, displayName: 'Patiala, Punjab, India' },
+  'bathinda': { lat: 30.2110, lng: 74.9455, displayName: 'Bathinda, Punjab, India' },
+  'mohali': { lat: 30.7046, lng: 76.7179, displayName: 'Mohali, Punjab, India' },
+  '141001': { lat: 30.9010, lng: 75.8573, displayName: 'PIN 141001 - Ludhiana Central, Punjab' },
+  '141008': { lat: 30.8987, lng: 75.8645, displayName: 'PIN 141008 - Maha Luxmi Nagar / Shivpuri, Ludhiana, Punjab' },
+  '144001': { lat: 31.3260, lng: 75.5762, displayName: 'PIN 144001 - Jalandhar City, Punjab' },
+  '144003': { lat: 31.3130, lng: 75.5866, displayName: 'PIN 144003 - Model Town, Jalandhar, Punjab' },
+  '160017': { lat: 30.7415, lng: 76.7790, displayName: 'PIN 160017 - Sector 17, Chandigarh' },
+  '110001': { lat: 28.6315, lng: 77.2167, displayName: 'PIN 110001 - Connaught Place, New Delhi' },
+};
+
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
@@ -295,6 +342,105 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to fetch cities' });
     }
+  });
+
+  // 1c. Safe Geocoding Proxy with Memory Cache & Offline Fallbacks
+  app.get('/api/geocode/search', async (req, res) => {
+    const rawQuery = String(req.query.q || '').trim();
+    if (!rawQuery || rawQuery.length < 2) {
+      return res.json([]);
+    }
+
+    const normQuery = rawQuery.toLowerCase();
+    if (geocodeCache.has(normQuery)) {
+      return res.json(geocodeCache.get(normQuery));
+    }
+
+    // Check direct known dictionary matches first
+    const directMatches: any[] = [];
+    for (const [key, loc] of Object.entries(KNOWN_INDIAN_LOCATIONS)) {
+      if (normQuery === key || key.includes(normQuery) || normQuery.includes(key)) {
+        directMatches.push({
+          displayName: loc.displayName,
+          lat: loc.lat,
+          lng: loc.lng,
+          source: 'barberloo_index',
+        });
+      }
+    }
+
+    if (directMatches.length > 0) {
+      geocodeCache.set(normQuery, directMatches);
+      return res.json(directMatches);
+    }
+
+    // Query OpenStreetMap Nominatim with safe timeout
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+      const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=in&limit=5&q=${encodeURIComponent(
+        rawQuery
+      )}`;
+
+      const response = await fetch(nominatimUrl, {
+        headers: {
+          'User-Agent': 'BarberLoo-Navigation/1.0 (info@barberloo.in)',
+          'Accept': 'application/json',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const results = data.map((item: any) => ({
+            displayName: item.display_name,
+            lat: parseFloat(item.lat),
+            lng: parseFloat(item.lon),
+            city: item.address?.city || item.address?.town || item.address?.village || item.address?.suburb || '',
+            state: item.address?.state || '',
+            pinCode: item.address?.postcode || '',
+            source: 'osm_nominatim',
+          }));
+
+          geocodeCache.set(normQuery, results);
+          return res.json(results);
+        }
+      }
+    } catch {
+      // Offline or rate-limited: Fallback to best known matches or cities in database
+    }
+
+    // Fallback: search in database cities
+    try {
+      const allDbCities = await db.select().from(cities);
+      const matchedDbCity = allDbCities.find((c) =>
+        c.name.toLowerCase().includes(normQuery) || normQuery.includes(c.name.toLowerCase())
+      );
+      if (matchedDbCity) {
+        const cityKey = matchedDbCity.name.toLowerCase();
+        const known = KNOWN_INDIAN_LOCATIONS[cityKey];
+        if (known) {
+          const fallback = [{
+            displayName: `${matchedDbCity.name}, India`,
+            lat: known.lat,
+            lng: known.lng,
+            city: matchedDbCity.name,
+            source: 'db_fallback',
+          }];
+          geocodeCache.set(normQuery, fallback);
+          return res.json(fallback);
+        }
+      }
+    } catch {
+      // Ignore db error
+    }
+
+    // Return empty results gracefully
+    geocodeCache.set(normQuery, []);
+    res.json([]);
   });
 
   // 2. Auth & Profile Synchronization (Requires Verified Session)
@@ -952,6 +1098,11 @@ async function startServer() {
   // 8. Shops Management (Ownership Enforced)
   app.post('/api/shops', requireAuth, async (req: AuthRequest, res) => {
     try {
+      const coordCheck = validateCoordinates(req.body.latitude, req.body.longitude);
+      if (!coordCheck.valid) {
+        return res.status(400).json({ error: coordCheck.error });
+      }
+
       const id = `shop-${Date.now()}`;
       const [created] = await db
         .insert(shops)
@@ -985,6 +1136,10 @@ async function startServer() {
             req.body.about ||
             'Verified partner barbershop on the BarberLoo network.',
           qrCodeSlug: id,
+          latitude: coordCheck.lat !== undefined ? coordCheck.lat : '',
+          longitude: coordCheck.lng !== undefined ? coordCheck.lng : '',
+          pinCode: req.body.pinCode || req.body.pin_code || '',
+          landmark: req.body.landmark || '',
         })
         .returning();
 
@@ -1013,6 +1168,13 @@ async function startServer() {
         });
       }
 
+      if (req.body.latitude !== undefined || req.body.longitude !== undefined) {
+        const check = validateCoordinates(req.body.latitude, req.body.longitude);
+        if (!check.valid) {
+          return res.status(400).json({ error: check.error });
+        }
+      }
+
       const updateData: Record<string, unknown> = {};
       for (const k of [
         'name',
@@ -1031,10 +1193,17 @@ async function startServer() {
         'minPrice',
         'image',
         'logoUrl',
+        'latitude',
+        'longitude',
+        'pinCode',
+        'landmark',
       ]) {
         if (req.body[k] !== undefined) {
           updateData[k] = req.body[k];
         }
+      }
+      if (req.body.pin_code !== undefined && req.body.pinCode === undefined) {
+        updateData.pinCode = req.body.pin_code;
       }
 
       // Only admins can alter verified or approvalStatus

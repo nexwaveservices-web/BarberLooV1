@@ -471,6 +471,10 @@ export async function getBootstrapState(
     about: sh.about,
     qrCodeSlug: sh.qrCodeSlug,
     qrCodeUrl: `${runtimeCustomDomain}/booking.html?shop_id=${encodeURIComponent(sh.id)}`,
+    latitude: sh.latitude || '',
+    longitude: sh.longitude || '',
+    pinCode: sh.pinCode || '',
+    landmark: sh.landmark || '',
   }));
 
   // Role-based data privacy filtering for appointments
