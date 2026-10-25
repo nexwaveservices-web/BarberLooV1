@@ -6,7 +6,7 @@ import {
   broadcastSupabaseEvent,
   connectSupabaseRealtime,
 } from './supabase';
-import { ASSETS, OPENING_HOURS } from '../data/barberlooData';
+import { ASSETS } from '../data/barberlooData';
 import { DEFAULT_STATES, DEFAULT_CITIES } from './locations';
 import { getShopQrDestinationUrl } from './domain';
 
@@ -25,6 +25,7 @@ async function safeBackendRequest<T>(
     }
 
     const response = await fetch(path, {
+      credentials: 'same-origin',
       ...options,
       headers,
     });
@@ -431,7 +432,7 @@ export const apiFetchBootstrap = async (uid = '') => {
     reports: mergeById(supaData.reports, backendData?.reports),
     favorites: mergeById(supaData.favorites, backendData?.favorites),
     notifications: mergeById(supaData.notifications, backendData?.notifications),
-    workingHours: mergedWorkingHours.length ? mergedWorkingHours : OPENING_HOURS,
+    workingHours: mergedWorkingHours,
     shopGallery: mergeById(supaData.shopGallery, backendData?.shopGallery),
     barberGallery: mergeById(supaData.barberGallery, backendData?.barberGallery),
     platformSettings: backendData?.platformSettings || {
@@ -1202,7 +1203,6 @@ export const apiUpdateWorkingHours = async (id: string, updates: any) => {
       .eq('id', id)
       .maybeSingle();
 
-    const defaultDay = OPENING_HOURS.find((d) => d.id === id);
     const record = {
       id,
       shop_id: updates.shopId || existing?.shop_id || '',
@@ -1210,12 +1210,11 @@ export const apiUpdateWorkingHours = async (id: string, updates: any) => {
       day_of_week:
         updates.dayOfWeek ||
         existing?.day_of_week ||
-        defaultDay?.day ||
         'Monday',
       day_order:
         updates.dayOrder ??
         existing?.day_order ??
-        (OPENING_HOURS.findIndex((d) => d.id === id) + 1 || 1),
+        1,
       start_time: updates.startTime ?? existing?.start_time ?? '09:30',
       end_time: updates.endTime ?? existing?.end_time ?? '21:30',
       break_start: updates.breakStart ?? existing?.break_start ?? '14:00',
@@ -1698,4 +1697,136 @@ export async function apiVerifyRazorpayPayment(payload: {
   // Client fallback
   return { verified: true, paymentId: payload.razorpay_payment_id };
 }
+
+// ----------------------------------------------------------------------------
+// OTP Verification & Barber Payout Release APIs
+// ----------------------------------------------------------------------------
+
+export async function apiVerifyCompletionOtp(appointmentId: string, otp: string) {
+  const token = await getAuthToken();
+  const res = await fetch(`/api/appointments/${appointmentId}/verify-completion-otp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ otp }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to verify completion OTP.');
+  }
+  return data;
+}
+
+export async function apiRegenerateCompletionOtp(appointmentId: string) {
+  const token = await getAuthToken();
+  const res = await fetch(`/api/appointments/${appointmentId}/regenerate-completion-otp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to regenerate OTP.');
+  }
+  return data;
+}
+
+export async function apiGetCompletionOtp(appointmentId: string) {
+  const token = await getAuthToken();
+  const res = await fetch(`/api/appointments/${appointmentId}/completion-otp`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to fetch OTP.');
+  }
+  return data;
+}
+
+export async function apiGetAdminFinancialOverview() {
+  const token = await getAuthToken();
+  const res = await fetch('/api/admin/financial-overview', {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch financial overview.');
+  return data;
+}
+
+export async function apiGetAdminFinancialLedger() {
+  const token = await getAuthToken();
+  const res = await fetch('/api/admin/financial-ledger', {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch financial ledger.');
+  return data;
+}
+
+export async function apiGetAdminPayouts() {
+  const token = await getAuthToken();
+  const res = await fetch('/api/admin/payouts', {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch payouts.');
+  return data;
+}
+
+export async function apiTogglePayoutHold(payoutId: string, hold: boolean, reason?: string) {
+  const token = await getAuthToken();
+  const res = await fetch(`/api/payouts/${payoutId}/hold`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ hold, reason }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to update payout hold.');
+  return data;
+}
+
+export async function apiRetryPayout(payoutId: string) {
+  const token = await getAuthToken();
+  const res = await fetch(`/api/payouts/${payoutId}/retry`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to retry payout.');
+  return data;
+}
+
+export async function apiProcessRefund(appointmentId: string, reason: string) {
+  const token = await getAuthToken();
+  const res = await fetch(`/api/appointments/${appointmentId}/refund`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ reason }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to process refund.');
+  return data;
+}
+
 

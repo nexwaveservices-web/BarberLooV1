@@ -22,6 +22,8 @@ import {
   reports,
   appointments,
   platformSettings,
+  barberPayouts,
+  financialLedger,
 } from './src/db/schema.ts';
 import {
   getOrCreateUser,
@@ -32,7 +34,17 @@ import {
   getPlatformSettings,
   updatePlatformSettingsInDb,
   calculateServerBookingPrice,
+  verifyAndCompleteAppointmentInDb,
+  regenerateCustomerCompletionOtp,
+  toggleAdminPayoutHold,
+  processAppointmentRefund,
 } from './src/db/users.ts';
+import { decryptCompletionOtp } from './src/lib/payoutOtp.ts';
+import {
+  executeBarberPayoutTransfer,
+  confirmBarberPayoutSettlement,
+  postLedgerTransaction,
+} from './src/lib/ledgerEngine.ts';
 import {
   requireAuth,
   requireBarberOrAdmin,
@@ -473,7 +485,53 @@ async function startServer() {
     }
   });
 
-  // 3. Update Profile / User Management (Ownership or Admin Authorization Required)
+  // 3a. Get Current Authenticated Session & Profile (/api/auth/me)
+  app.get('/api/auth/me', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const [prof] = await db
+        .select()
+        .from(profiles)
+        .where(eq(profiles.uid, req.user!.uid))
+        .limit(1);
+
+      res.json({
+        user: req.user,
+        profile: prof || null,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to verify session' });
+    }
+  });
+
+  // 3b. Get User Profile (Ownership or Admin Authorization Required)
+  app.get('/api/profiles/:uid', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const { uid } = req.params;
+      const requester = req.user!;
+
+      if (requester.uid !== uid && requester.role !== 'admin') {
+        return res.status(403).json({
+          error: 'Forbidden: You do not have permission to view another user profile.',
+        });
+      }
+
+      const [prof] = await db
+        .select()
+        .from(profiles)
+        .where(eq(profiles.uid, uid))
+        .limit(1);
+
+      if (!prof) {
+        return res.status(404).json({ error: 'Profile not found' });
+      }
+
+      res.json(prof);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to fetch profile' });
+    }
+  });
+
+  // 3c. Update Profile / User Management (Ownership or Admin Authorization Required)
   app.patch('/api/profiles/:uid', requireAuth, async (req: AuthRequest, res) => {
     try {
       const { uid } = req.params;
@@ -630,7 +688,7 @@ async function startServer() {
     }
   });
 
-  // 5. Update / Reschedule / Cancel / Complete Appointment
+  // 5. Update Appointment Status / Reschedule / Cancel / Notes (Auth Required)
   app.patch(
     '/api/appointments/:id',
     requireAuth,
@@ -653,6 +711,355 @@ async function startServer() {
       }
     }
   );
+
+  // 5b. Customer Completion OTP Retrieval (Authenticated Customer Only)
+  app.get(
+    '/api/appointments/:id/completion-otp',
+    requireAuth,
+    async (req: AuthRequest, res) => {
+      try {
+        const [apt] = await db
+          .select()
+          .from(appointments)
+          .where(eq(appointments.id, req.params.id));
+
+        if (!apt) {
+          return res.status(404).json({ error: 'Appointment not found.' });
+        }
+
+        // Strictly verify customer identity (Barbers and Admins are NOT allowed to view customer OTP secret)
+        const isCustomer = apt.customerUid === req.user!.uid;
+
+        if (!isCustomer) {
+          return res.status(403).json({
+            error: 'Forbidden: Completion OTP secrets are strictly confidential to the customer only.',
+          });
+        }
+
+        if (apt.status === 'completed') {
+          return res.json({
+            appointmentId: apt.id,
+            status: 'consumed',
+            message: 'Appointment is already completed and OTP verified.',
+          });
+        }
+
+        if (apt.status === 'cancelled') {
+          return res.status(400).json({
+            error: 'Cannot retrieve OTP for a cancelled appointment.',
+          });
+        }
+
+        const rawOtp = apt.completionOtpCipher
+          ? decryptCompletionOtp(apt.completionOtpCipher)
+          : null;
+
+        res.json({
+          appointmentId: apt.id,
+          completionOtp: rawOtp,
+          status: apt.completionOtpStatus || 'active',
+          expiresAt: apt.completionOtpExpiresAt,
+          attempts: apt.completionOtpAttempts || 0,
+          maxAttempts: apt.completionOtpMaxAttempts || 5,
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to retrieve OTP' });
+      }
+    }
+  );
+
+  // 5c. Customer Completion OTP Regeneration (Authenticated Customer Only)
+  app.post(
+    '/api/appointments/:id/regenerate-completion-otp',
+    requireAuth,
+    async (req: AuthRequest, res) => {
+      try {
+        const result = await regenerateCustomerCompletionOtp(
+          req.params.id,
+          req.user!.uid
+        );
+        broadcastEvent('state:updated', {
+          entity: 'appointments',
+          appointmentId: req.params.id,
+        });
+        res.json(result);
+      } catch (err: any) {
+        res.status(400).json({ error: err.message || 'Failed to regenerate OTP' });
+      }
+    }
+  );
+
+  // 5d. Barber Completion Verification (Authorized Barber / Admin Only)
+  app.post(
+    '/api/appointments/:id/verify-completion-otp',
+    requireBarberOrAdmin,
+    async (req: AuthRequest, res) => {
+      try {
+        const otp = String(req.body.otp || '').trim();
+        if (!otp) {
+          return res.status(400).json({ error: 'Please enter the 6-digit completion OTP supplied by the customer.' });
+        }
+
+        const result = await verifyAndCompleteAppointmentInDb(
+          req.params.id,
+          otp,
+          req.user!
+        );
+
+        broadcastEvent('state:updated', {
+          entity: 'appointments',
+          appointment: result.appointment,
+        });
+        broadcastEvent('state:updated', {
+          entity: 'payouts',
+          payout: result.payout,
+        });
+
+        res.json({
+          success: true,
+          message: 'OTP verified successfully. Appointment completed and barber payout initiated.',
+          appointment: result.appointment,
+          payout: result.payout,
+          transferId: result.transferId,
+        });
+      } catch (err: any) {
+        res.status(400).json({ error: err.message || 'OTP verification failed' });
+      }
+    }
+  );
+
+  // 5e. Admin Payout Hold / Release
+  app.post(
+    '/api/payouts/:id/hold',
+    requireAdmin,
+    async (req: AuthRequest, res) => {
+      try {
+        const hold = Boolean(req.body.hold);
+        const reason = String(req.body.reason || '').trim();
+        const appointmentId = req.params.id.replace(/^payout-/, '');
+
+        const result = await toggleAdminPayoutHold(
+          appointmentId,
+          req.user!,
+          hold,
+          reason
+        );
+
+        broadcastEvent('state:updated', {
+          entity: 'payouts',
+          appointmentId,
+        });
+        res.json(result);
+      } catch (err: any) {
+        res.status(400).json({ error: err.message || 'Failed to update payout hold' });
+      }
+    }
+  );
+
+  // 5f. Retry Failed Payout
+  app.post(
+    '/api/payouts/:id/retry',
+    requireBarberOrAdmin,
+    async (req: AuthRequest, res) => {
+      try {
+        const payoutId = req.params.id.startsWith('payout-') ? req.params.id : `payout-${req.params.id}`;
+        const result = await executeBarberPayoutTransfer(db, payoutId, {
+          forcedRetry: true,
+        });
+        broadcastEvent('state:updated', {
+          entity: 'payouts',
+          payout: result.payout,
+        });
+        res.json(result);
+      } catch (err: any) {
+        res.status(400).json({ error: err.message || 'Failed to retry payout' });
+      }
+    }
+  );
+
+  // 5g. Confirm Payout Bank Settlement
+  app.post(
+    '/api/payouts/:id/settle',
+    requireAdmin,
+    async (req: AuthRequest, res) => {
+      try {
+        const payoutId = req.params.id.startsWith('payout-') ? req.params.id : `payout-${req.params.id}`;
+        const result = await confirmBarberPayoutSettlement(
+          db,
+          payoutId,
+          req.body.settlementRef
+        );
+        broadcastEvent('state:updated', {
+          entity: 'payouts',
+          payout: result.payout,
+        });
+        res.json(result);
+      } catch (err: any) {
+        res.status(400).json({ error: err.message || 'Failed to settle payout' });
+      }
+    }
+  );
+
+  // 5h. Admin Appointment Refund & Reversal
+  app.post(
+    '/api/appointments/:id/refund',
+    requireAdmin,
+    async (req: AuthRequest, res) => {
+      try {
+        const reason = String(req.body.reason || 'Customer refund authorized').trim();
+        const result = await processAppointmentRefund(
+          req.params.id,
+          req.user!,
+          reason
+        );
+        broadcastEvent('state:updated', {
+          entity: 'appointments',
+          appointment: result.appointment,
+        });
+        res.json(result);
+      } catch (err: any) {
+        res.status(400).json({ error: err.message || 'Failed to process refund' });
+      }
+    }
+  );
+
+  // 5i. Admin Financial Overview (Balances, Escrow, and Reconciliation)
+  app.get(
+    '/api/admin/financial-overview',
+    requireAdmin,
+    async (_req: AuthRequest, res) => {
+      try {
+        const allLedger = await db.select().from(financialLedger);
+        let totalDebits = 0;
+        let totalCredits = 0;
+
+        let customerEscrow = 0;
+        let platformFeeRevenue = 0;
+        let pendingPayables = 0;
+        let payoutsInTransit = 0;
+        let settledPayouts = 0;
+        let refundsPaid = 0;
+
+        for (const entry of allLedger) {
+          const amt = entry.amount;
+          if (entry.entryType === 'DEBIT') totalDebits += amt;
+          if (entry.entryType === 'CREDIT') totalCredits += amt;
+
+          if (entry.account === 'customer_funds_escrow') {
+            customerEscrow += entry.entryType === 'DEBIT' ? amt : -amt;
+          } else if (entry.account === 'platform_fee_revenue') {
+            platformFeeRevenue += entry.entryType === 'CREDIT' ? amt : -amt;
+          } else if (entry.account === 'barber_payable_pending') {
+            pendingPayables += entry.entryType === 'CREDIT' ? amt : -amt;
+          } else if (entry.account === 'barber_payout_in_transit') {
+            payoutsInTransit += entry.entryType === 'CREDIT' ? amt : -amt;
+          } else if (entry.account === 'barber_payout_settled') {
+            settledPayouts += entry.entryType === 'CREDIT' ? amt : 0;
+          } else if (entry.account === 'refunds_payable') {
+            refundsPaid += amt;
+          }
+        }
+
+        const allPayouts = await db.select().from(barberPayouts);
+
+        res.json({
+          isBalanced: totalDebits === totalCredits,
+          totalDebits,
+          totalCredits,
+          totalLedgerEntries: allLedger.length,
+          accounts: {
+            customerEscrow: Math.max(0, customerEscrow),
+            platformFeeRevenue: Math.max(0, platformFeeRevenue),
+            pendingPayables: Math.max(0, pendingPayables),
+            payoutsInTransit: Math.max(0, payoutsInTransit),
+            settledPayouts: Math.max(0, settledPayouts),
+            refundsPaid,
+          },
+          payoutCounts: {
+            total: allPayouts.length,
+            pendingVerification: allPayouts.filter((p) => p.status === 'pending_verification').length,
+            initiated: allPayouts.filter((p) => p.status === 'initiated').length,
+            settled: allPayouts.filter((p) => p.status === 'settled').length,
+            onHold: allPayouts.filter((p) => p.status === 'on_hold').length,
+            failed: allPayouts.filter((p) => p.status === 'failed').length,
+            reversed: allPayouts.filter((p) => p.status === 'reversed').length,
+          },
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to load financial overview' });
+      }
+    }
+  );
+
+  // 5j. Admin Financial Ledger View
+  app.get(
+    '/api/admin/financial-ledger',
+    requireAdmin,
+    async (_req: AuthRequest, res) => {
+      try {
+        const entries = await db
+          .select()
+          .from(financialLedger)
+          .orderBy(financialLedger.entryNumber);
+
+        res.json({
+          count: entries.length,
+          entries,
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to fetch financial ledger' });
+      }
+    }
+  );
+
+  // 5k. Admin Payouts List
+  app.get(
+    '/api/admin/payouts',
+    requireAdmin,
+    async (_req: AuthRequest, res) => {
+      try {
+        const payoutsList = await db
+          .select()
+          .from(barberPayouts)
+          .orderBy(barberPayouts.createdAt);
+
+        res.json(payoutsList);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to fetch payouts' });
+      }
+    }
+  );
+
+  // 5l. Razorpay Webhook Endpoint
+  app.post('/api/webhooks/razorpay', async (req, res) => {
+    try {
+      const event = req.body?.event;
+      const payload = req.body?.payload;
+
+      if (!event || !payload) {
+        return res.status(400).json({ error: 'Invalid webhook payload' });
+      }
+
+      // Handle payout / transfer settlement event
+      if (event === 'payout.processed' || event === 'transfer.processed') {
+        const transferId = payload.transfer?.entity?.id || payload.payout?.entity?.id;
+        if (transferId) {
+          const [payout] = await db
+            .select()
+            .from(barberPayouts)
+            .where(eq(barberPayouts.providerTransferId, transferId));
+
+          if (payout && payout.status !== 'settled') {
+            await confirmBarberPayoutSettlement(db, payout.id, transferId);
+          }
+        }
+      }
+
+      res.json({ status: 'ok', received: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Webhook processing error' });
+    }
+  });
 
   // 6. Services CRUD (Barber / Shop Owner / Admin with Ownership Enforcement)
   app.post('/api/services', requireBarberOrAdmin, async (req: AuthRequest, res) => {
@@ -1231,11 +1638,13 @@ async function startServer() {
       const cleanId = (req.params.id || '').trim();
       if (!cleanId) return res.status(400).json({ error: 'Shop ID required' });
 
-      let [shopRecord] = await db
-        .select()
-        .from(shops)
-        .where(or(eq(shops.id, cleanId), eq(shops.qrCodeSlug, cleanId)))
-        .limit(1);
+      let shopRecord: any = (
+        await db
+          .select()
+          .from(shops)
+          .where(or(eq(shops.id, cleanId), eq(shops.qrCodeSlug, cleanId)))
+          .limit(1)
+      )[0];
 
       if (!shopRecord) {
         // Fallback: match by slugified name or case-insensitive

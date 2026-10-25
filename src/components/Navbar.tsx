@@ -200,6 +200,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             name: supaUser.name,
             phone: supaUser.phone,
             role: supaUser.role,
+            token: supaUser.token,
             stateId: selectedStateId,
             cityId: cityObj.id,
             state: stateObj?.name || 'Punjab',
@@ -215,6 +216,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             name: supaUser.name,
             phone: supaUser.phone,
             role: supaUser.role,
+            token: supaUser.token,
           });
         }
       }
@@ -486,6 +488,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {tr('Sign In / Create Account', 'साइन इन / नया खाता बनाएं')}
                 </button>
               )}
+            </div>
+
+            <div className="pt-2 flex items-center justify-center gap-4 text-[11px] text-[#8A8178] border-t border-[#8A8178]/15">
+              <button
+                type="button"
+                onClick={() => handleSelectPage('privacy-policy')}
+                className="hover:text-[#F1E194] transition-colors cursor-pointer"
+              >
+                {tr('Privacy Policy', 'गोपनीयता नीति')}
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => handleSelectPage('terms-of-service')}
+                className="hover:text-[#F1E194] transition-colors cursor-pointer"
+              >
+                {tr('Terms of Service', 'सेवा की शर्तें')}
+              </button>
             </div>
           </div>
         )}

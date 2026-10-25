@@ -6,10 +6,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   BarberItem,
-  INITIAL_BARBERS,
-  INITIAL_SERVICES,
-  INITIAL_SHOPS,
-  OPENING_HOURS,
   PageView,
   ServiceItem,
   ShopItem,
@@ -22,6 +18,9 @@ import { BookingPage } from './components/BookingPage';
 import { CustomerDashboard } from './components/CustomerDashboard';
 import { BarberDashboard } from './components/BarberDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
+import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
+import { TermsOfServicePage } from './components/TermsOfServicePage';
+import { EasyBar } from './components/EasyBar';
 import { Footer } from './components/Footer';
 import {
   apiFetchBootstrap,
@@ -56,6 +55,7 @@ import {
 import {
   supabase,
   getPersistedSupabaseUser,
+  setPersistedSupabaseUser,
 } from './lib/supabase';
 import { LanguageProvider } from './lib/i18n';
 import { getShopSlug, findShopBySlugOrId } from './lib/domain';
@@ -75,9 +75,9 @@ export default function App() {
   const [currentUserProfile, setCurrentUserProfile] = useState<any | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
 
-  const [shops, setShops] = useState<any[]>(INITIAL_SHOPS);
-  const [barbers, setBarbers] = useState<any[]>(INITIAL_BARBERS);
-  const [services, setServices] = useState<any[]>(INITIAL_SERVICES);
+  const [shops, setShops] = useState<any[]>([]);
+  const [barbers, setBarbers] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
   const [selectedShop, setSelectedShop] = useState<ShopItem | null>(null);
   const [bookingService, setBookingService] = useState<ServiceItem | null>(null);
   const [bookingBarber, setBookingBarber] = useState<BarberItem | null>(null);
@@ -85,7 +85,7 @@ export default function App() {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
-  const [workingHours, setWorkingHours] = useState<any[]>(OPENING_HOURS);
+  const [workingHours, setWorkingHours] = useState<any[]>([]);
   const [shopGallery, setShopGallery] = useState<any[]>([]);
   const [barberGallery, setBarberGallery] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -289,6 +289,28 @@ export default function App() {
         return;
       }
 
+      // 7b. Legal Pages: Privacy Policy & Terms of Service
+      if (
+        pathname === '/privacy-policy' ||
+        pathname === '/privacy-policy/' ||
+        pathname === '/privacy' ||
+        params.get('page') === 'privacy-policy' ||
+        params.get('page') === 'privacy'
+      ) {
+        setCurrentPage('privacy-policy');
+        return;
+      }
+      if (
+        pathname === '/terms-of-service' ||
+        pathname === '/terms-of-service/' ||
+        pathname === '/terms' ||
+        params.get('page') === 'terms-of-service' ||
+        params.get('page') === 'terms'
+      ) {
+        setCurrentPage('terms-of-service');
+        return;
+      }
+
       // 8. Homepage default
       if (pathname === '/' || pathname === '' || params.get('page') === 'home') {
         setCurrentPage('home');
@@ -347,10 +369,11 @@ export default function App() {
   }, [activeUserUid, loadBootstrapState]);
 
   useEffect(() => {
-    // 1. Restore persisted Supabase user or active Supabase Auth session
+    // 1. Immediately restore session from dual storage (localStorage + Cookies) to prevent any UI flicker
     const persisted = getPersistedSupabaseUser();
     if (persisted && persisted.uid && persisted.email) {
       setActiveUserUid(persisted.uid);
+      setCurrentUserProfile(persisted);
       apiSyncAuthUser({
         uid: persisted.uid,
         email: persisted.email,
@@ -361,54 +384,99 @@ export default function App() {
         .then((synced) => {
           if (synced?.profile) {
             setCurrentUserProfile(synced.profile);
+            setPersistedSupabaseUser(
+              {
+                ...persisted,
+                ...synced.profile,
+              },
+              persisted.token
+            );
           }
         })
         .catch(() => {
           // ignore transient sync error
         });
-    } else {
-      supabase.auth.getSession().then(({ data }) => {
-        const supaUser = data?.session?.user;
+    }
+
+    // 2. Validate session with Supabase Auth server
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) {
+        console.warn('[Supabase Auth] Session check notice:', error.message);
+      }
+      const supaUser = data?.session?.user;
+      const accessToken = data?.session?.access_token;
+      if (supaUser && supaUser.email) {
+        const sessionPayload = {
+          uid: supaUser.id,
+          email: supaUser.email,
+          name:
+            supaUser.user_metadata?.full_name ||
+            supaUser.email.split('@')[0],
+          role: supaUser.user_metadata?.role || 'customer',
+          phone: supaUser.user_metadata?.phone || '',
+          token: accessToken,
+        };
+        setActiveUserUid(supaUser.id);
+        setPersistedSupabaseUser(sessionPayload, accessToken);
+
+        apiSyncAuthUser(sessionPayload)
+          .then((synced) => {
+            if (synced?.profile) {
+              setCurrentUserProfile(synced.profile);
+              setPersistedSupabaseUser(
+                {
+                  ...sessionPayload,
+                  ...synced.profile,
+                },
+                accessToken
+              );
+            }
+          })
+          .catch(() => {});
+      } else if (!persisted) {
+        // No session found anywhere
+        setActiveUserUid('');
+        setCurrentUserProfile(null);
+      }
+    });
+
+    // 3. Listen to all Supabase Auth lifecycle events (Login, Refresh, Logout, Token Rotation)
+    const { data: supaAuthListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          setActiveUserUid('');
+          setCurrentUserProfile(null);
+          setPersistedSupabaseUser(null);
+          return;
+        }
+
+        const supaUser = session?.user;
+        const accessToken = session?.access_token;
         if (supaUser && supaUser.email) {
-          apiSyncAuthUser({
+          const sessionPayload = {
             uid: supaUser.id,
             email: supaUser.email,
             name:
               supaUser.user_metadata?.full_name ||
               supaUser.email.split('@')[0],
-            role: supaUser.user_metadata?.role,
-            phone: supaUser.user_metadata?.phone,
-          })
-            .then((synced) => {
-              setActiveUserUid(supaUser.id);
-              if (synced?.profile) {
-                setCurrentUserProfile(synced.profile);
-              }
-            })
-            .catch(() => {
-              // ignore transient sync error
-            });
-        }
-      });
-    }
+            role: supaUser.user_metadata?.role || 'customer',
+            phone: supaUser.user_metadata?.phone || '',
+            token: accessToken,
+          };
+          setActiveUserUid(supaUser.id);
+          setPersistedSupabaseUser(sessionPayload, accessToken);
 
-    const { data: supaAuthListener } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        const supaUser = session?.user;
-        if (supaUser && supaUser.email) {
           try {
-            const synced = await apiSyncAuthUser({
-              uid: supaUser.id,
-              email: supaUser.email,
-              name:
-                supaUser.user_metadata?.full_name ||
-                supaUser.email.split('@')[0],
-              role: supaUser.user_metadata?.role,
-              phone: supaUser.user_metadata?.phone,
-            });
-            setActiveUserUid(supaUser.id);
+            const synced = await apiSyncAuthUser(sessionPayload);
             if (synced?.profile) {
               setCurrentUserProfile(synced.profile);
+              setPersistedSupabaseUser(
+                {
+                  ...sessionPayload,
+                  ...synced.profile,
+                },
+                accessToken
+              );
             }
           } catch {
             // ignore transient sync error
@@ -436,9 +504,13 @@ export default function App() {
     if (!userPayload) {
       setActiveUserUid('');
       setCurrentUserProfile(null);
+      setPersistedSupabaseUser(null);
       return;
     }
     try {
+      setPersistedSupabaseUser(userPayload, userPayload.token);
+      setActiveUserUid(userPayload.uid);
+      setCurrentUserProfile(userPayload);
       const synced = await apiSyncAuthUser({
         uid: userPayload.uid,
         email: userPayload.email,
@@ -447,9 +519,12 @@ export default function App() {
         phone: userPayload.phone,
       });
       const profile = synced?.profile;
-      setActiveUserUid(userPayload.uid);
       if (profile) {
         setCurrentUserProfile(profile);
+        setPersistedSupabaseUser(
+          { ...userPayload, ...profile },
+          userPayload.token
+        );
         await loadBootstrapState(userPayload.uid);
 
         const isCurrentlyInBooking =
@@ -745,6 +820,13 @@ export default function App() {
       }
     } else if (page === 'booking') {
       const target = targetShop || selectedShop;
+      if (targetShop) {
+        let resolved = targetShop;
+        if (typeof targetShop === 'string') {
+          resolved = findShopBySlugOrId(shops, targetShop) || { id: targetShop };
+        }
+        setSelectedShop(resolved);
+      }
       const slug = getShopSlug(target);
       const url = slug
         ? `/book-appointment/?shop=${encodeURIComponent(slug)}`
@@ -760,6 +842,10 @@ export default function App() {
       window.history.pushState({}, '', '/barber/dashboard/');
     } else if (page === 'admin-dashboard') {
       window.history.pushState({}, '', '/admin-dashboard/');
+    } else if (page === 'privacy-policy') {
+      window.history.pushState({}, '', '/privacy-policy');
+    } else if (page === 'terms-of-service') {
+      window.history.pushState({}, '', '/terms-of-service');
     }
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -968,9 +1054,28 @@ export default function App() {
                 'The Platform Admin Console is restricted exclusively to authorized administrators.'
               )
             ))}
+
+          {currentPage === 'privacy-policy' && (
+            <PrivacyPolicyPage onNavigate={handleNavigate} />
+          )}
+
+          {currentPage === 'terms-of-service' && (
+            <TermsOfServicePage onNavigate={handleNavigate} />
+          )}
         </main>
 
-        <Footer onNavigate={setCurrentPage} />
+        <EasyBar
+          onNavigate={handleNavigate}
+          currentPage={currentPage}
+          activeUserUid={activeUserUid}
+          hasActiveAppointments={appointments.some(
+            (a) =>
+              a.customerUid === activeUserUid &&
+              (a.status === 'confirmed' || a.status === 'in_progress')
+          )}
+        />
+
+        <Footer onNavigate={handleNavigate} />
       </div>
     </LanguageProvider>
   );

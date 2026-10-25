@@ -20,6 +20,7 @@ import {
   RotateCcw,
   Settings as SettingsIcon,
   Navigation,
+  Copy,
 } from 'lucide-react';
 import { GetDirectionsModal } from './GetDirectionsModal';
 import {
@@ -29,7 +30,7 @@ import {
   formatISTTimeSlot,
 } from '../lib/i18n';
 import { uploadImageToSupabaseStorage } from '../lib/supabase';
-import { apiClaimSlaCompensation } from '../lib/api';
+import { apiClaimSlaCompensation, apiRegenerateCompletionOtp } from '../lib/api';
 import {
   evaluateAppointmentSla,
   markCustomerClaimedSla,
@@ -641,25 +642,69 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* Customer 4-Digit Service Completion OTP Box */}
-                  {nextAppointment.completionOtp && (
-                    <div className="p-4 rounded-[16px] bg-[#111113] border border-[#F1E194]/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  {/* Customer 6-Digit Service Completion OTP Banner */}
+                  {nextAppointment.completionOtp && String(nextAppointment.status).toLowerCase() !== 'completed' && (
+                    <div className="p-4 rounded-[16px] bg-[#111113] border border-[#D4AF37]/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
                       <div>
-                        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#F1E194]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#F1E194] bg-[#241719] px-2 py-0.5 rounded border border-[#F1E194]/20">
+                            {tr('🔐 SERVICE COMPLETION OTP', '🔐 सेवा पूर्णता OTP')}
+                          </span>
+                          <span className="text-[10px] text-amber-300 font-semibold">
+                            {tr('Single-Use • Cryptographically Secure', 'एकल-उपयोग • सुरक्षित')}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#FFF9E8]/90 mt-1.5 max-w-xl">
                           {tr(
-                            `🔐 SERVICE COMPLETION OTP • SENT TO ${nextAppointment.clientPhone || currentUserProfile?.phone || '+91'}`,
-                            `🔐 सेवा पूर्णता OTP • ${nextAppointment.clientPhone || currentUserProfile?.phone || '+91'} पर भेजा गया`
+                            'Provide this 6-digit code to your barber only AFTER your haircut is completed to release their earnings.',
+                            'यह 6-अंकीय कोड अपने बार्बर को केवल तभी बताएं जब आपकी कटिंग/सेवा पूरी हो जाए।'
                           )}
-                        </span>
-                        <p className="text-xs text-[#FFF9E8]/80 mt-0.5">
+                        </p>
+                        <p className="text-[11px] text-[#8A8178] mt-0.5">
                           {tr(
-                            'Share this 4-digit OTP with your barber only when your haircut/service is completed ✅',
-                            'जब आपका काम पूरा हो जाए ✅ केवल तभी यह 4-अंकीय OTP अपने बार्बर को बताएं'
+                            'Do not reveal this code before service delivery. Barber payout remains securely held until verified.',
+                            'सेवा से पहले यह कोड न दें। सत्यापन होने तक नाई का भुगतान सुरक्षित रहता है।'
                           )}
                         </p>
                       </div>
-                      <div className="px-4 py-2 rounded-[12px] bg-[#241719] border border-[#F1E194] font-mono-num text-xl font-bold tracking-[0.25em] text-[#F1E194] text-center shrink-0">
-                        {nextAppointment.completionOtp}
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="px-5 py-2.5 rounded-[12px] bg-[#241719] border-2 border-[#D4AF37] font-mono text-2xl font-bold tracking-[0.3em] text-[#F1E194] text-center shadow-inner">
+                          {nextAppointment.completionOtp}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator.clipboard) {
+                              navigator.clipboard.writeText(String(nextAppointment.completionOtp));
+                              setStatusToast(tr('✓ OTP copied to clipboard!', '✓ OTP क्लिपबोर्ड पर कॉपी हुआ!'));
+                              setTimeout(() => setStatusToast(''), 3000);
+                            }
+                          }}
+                          className="p-2.5 rounded-[10px] bg-[#5B0E14] border border-[#F1E194]/30 text-[#F1E194] hover:bg-[#73121a] text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 transition-all"
+                          title={tr('Copy OTP', 'OTP कॉपी करें')}
+                        >
+                          <Copy className="w-4 h-4" />
+                          <span className="hidden sm:inline text-xs">{tr('Copy', 'कॉपी')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const res = await apiRegenerateCompletionOtp(nextAppointment.id);
+                              nextAppointment.completionOtp = res.completionOtp;
+                              setStatusToast(tr(`New OTP Generated: ${res.completionOtp}`, `नया OTP जारी: ${res.completionOtp}`));
+                              setTimeout(() => setStatusToast(''), 5000);
+                            } catch (e: any) {
+                              setStatusToast(e?.message || 'Failed to regenerate OTP');
+                              setTimeout(() => setStatusToast(''), 5000);
+                            }
+                          }}
+                          className="p-2.5 rounded-[10px] bg-[#241719] border border-[#F1E194]/20 text-[#F1E194] hover:text-[#FFF9E8] hover:border-[#F1E194] text-xs font-semibold cursor-pointer"
+                          title={tr('Regenerate OTP', 'OTP पुनः बनाएं')}
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
                   )}
@@ -893,11 +938,26 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             {!isCompleted &&
                               String(apt.status).toLowerCase() !== 'cancelled' &&
                               apt.completionOtp && (
-                                <p className="text-[11px] font-mono-num font-bold text-[#5B0E14] mt-1">
-                                  🔐 {tr('Completion OTP (Share with barber when work is ✅):', 'सेवा पूर्ण OTP (काम पूरा होने पर बार्बर को दें ✅):')}{' '}
+                                <p className="text-[11px] font-mono-num font-bold text-[#5B0E14] mt-1 inline-flex items-center gap-1.5 flex-wrap">
+                                  <span>🔐 {tr('Completion OTP (Share with barber when work is ✅):', 'सेवा पूर्ण OTP (काम पूरा होने पर बार्बर को दें ✅):')}</span>
                                   <span className="px-2 py-0.5 rounded bg-[#241719] text-[#F1E194] tracking-widest">
                                     {apt.completionOtp}
                                   </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (navigator.clipboard) {
+                                        navigator.clipboard.writeText(String(apt.completionOtp));
+                                        setStatusToast(tr('✓ OTP copied to clipboard!', '✓ OTP क्लिपबोर्ड पर कॉपी हुआ!'));
+                                        setTimeout(() => setStatusToast(''), 3000);
+                                      }
+                                    }}
+                                    className="px-1.5 py-0.5 rounded bg-[#E9D9B8] hover:bg-[#d9c7a0] text-[#5B0E14] text-[10px] cursor-pointer inline-flex items-center gap-0.5"
+                                    title={tr('Copy OTP', 'OTP कॉपी करें')}
+                                  >
+                                    <Copy className="w-3 h-3" />
+                                    <span>{tr('Copy', 'कॉपी')}</span>
+                                  </button>
                                 </p>
                               )}
                           </div>

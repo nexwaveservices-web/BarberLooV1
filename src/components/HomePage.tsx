@@ -370,6 +370,51 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
           </form>
 
+          {/* Quick 1-Tap Search Filter Chips */}
+          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#F1E194]/10">
+            <span className="text-[11px] font-semibold text-[#8A8178] uppercase tracking-wider">
+              {tr('Quick Pick:', 'त्वरित चयन:')}
+            </span>
+            {[
+              { label: tr('✂️ Haircut', '✂️ हेयरकट'), query: 'hair' },
+              { label: tr('🧔 Beard', '🧔 दाढ़ी'), query: 'beard' },
+              { label: tr('🧖 Massage', '🧖 मसाज'), query: 'massage' },
+              { label: tr('👑 Fade Cut', '👑 फ़ेड कट'), query: 'fade' },
+              { label: tr('⭐ 4.8+ Rated', '⭐ 4.8+ रेटिंग'), minRating: 4.8 },
+              { label: tr('💰 Under ₹500', '💰 ₹500 से कम'), maxPrice: 500 },
+            ].map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => {
+                  if (chip.query !== undefined) setSearchQuery(chip.query);
+                  if (chip.minRating !== undefined) setMinRatingFilter(chip.minRating);
+                  if (chip.maxPrice !== undefined) setMaxPriceFilter(chip.maxPrice);
+                  const el = document.getElementById('nearby-shops-section');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="px-2.5 py-1 rounded-full bg-[#241719] hover:bg-[#5B0E14] text-[#F1E194] text-[11px] font-medium border border-[#F1E194]/20 transition-all cursor-pointer"
+              >
+                {chip.label}
+              </button>
+            ))}
+            {(searchQuery || minRatingFilter > 0 || maxPriceFilter < 99999) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setMinRatingFilter(0);
+                  setMaxPriceFilter(99999);
+                  setSelectedStateId('all');
+                  setSelectedCityId('all');
+                }}
+                className="px-2.5 py-1 rounded-full bg-red-950/60 hover:bg-red-900 text-red-200 text-[11px] font-medium border border-red-500/30 transition-all cursor-pointer"
+              >
+                {tr('Reset Filters ✕', 'फ़िल्टर रीसेट ✕')}
+              </button>
+            )}
+          </div>
+
           {/* Compact Filter & Sort Strip */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#F1E194]/12 text-xs">
             <div className="flex flex-wrap items-center gap-3">
@@ -426,6 +471,82 @@ export const HomePage: React.FC<HomePageProps> = ({
                     : tr('Price (₹)', 'कीमत (₹)')}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 2b. HOW IT WORKS IN 3 EASY STEPS */}
+      <section className="max-w-[1360px] mx-auto px-5 sm:px-8 pt-8">
+        <div className="rounded-[24px] bg-[#FAF6EA] border border-[#241719]/10 p-6 sm:p-8 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#241719]/10 pb-5">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#5B0E14]">
+                {tr('EFFORTLESS GROOMING', 'सरल व आसान बुकिंग')}
+              </span>
+              <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#1C1718] mt-0.5">
+                {tr('How BarberLoo Works in 3 Easy Steps', '3 आसान चरणों में अपनी ग्रूमिंग बुक करें')}
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('booking')}
+              className="px-5 py-2.5 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold uppercase tracking-wider cursor-pointer shrink-0 self-start sm:self-auto hover:brightness-110 transition-all shadow-sm"
+            >
+              {tr('Book an Appointment Now →', 'अभी अपॉइंटमेंट बुक करें →')}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
+            <div className="flex items-start gap-3.5">
+              <div className="w-9 h-9 rounded-[12px] bg-[#5B0E14] text-[#F1E194] font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+                1
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-display text-base font-bold text-[#1C1718]">
+                  {tr('Pick Salon & Service', 'सैलून व सेवा चुनें')}
+                </h3>
+                <p className="text-xs text-[#5B524A] leading-relaxed">
+                  {tr(
+                    'Explore top-rated verified partner barbers in your city. Pick your fade, beard sculpt, or facial ritual.',
+                    'अपने शहर में सत्यापित सैलून खोजें। हेयरकट, दाढ़ी या फेशियल सेवा चुनें।'
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3.5">
+              <div className="w-9 h-9 rounded-[12px] bg-[#5B0E14] text-[#F1E194] font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+                2
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-display text-base font-bold text-[#1C1718]">
+                  {tr('Pick Time & Pay Safely', 'समय चुनें व सुरक्षित भुगतान करें')}
+                </h3>
+                <p className="text-xs text-[#5B524A] leading-relaxed">
+                  {tr(
+                    'Select your IST time slot. Pay upfront via Razorpay (UPI/Card). Your money is safely held in escrow until your cut is done.',
+                    'भारतीय मानक समय (IST) पर समय चुनें। रेज़रपे से सुरक्षित भुगतान करें। काम पूरा होने तक राशि एस्क्रो में सुरक्षित रहती है।'
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3.5">
+              <div className="w-9 h-9 rounded-[12px] bg-[#5B0E14] text-[#F1E194] font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+                3
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-display text-base font-bold text-[#1C1718]">
+                  {tr('Show 6-Digit OTP After Cut', 'कटिंग के बाद 6-अंकीय OTP दें')}
+                </h3>
+                <p className="text-xs text-[#5B524A] leading-relaxed">
+                  {tr(
+                    'Arrive on time, enjoy your haircut, and give your 6-digit OTP to the barber only when you are 100% satisfied.',
+                    'सैलून पहुंचें, हेयरकट का आनंद लें और सेवा पूरी होने के बाद ही बार्बर को 6-अंकीय ओटीपी दें।'
+                  )}
+                </p>
+              </div>
             </div>
           </div>
         </div>

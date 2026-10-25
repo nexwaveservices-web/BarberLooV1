@@ -18,9 +18,13 @@ import {
   coupons,
   reports,
   platformSettings,
+  barberPayouts,
+  financialLedger,
 } from './schema.ts';
 import { eq, asc, desc, and, sql } from 'drizzle-orm';
 import { ASSETS } from '../data/barberlooData.ts';
+import { generateSecureCompletionOtp, decryptCompletionOtp, verifyCompletionOtp } from '../lib/payoutOtp.ts';
+import { postLedgerTransaction, executeBarberPayoutTransfer } from '../lib/ledgerEngine.ts';
 
 export function resolveAllowedRole(
   requestedRole?: string | null,
@@ -470,7 +474,7 @@ export async function getBootstrapState(
     tagline: sh.tagline,
     about: sh.about,
     qrCodeSlug: sh.qrCodeSlug,
-    qrCodeUrl: `${runtimeCustomDomain}/booking.html?shop_id=${encodeURIComponent(sh.id)}`,
+    qrCodeUrl: `${runtimeCustomDomain}/shop/${sh.qrCodeSlug || sh.id}/`,
     latitude: sh.latitude || '',
     longitude: sh.longitude || '',
     pinCode: sh.pinCode || '',
@@ -554,6 +558,17 @@ export async function getBootstrapState(
       barberNotes: safeInternalNotes,
       internalBarberNotes: safeInternalNotes,
       couponCode: a.couponCode,
+      completionOtp:
+        a.customerUid === activeUid && a.completionOtpCipher
+          ? decryptCompletionOtp(a.completionOtpCipher) || undefined
+          : undefined,
+      completionOtpStatus: a.completionOtpStatus || 'active',
+      completionOtpExpiresAt: a.completionOtpExpiresAt,
+      completionOtpAttempts: a.completionOtpAttempts ?? 0,
+      completionOtpMaxAttempts: a.completionOtpMaxAttempts ?? 5,
+      payoutStatus: a.payoutStatus || 'pending_verification',
+      payoutHoldReason: a.payoutHoldReason || '',
+      completionVerifiedAt: a.completionVerifiedAt,
     };
   });
 
@@ -901,6 +916,9 @@ export async function createBookingInDb(payload: {
         .where(eq(coupons.code, cleanCoupon));
     }
 
+    // Cryptographic 6-digit Completion OTP generation with Salt, HMAC-SHA256, and AES-256-GCM cipher
+    const secureOtp = generateSecureCompletionOtp(48);
+
     const [created] = await tx
       .insert(appointments)
       .values({
@@ -929,6 +947,14 @@ export async function createBookingInDb(payload: {
         notes: finalNotes,
         internalBarberNotes: '',
         couponCode: payload.couponCode || '',
+        completionOtpHash: secureOtp.hash,
+        completionOtpSalt: secureOtp.salt,
+        completionOtpCipher: secureOtp.cipher,
+        completionOtpAttempts: 0,
+        completionOtpMaxAttempts: 5,
+        completionOtpExpiresAt: secureOtp.expiresAt,
+        completionOtpStatus: 'active',
+        payoutStatus: 'pending_verification',
       })
       .returning();
 
@@ -957,6 +983,42 @@ export async function createBookingInDb(payload: {
         : `BL-IN-${Math.floor(10000 + Math.random() * 89999)}`,
     });
 
+    // Marketplace Barber Payout Record (Held until OTP verification)
+    await tx.insert(barberPayouts).values({
+      id: `payout-${payload.id}`,
+      appointmentId: payload.id,
+      shopId: payload.shopId,
+      barberId: payload.barberId,
+      barberName: payload.barberName,
+      customerUid: payload.customerUid,
+      grossAmount: pricing.discountedServicePrice,
+      platformFee,
+      netPayoutAmount: pricing.discountedServicePrice,
+      currency: 'INR',
+      status: 'pending_verification',
+      idempotencyKey: `idemp-${payload.id}`,
+      provider: 'razorpay_route',
+    });
+
+    // Balanced Double-Entry Financial Ledger Posting:
+    // Debit Customer Funds Escrow (Total) = Credit Platform Fee Revenue + Credit Barber Payable Pending
+    await postLedgerTransaction(tx, {
+      appointmentId: payload.id,
+      referenceType: 'customer_payment',
+      referenceId: payload.razorpayPaymentId || `pay-${payload.id}`,
+      description: `Customer payment received for booking ${payload.id} (Service: ₹${pricing.discountedServicePrice}, Platform Fee: ₹${platformFee})`,
+      entries: [
+        { account: 'customer_funds_escrow', entryType: 'DEBIT', amount: totalPrice },
+        { account: 'platform_fee_revenue', entryType: 'CREDIT', amount: platformFee },
+        { account: 'barber_payable_pending', entryType: 'CREDIT', amount: pricing.discountedServicePrice },
+      ],
+      metadata: {
+        customerUid: payload.customerUid,
+        servicePrice: pricing.discountedServicePrice,
+        platformFee,
+      },
+    });
+
     // Client notification
     await tx.insert(notifications).values({
       id: `notif-${Date.now()}`,
@@ -967,7 +1029,10 @@ export async function createBookingInDb(payload: {
       unread: true,
     });
 
-    return created;
+    return {
+      ...created,
+      completionOtp: secureOtp.rawOtp,
+    };
   });
 }
 
@@ -1042,6 +1107,12 @@ export async function updateAppointmentInDb(
   if (updates.status) {
     const fromStatus = current.status.toLowerCase();
     const toStatus = updates.status.toLowerCase();
+    if (toStatus === 'completed') {
+      throw new Error(
+        'Appointments cannot be marked completed directly. Barbers must verify the customer-provided completion OTP to complete the appointment and release payout.'
+      );
+    }
+
     const ALLOWED_TRANSITIONS: Record<string, string[]> = {
       pending: ['confirmed', 'cancelled'],
       confirmed: [
@@ -1049,10 +1120,9 @@ export async function updateAppointmentInDb(
         'in_progress',
         'cancelled',
         'no_show',
-        'completed',
       ],
       arrived: ['in_progress', 'cancelled', 'no_show'],
-      in_progress: ['completed', 'cancelled'],
+      in_progress: ['cancelled'],
       completed: [],
       cancelled: [],
       no_show: [],
@@ -1073,6 +1143,19 @@ export async function updateAppointmentInDb(
           `Invalid appointment state transition from ${fromStatus} to ${toStatus}.`
         );
       }
+    }
+
+    if (toStatus === 'cancelled') {
+      // Invalidate OTP and cancel payout
+      await db
+        .update(appointments)
+        .set({ completionOtpStatus: 'revoked' })
+        .where(eq(appointments.id, id));
+
+      await db
+        .update(barberPayouts)
+        .set({ status: 'cancelled', holdReason: 'Appointment cancelled' })
+        .where(eq(barberPayouts.appointmentId, id));
     }
   }
 
@@ -1247,3 +1330,471 @@ export async function updateAppointmentInDb(
 
   return updated;
 }
+
+/**
+ * Trusted backend verification function for customer OTP and barber payout initiation.
+ * Atomically verifies OTP, completes appointment, and dispatches provider transfer.
+ */
+export async function verifyAndCompleteAppointmentInDb(
+  appointmentId: string,
+  submittedOtp: string,
+  userContext: { uid: string; email?: string; role?: string; name?: string }
+) {
+  if (!userContext || !userContext.uid) {
+    throw new Error('Unauthorized: Authentication required.');
+  }
+
+  const [appointment] = await db
+    .select()
+    .from(appointments)
+    .where(eq(appointments.id, appointmentId));
+
+  if (!appointment) {
+    throw new Error('Appointment not found.');
+  }
+
+  // 1. Role & Identity Check
+  const [aptShop] = await db
+    .select()
+    .from(shops)
+    .where(eq(shops.id, appointment.shopId));
+  const [aptBarber] = await db
+    .select()
+    .from(barbers)
+    .where(eq(barbers.id, appointment.barberId));
+  const isShopOwner = aptShop && aptShop.ownerUid === userContext.uid;
+  const isAssignedBarber =
+    appointment.barberId === userContext.uid ||
+    (aptBarber && (aptBarber.userUid === userContext.uid || aptBarber.id === userContext.uid));
+  const isAdmin = userContext.role === 'admin';
+
+  if (!isAssignedBarber && !isShopOwner && !isAdmin) {
+    throw new Error('Forbidden: Only the assigned barber or salon administrator can verify completion and complete this appointment.');
+  }
+
+  // 2. Booking State Eligibility Check
+  const fromStatus = (appointment.status || '').toLowerCase();
+  if (fromStatus === 'completed') {
+    throw new Error('Appointment has already been completed.');
+  }
+  if (fromStatus === 'cancelled') {
+    throw new Error('Cannot complete a cancelled appointment.');
+  }
+  if (fromStatus === 'no_show') {
+    throw new Error('Cannot complete a no-show appointment.');
+  }
+
+  // 3. Payment Status Check
+  if ((appointment.paymentStatus || '').toLowerCase() !== 'paid') {
+    throw new Error('Cannot complete appointment: Customer payment has not been confirmed.');
+  }
+
+  // 4. Payout Hold & Dispute Check
+  const [payoutRow] = await db
+    .select()
+    .from(barberPayouts)
+    .where(eq(barberPayouts.appointmentId, appointmentId));
+
+  if (appointment.payoutHoldReason || payoutRow?.status === 'on_hold') {
+    throw new Error(`Cannot complete appointment: Payout is on administrative hold: ${appointment.payoutHoldReason || payoutRow?.holdReason || 'Flagged for review'}.`);
+  }
+
+  // 5. Completion OTP Status & Expiry Check
+  if (appointment.completionOtpStatus === 'verified') {
+    throw new Error('This completion OTP has already been verified and consumed.');
+  }
+  if (appointment.completionOtpStatus === 'revoked') {
+    throw new Error('This completion OTP has been revoked.');
+  }
+  if (appointment.completionOtpExpiresAt && new Date(appointment.completionOtpExpiresAt) < new Date()) {
+    await db
+      .update(appointments)
+      .set({ completionOtpStatus: 'expired' })
+      .where(eq(appointments.id, appointmentId));
+    throw new Error('Completion OTP has expired. Please ask the client to regenerate it from their booking screen.');
+  }
+
+  // 6. Max Attempt Rate Limiting Check (5 attempts max)
+  const currentAttempts = appointment.completionOtpAttempts ?? 0;
+  const maxAttempts = appointment.completionOtpMaxAttempts ?? 5;
+  if (currentAttempts >= maxAttempts) {
+    throw new Error('Maximum OTP verification attempts (5) exceeded for this appointment. Access locked. Please ask customer to regenerate.');
+  }
+
+  // 7. Verify OTP against stored HMAC-SHA256 hash using constant-time comparison
+  const isMatch = verifyCompletionOtp(submittedOtp, appointment.completionOtpSalt || '', appointment.completionOtpHash || '');
+  if (!isMatch) {
+    const nextAttempts = currentAttempts + 1;
+    await db
+      .update(appointments)
+      .set({ completionOtpAttempts: nextAttempts })
+      .where(eq(appointments.id, appointmentId));
+    const remaining = Math.max(0, maxAttempts - nextAttempts);
+    throw new Error(`Invalid completion OTP. ${remaining} attempt(s) remaining.`);
+  }
+
+  // 8. Atomic OTP Consumption, Appointment Completion & Payout Initiation inside Transaction
+  return await db.transaction(async (tx) => {
+    // Acquire PostgreSQL transaction-level lock to prevent concurrent double-consumption
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('complete_' || ${appointmentId}))`
+    );
+
+    // Re-verify inside lock
+    const [lockedApt] = await tx
+      .select()
+      .from(appointments)
+      .where(eq(appointments.id, appointmentId));
+
+    if (lockedApt.status === 'completed' || lockedApt.completionOtpStatus === 'verified') {
+      throw new Error('Appointment has already been completed by a concurrent request.');
+    }
+
+    const now = new Date();
+    const verifiedBy = userContext.name || userContext.uid;
+
+    // Transition appointment to completed
+    const [updatedApt] = await tx
+      .update(appointments)
+      .set({
+        status: 'completed',
+        completionOtpStatus: 'verified',
+        completionVerifiedAt: now,
+        completionVerifiedBy: verifiedBy,
+        payoutStatus: 'initiated',
+      })
+      .where(eq(appointments.id, appointmentId))
+      .returning();
+
+    // Post balanced ledger entries for OTP completion:
+    // Debit Barber Payable Pending -> Credit Barber Payable Released
+    const barberShare = appointment.servicePrice ?? (appointment.price - (appointment.platformFee ?? 10));
+    await postLedgerTransaction(tx, {
+      appointmentId,
+      referenceType: 'otp_completion',
+      referenceId: `otp-vfy-${appointmentId}`,
+      description: `Service completed and OTP verified by ${verifiedBy}. Barber earnings released from escrow (₹${barberShare}).`,
+      entries: [
+        { account: 'barber_payable_pending', entryType: 'DEBIT', amount: barberShare },
+        { account: 'barber_payable_released', entryType: 'CREDIT', amount: barberShare },
+      ],
+      metadata: { verifiedBy, completedAt: now.toISOString() },
+    });
+
+    // Execute / Initiate Provider Payout Transfer (Razorpay Route)
+    const payoutId = `payout-${appointmentId}`;
+    const transferResult = await executeBarberPayoutTransfer(tx, payoutId);
+
+    // Client completion notification
+    if (appointment.customerUid) {
+      await tx.insert(notifications).values({
+        id: `notif-${Date.now()}-c`,
+        recipientUid: appointment.customerUid,
+        type: 'service_completed',
+        title: `Service Completed: Your visit with ${appointment.barberName} has been verified. Thank you!`,
+        timeLabel: 'Just now · Salon Desk',
+        unread: true,
+      });
+    }
+
+    // Barber payout notification
+    if (appointment.barberId) {
+      await tx.insert(notifications).values({
+        id: `notif-${Date.now()}-b`,
+        recipientUid: appointment.barberId,
+        type: 'payout_initiated',
+        title: `Payout Initiated: ₹${barberShare} transferred for ${appointment.clientName}'s appointment (#${appointment.id}).`,
+        timeLabel: 'Just now · Financial Engine',
+        unread: true,
+      });
+    }
+
+    return {
+      success: true,
+      appointment: updatedApt,
+      payout: transferResult.payout,
+      transferId: transferResult.transferId,
+    };
+  });
+}
+
+/**
+ * Regenerates the completion OTP for the authorized customer.
+ */
+export async function regenerateCustomerCompletionOtp(
+  appointmentId: string,
+  customerUid: string
+) {
+  const [appointment] = await db
+    .select()
+    .from(appointments)
+    .where(eq(appointments.id, appointmentId));
+
+  if (!appointment) {
+    throw new Error('Appointment not found.');
+  }
+
+  if (appointment.customerUid !== customerUid) {
+    throw new Error('Forbidden: Only the booked customer can request OTP regeneration.');
+  }
+
+  if (appointment.status === 'completed') {
+    throw new Error('Cannot regenerate OTP for a completed appointment.');
+  }
+  if (appointment.status === 'cancelled') {
+    throw new Error('Cannot regenerate OTP for a cancelled appointment.');
+  }
+
+  const secureOtp = generateSecureCompletionOtp(48);
+
+  await db
+    .update(appointments)
+    .set({
+      completionOtpHash: secureOtp.hash,
+      completionOtpSalt: secureOtp.salt,
+      completionOtpCipher: secureOtp.cipher,
+      completionOtpAttempts: 0,
+      completionOtpExpiresAt: secureOtp.expiresAt,
+      completionOtpStatus: 'active',
+    })
+    .where(eq(appointments.id, appointmentId));
+
+  return {
+    success: true,
+    completionOtp: secureOtp.rawOtp,
+    expiresAt: secureOtp.expiresAt,
+  };
+}
+
+/**
+ * Applies or releases administrative payout hold with documented reason.
+ */
+export async function toggleAdminPayoutHold(
+  appointmentId: string,
+  adminContext: { uid: string; email?: string; role?: string; name?: string },
+  hold: boolean,
+  reason?: string
+) {
+  if (adminContext.role !== 'admin') {
+    throw new Error('Forbidden: Only platform administrators can modify payout holds.');
+  }
+
+  const [appointment] = await db
+    .select()
+    .from(appointments)
+    .where(eq(appointments.id, appointmentId));
+
+  if (!appointment) {
+    throw new Error('Appointment not found.');
+  }
+
+  const payoutId = `payout-${appointmentId}`;
+  const [payout] = await db
+    .select()
+    .from(barberPayouts)
+    .where(eq(barberPayouts.id, payoutId));
+
+  if (hold) {
+    const holdReason = String(reason || '').trim();
+    if (!holdReason) {
+      throw new Error('A documented reason is required to place a payout on administrative hold.');
+    }
+
+    const heldBy = adminContext.name || adminContext.email || adminContext.uid;
+
+    await db
+      .update(appointments)
+      .set({
+        payoutStatus: 'held',
+        payoutHoldReason: holdReason,
+        payoutHoldAppliedBy: heldBy,
+      })
+      .where(eq(appointments.id, appointmentId));
+
+    if (payout) {
+      await db
+        .update(barberPayouts)
+        .set({
+          status: 'on_hold',
+          holdReason,
+          heldBy,
+          updatedAt: new Date(),
+        })
+        .where(eq(barberPayouts.id, payoutId));
+    }
+
+    // Ledger audit posting
+    await postLedgerTransaction(db, {
+      appointmentId,
+      referenceType: 'admin_hold',
+      referenceId: `hold-${appointmentId}`,
+      description: `Administrative hold applied to payout ${payoutId}: "${holdReason}" by ${heldBy}`,
+      entries: [
+        { account: 'barber_payable_pending', entryType: 'DEBIT', amount: appointment.servicePrice ?? 150 },
+        { account: 'disputed_hold', entryType: 'CREDIT', amount: appointment.servicePrice ?? 150 },
+      ],
+    });
+
+    return { success: true, held: true, reason: holdReason };
+  } else {
+    // Release hold
+    await db
+      .update(appointments)
+      .set({
+        payoutStatus: 'pending_verification',
+        payoutHoldReason: '',
+        payoutHoldAppliedBy: '',
+      })
+      .where(eq(appointments.id, appointmentId));
+
+    if (payout) {
+      await db
+        .update(barberPayouts)
+        .set({
+          status: appointment.status === 'completed' ? 'eligible' : 'pending_verification',
+          holdReason: '',
+          heldBy: '',
+          updatedAt: new Date(),
+        })
+        .where(eq(barberPayouts.id, payoutId));
+    }
+
+    // Ledger audit posting
+    await postLedgerTransaction(db, {
+      appointmentId,
+      referenceType: 'admin_hold',
+      referenceId: `release-${appointmentId}`,
+      description: `Administrative hold released for payout ${payoutId} by ${adminContext.name || adminContext.uid}`,
+      entries: [
+        { account: 'disputed_hold', entryType: 'DEBIT', amount: appointment.servicePrice ?? 150 },
+        { account: 'barber_payable_pending', entryType: 'CREDIT', amount: appointment.servicePrice ?? 150 },
+      ],
+    });
+
+    return { success: true, held: false };
+  }
+}
+
+/**
+ * Processes refund with status verification and balanced ledger reversal.
+ */
+export async function processAppointmentRefund(
+  appointmentId: string,
+  adminContext: { uid: string; email?: string; role?: string; name?: string },
+  reason: string
+) {
+  if (adminContext.role !== 'admin') {
+    throw new Error('Forbidden: Only platform administrators can authorize refunds.');
+  }
+
+  const [appointment] = await db
+    .select()
+    .from(appointments)
+    .where(eq(appointments.id, appointmentId));
+
+  if (!appointment) {
+    throw new Error('Appointment not found.');
+  }
+
+  if (appointment.paymentStatus === 'refunded') {
+    throw new Error('Appointment has already been refunded.');
+  }
+
+  const totalPrice = appointment.totalPrice ?? appointment.price;
+  const platformFee = appointment.platformFee ?? 10;
+  const barberShare = appointment.servicePrice ?? (totalPrice - platformFee);
+
+  const payoutId = `payout-${appointmentId}`;
+  const [payout] = await db
+    .select()
+    .from(barberPayouts)
+    .where(eq(barberPayouts.id, payoutId));
+
+  return await db.transaction(async (tx) => {
+    // Update appointment
+    const [updatedApt] = await tx
+      .update(appointments)
+      .set({
+        status: 'cancelled',
+        paymentStatus: 'refunded',
+        completionOtpStatus: 'revoked',
+        payoutStatus: 'reversed',
+      })
+      .where(eq(appointments.id, appointmentId))
+      .returning();
+
+    // Update payout status
+    if (payout) {
+      await tx
+        .update(barberPayouts)
+        .set({
+          status: 'reversed',
+          holdReason: `Refunded: ${reason}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(barberPayouts.id, payoutId));
+    }
+
+    // Insert refund payment record
+    await tx.insert(payments).values({
+      id: `ref-${Date.now()}`,
+      appointmentId,
+      customerUid: appointment.customerUid,
+      clientName: appointment.clientName,
+      shopId: appointment.shopId,
+      shopName: appointment.shopName,
+      amount: totalPrice,
+      serviceAmount: barberShare,
+      platformFee,
+      discountAmount: 0,
+      totalAmount: totalPrice,
+      currency: 'INR',
+      provider: 'razorpay',
+      providerOrderId: appointment.razorpayOrderId || '',
+      providerPaymentId: `ref_${Date.now()}`,
+      method: 'online',
+      methodDisplay: 'Refund Reversal',
+      status: 'refunded',
+      receiptNumber: `REF-${appointment.id.toUpperCase()}`,
+    });
+
+    // Balanced Ledger Reversal:
+    // Debit Barber Payable Pending (or recovery) + Debit Platform Fee Revenue = Credit Customer Funds Escrow (Total)
+    if (payout?.status === 'settled' || payout?.status === 'initiated') {
+      // Refund after barber transfer: track as Barber Receivable Recovery
+      await postLedgerTransaction(tx, {
+        appointmentId,
+        referenceType: 'refund',
+        referenceId: `ref-post-payout-${appointmentId}`,
+        description: `Refund processed after barber payout: Barber recovery balance recorded (₹${barberShare}), Platform fee reversed (₹${platformFee})`,
+        entries: [
+          { account: 'refunds_payable', entryType: 'DEBIT', amount: barberShare },
+          { account: 'platform_fee_revenue', entryType: 'DEBIT', amount: platformFee },
+          { account: 'customer_funds_escrow', entryType: 'CREDIT', amount: totalPrice },
+        ],
+        metadata: { reason, refundAfterPayout: true },
+      });
+    } else {
+      // Standard refund before payout release
+      await postLedgerTransaction(tx, {
+        appointmentId,
+        referenceType: 'refund',
+        referenceId: `ref-${appointmentId}`,
+        description: `Customer refund processed for booking ${appointmentId} (Total: ₹${totalPrice}) - Reason: ${reason}`,
+        entries: [
+          { account: 'barber_payable_pending', entryType: 'DEBIT', amount: barberShare },
+          { account: 'platform_fee_revenue', entryType: 'DEBIT', amount: platformFee },
+          { account: 'customer_funds_escrow', entryType: 'CREDIT', amount: totalPrice },
+        ],
+        metadata: { reason, authorizedBy: adminContext.name || adminContext.uid },
+      });
+    }
+
+    return {
+      success: true,
+      appointment: updatedApt,
+      refundedAmount: totalPrice,
+    };
+  });
+}
+

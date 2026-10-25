@@ -126,6 +126,9 @@ export function getBookingPermalinkUrl(shop?: any, domain?: string): string {
   return `${base}/book-appointment/`;
 }
 
+export const getShopUrl = getShopPermalinkUrl;
+export const getBookingUrl = getBookingPermalinkUrl;
+
 /**
  * Generates the authoritative Salon QR Destination URL for a given shop.
  * Example: https://barberloo.in/shop/pawan-hair-saloon-ludhiana/

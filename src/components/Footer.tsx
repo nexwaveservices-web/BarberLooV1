@@ -70,6 +70,24 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   {tr('Book Appointment (IST)', 'अपॉइंटमेंट बुक करें (IST)')}
                 </button>
               </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => handleNav('privacy-policy')}
+                  className="hover:text-[#F1E194] transition-colors cursor-pointer text-xs"
+                >
+                  {tr('Privacy Policy (DPDPA)', 'गोपनीयता नीति (DPDPA)')}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => handleNav('terms-of-service')}
+                  className="hover:text-[#F1E194] transition-colors cursor-pointer text-xs"
+                >
+                  {tr('Terms of Service', 'सेवा की शर्तें')}
+                </button>
+              </li>
             </ul>
           </div>
 
@@ -95,8 +113,20 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             {tr('All rights reserved.', 'सर्वाधिकार सुरक्षित।')}
           </p>
           <div className="flex items-center gap-6">
-            <span>{tr('Privacy Policy', 'गोपनीयता नीति')}</span>
-            <span>{tr('Terms of Service', 'सेवा की शर्तें')}</span>
+            <button
+              type="button"
+              onClick={() => handleNav('privacy-policy')}
+              className="hover:text-[#F1E194] transition-colors cursor-pointer"
+            >
+              {tr('Privacy Policy', 'गोपनीयता नीति')}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNav('terms-of-service')}
+              className="hover:text-[#F1E194] transition-colors cursor-pointer"
+            >
+              {tr('Terms of Service', 'सेवा की शर्तें')}
+            </button>
           </div>
         </div>
       </div>

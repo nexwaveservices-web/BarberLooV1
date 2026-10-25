@@ -3,8 +3,6 @@ import QRCode from 'qrcode';
 import {
   ASSETS,
   BarberItem,
-  INITIAL_SHOPS,
-  OPENING_HOURS,
   PageView,
   ServiceItem,
   ShopItem,
@@ -73,7 +71,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   services = [],
   barbers = [],
   reviews = [],
-  workingHours = OPENING_HOURS,
+  workingHours = [],
   shopGallery = [],
   barberGallery = [],
   favorites = [],
@@ -120,7 +118,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   const [qrCopied, setQrCopied] = useState(false);
 
   // Safe arrays to prevent any undefined/null crashes
-  const safeShops = Array.isArray(shops) && shops.length > 0 ? shops : INITIAL_SHOPS;
+  const safeShops = Array.isArray(shops) ? shops : [];
   const safeServices = Array.isArray(services) ? services : [];
   const safeBarbers = Array.isArray(barbers) ? barbers : [];
   const safeReviews = Array.isArray(reviews) ? reviews : [];
@@ -128,17 +126,17 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   const safeWorkingHours =
     Array.isArray(workingHours) && workingHours.length > 0
       ? workingHours
-      : OPENING_HOURS;
+      : [];
   const safeShopGallery = Array.isArray(shopGallery) ? shopGallery : [];
   const safeBarberGallery = Array.isArray(barberGallery) ? barberGallery : [];
 
   const productionDomain = getProductionDomain(platformSettings);
-  const activeShopId = shop?.id || (safeShops[0]?.id ?? '7fa27fef-d890-449e-b9bb-85bbfeaa2998');
-  const qrDestinationUrl = activeShopId
-    ? getShopQrDestinationUrl(activeShopId, {
+  const activeShopId = shop?.id || safeShops[0]?.id || '';
+  const qrDestinationUrl = (shop || activeShopId)
+    ? getShopQrDestinationUrl(shop || activeShopId, {
         domain: productionDomain,
       })
-    : `${productionDomain}/booking.html`;
+    : `${productionDomain}/book-appointment/`;
 
   useEffect(() => {
     if (shop && activeTab === 'qr' && qrCanvasRef.current && qrDestinationUrl) {
@@ -614,23 +612,35 @@ export const ShopPage: React.FC<ShopPageProps> = ({
     );
   }
 
-  // Safe fallback shop in case shop prop has missing properties
-  const fallbackShop = safeShops.find((s: any) => s?.id === shop?.id) || safeShops[0] || INITIAL_SHOPS[0];
+  // Resolve shop from safeShops or selected shop
+  const fallbackShop = safeShops.find((s: any) => s?.id === shop?.id) || safeShops[0] || null;
+
+  if (!shop && !fallbackShop) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center p-8 text-center bg-[#EFE9DD]">
+        <Store className="w-12 h-12 text-[#5B0E14] mb-4 opacity-50" />
+        <h2 className="text-xl font-bold font-serif text-[#1C1718] mb-2">
+          {tr('No Salon Selected', 'कोई सैलून चयनित नहीं है')}
+        </h2>
+        <p className="text-xs text-[#8A8178] max-w-sm mb-6">
+          {tr(
+            'Please select a partner salon from the salon directory to view services and book appointments.',
+            'सेवाएं देखने और अपॉइंटमेंट बुक करने के लिए कृपया सैलून सूची से एक सैलून चुनें।'
+          )}
+        </p>
+        <button
+          onClick={() => onNavigate('home')}
+          className="px-6 py-2.5 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+        >
+          {tr('Explore Salons', 'सैलून देखें')}
+        </button>
+      </div>
+    );
+  }
 
   const activeShop = {
-    ...fallbackShop,
+    ...(fallbackShop || {}),
     ...(shop || {}),
-    name: (shop && shop.name) || fallbackShop.name,
-    address: (shop && shop.address) || fallbackShop.address,
-    district: (shop && shop.district) || fallbackShop.district,
-    phone: (shop && shop.phone) || fallbackShop.phone,
-    image: (shop && shop.image) || fallbackShop.image,
-    rating: (shop && shop.rating !== undefined) ? shop.rating : (fallbackShop.rating ?? 4.9),
-    reviewCount: (shop && shop.reviewCount !== undefined) ? shop.reviewCount : (fallbackShop.reviewCount ?? 0),
-    isOpen: (shop && shop.isOpen !== undefined) ? shop.isOpen : (fallbackShop.isOpen ?? true),
-    verified: (shop && shop.verified !== undefined) ? shop.verified : (fallbackShop.verified ?? true),
-    tagline: (shop && shop.tagline) || fallbackShop.tagline,
-    about: (shop && shop.about) || fallbackShop.about,
   };
 
   const shopServices = safeServices.filter(

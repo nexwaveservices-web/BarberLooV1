@@ -35,8 +35,8 @@ export const SalonQrModal: React.FC<SalonQrModalProps> = ({
 
   const domain = getProductionDomain(platformSettings);
   const destinationUrl = shop
-    ? getShopQrDestinationUrl(shop.id, { domain })
-    : `${domain}/booking.html`;
+    ? getShopQrDestinationUrl(shop, { domain })
+    : `${domain}/book-appointment/`;
 
   useEffect(() => {
     if (!isOpen || !shop || !canvasRef.current) return;

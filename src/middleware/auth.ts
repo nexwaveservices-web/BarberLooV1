@@ -167,19 +167,37 @@ export async function verifyAuthToken(
   }
 }
 
+export function extractTokenFromRequest(req: Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split('Bearer ')[1].trim();
+    if (token) return token;
+  }
+  // Cookie fallback (for session persistence across page refreshes)
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    const match = cookieHeader.match(
+      /(?:^|;\s*)(?:barberloo_auth_token|sb-access-token)=([^;]+)/
+    );
+    if (match) {
+      return decodeURIComponent(match[1]).trim();
+    }
+  }
+  return null;
+}
+
 export const requireAuth = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = extractTokenFromRequest(req);
+  if (!token) {
     return res
       .status(401)
       .json({ error: 'Unauthorized: Missing or malformed authentication token' });
   }
 
-  const token = authHeader.split('Bearer ')[1].trim();
   const verified = await verifyAuthToken(token);
   if (!verified) {
     return res
@@ -203,14 +221,13 @@ export const requireBarberOrAdmin = async (
   res: Response,
   next: NextFunction
 ) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = extractTokenFromRequest(req);
+  if (!token) {
     return res
       .status(401)
       .json({ error: 'Unauthorized: Missing authentication token' });
   }
 
-  const token = authHeader.split('Bearer ')[1].trim();
   const verified = await verifyAuthToken(token);
   if (!verified) {
     return res
@@ -243,14 +260,13 @@ export const requireShopOwnerOrAdmin = async (
   res: Response,
   next: NextFunction
 ) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = extractTokenFromRequest(req);
+  if (!token) {
     return res
       .status(401)
       .json({ error: 'Unauthorized: Missing authentication token' });
   }
 
-  const token = authHeader.split('Bearer ')[1].trim();
   const verified = await verifyAuthToken(token);
   if (!verified) {
     return res
@@ -282,14 +298,13 @@ export const requireAdmin = async (
   res: Response,
   next: NextFunction
 ) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = extractTokenFromRequest(req);
+  if (!token) {
     return res
       .status(401)
       .json({ error: 'Unauthorized: Missing authentication token' });
   }
 
-  const token = authHeader.split('Bearer ')[1].trim();
   const verified = await verifyAuthToken(token);
   if (!verified) {
     return res
@@ -317,9 +332,8 @@ export const optionalAuth = async (
   _res: Response,
   next: NextFunction
 ) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split('Bearer ')[1].trim();
+  const token = extractTokenFromRequest(req);
+  if (token) {
     const verified = await verifyAuthToken(token);
     if (verified) {
       req.user = verified;

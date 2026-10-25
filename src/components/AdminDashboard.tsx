@@ -16,10 +16,19 @@ import {
   Check,
   QrCode,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { useLanguage, getCurrentISTDisplay, formatISTDateString } from '../lib/i18n';
 import { SUPABASE_URL, SUPABASE_SQL_SCHEMA } from '../lib/supabase';
-import { apiClaimSlaCompensation } from '../lib/api';
+import {
+  apiClaimSlaCompensation,
+  apiGetAdminFinancialOverview,
+  apiGetAdminFinancialLedger,
+  apiGetAdminPayouts,
+  apiTogglePayoutHold,
+  apiRetryPayout,
+  apiProcessRefund,
+} from '../lib/api';
 import {
   evaluateAppointmentSla,
   calculatePlatformSlaSummary,
@@ -136,6 +145,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [suspensionNotes, setSuspensionNotes] = useState('');
   const [appointmentAction, setAppointmentAction] = useState<'flag' | 'reassign' | 'cancel'>('flag');
   const [reassignBarberId, setReassignBarberId] = useState('');
+
+  // Financial & Payout Governance State
+  const [financialOverview, setFinancialOverview] = useState<any | null>(null);
+  const [payoutsList, setPayoutsList] = useState<any[]>([]);
+  const [ledgerList, setLedgerList] = useState<any[]>([]);
+  const [isLoadingFinances, setIsLoadingFinances] = useState(false);
+  const [financeFeedback, setFinanceFeedback] = useState('');
+  const [holdModalPayout, setHoldModalPayout] = useState<any | null>(null);
+  const [holdReasonInput, setHoldReasonInput] = useState('');
+
+  const refreshFinancialData = async () => {
+    setIsLoadingFinances(true);
+    try {
+      const [ov, py, ld] = await Promise.all([
+        apiGetAdminFinancialOverview().catch(() => null),
+        apiGetAdminPayouts().catch(() => []),
+        apiGetAdminFinancialLedger().catch(() => ({ entries: [] })),
+      ]);
+      if (ov) setFinancialOverview(ov);
+      if (Array.isArray(py)) setPayoutsList(py);
+      if (ld?.entries) setLedgerList(ld.entries);
+    } catch (e: any) {
+      console.warn('[Finance Load Error]', e);
+    } finally {
+      setIsLoadingFinances(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection === 'payments') {
+      refreshFinancialData();
+    }
+  }, [activeSection]);
 
   // Sync inputs if platformSettings changes
   useEffect(() => {
@@ -1746,53 +1788,430 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* PAYMENTS */}
+        {/* FINANCIAL & PAYOUT GOVERNANCE */}
         {activeSection === 'payments' && (
-          <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
-            <h2 className="font-display text-2xl font-bold flex items-center gap-2">
-              <CreditCard className="w-5 h-5 text-[#F1E194]" />
-              <span>{tr('Payments Ledger (INR)', 'भुगतान विवरण (₹ INR)')}</span>
-            </h2>
-            {payments.length === 0 ? (
-              <p className="text-xs text-[#8A8178] py-6">
-                {tr('No payment transactions recorded yet.', 'अभी कोई भुगतान लेनदेन दर्ज नहीं है।')}
-              </p>
-            ) : (
-              <div className="space-y-2.5">
-                {payments.map((p: any) => (
-                  <div
-                    key={p.id}
-                    className="p-4 rounded-[14px] bg-[#111113] border border-[#F1E194]/12 flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <p className="font-semibold text-[#FFF9E8]">
-                        {p.clientName} · {p.shopName}
-                      </p>
-                      <p className="text-[#8A8178]">
-                        {p.methodDisplay || p.method} · {p.receiptNumber}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono-num font-bold text-[#F1E194]">
-                        {formatINR(p.amount)}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-[8px] bg-[#241719] text-[10px] uppercase">
-                        {p.status}
-                      </span>
-                      {onUpdatePayment && p.status !== 'refunded' && (
-                        <button
-                          type="button"
-                          onClick={() => onUpdatePayment(p.id, 'refunded')}
-                          className="text-[11px] text-[#F1E194] underline cursor-pointer"
-                        >
-                          {tr('Refund', 'रिफंड')}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+          <div className="space-y-6">
+            {/* Header & Refresh Controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#241719] border border-[#F1E194]/25 p-6 rounded-[24px]">
+              <div>
+                <h2 className="font-display text-2xl font-bold flex items-center gap-2 text-[#FFF9E8]">
+                  <CreditCard className="w-6 h-6 text-[#D4AF37]" />
+                  <span>{tr('Financial & Payout Governance', 'वित्तीय एवं पेआउट प्रशासन')}</span>
+                </h2>
+                <p className="text-xs text-[#8A8178] mt-1">
+                  {tr(
+                    'Real-time marketplace escrow, delayed barber payout releases, and immutable double-entry ledger.',
+                    'एस्क्रो, विलंबित नाई पेआउट रिलीज और डबल-एंट्री लेजर का प्रबंधन।'
+                  )}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {financialOverview?.isBalanced && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-400/40 text-emerald-300 text-xs font-semibold">
+                    <Check className="w-3.5 h-3.5" />
+                    {tr('Ledger Balanced (Debits = Credits)', 'लेजर संतुलित (डेबिट = क्रेडिट)')}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={refreshFinancialData}
+                  disabled={isLoadingFinances}
+                  className="px-4 py-2 rounded-[12px] bg-[#111113] border border-[#F1E194]/30 hover:border-[#F1E194] text-xs font-semibold text-[#F1E194] cursor-pointer flex items-center gap-2 transition-all"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFinances ? 'animate-spin' : ''}`} />
+                  {tr('Refresh Ledger', 'लेजर रीफ्रेश करें')}
+                </button>
+              </div>
+            </div>
+
+            {financeFeedback && (
+              <div className="p-3.5 rounded-[14px] bg-emerald-950/80 border border-emerald-400/40 text-emerald-200 text-xs font-semibold flex items-center justify-between">
+                <span>{financeFeedback}</span>
+                <button type="button" onClick={() => setFinanceFeedback('')} className="text-emerald-400 hover:text-white cursor-pointer">✕</button>
               </div>
             )}
+
+            {/* Financial Overview Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+              <div className="p-4 rounded-[18px] bg-[#241719] border border-[#F1E194]/15">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8A8178] block">
+                  {tr('Customer Escrow', 'ग्राहक एस्क्रो')}
+                </span>
+                <span className="text-lg font-bold font-mono text-[#FFF9E8] mt-1 block">
+                  {formatINR(financialOverview?.accounts?.customerEscrow ?? 0)}
+                </span>
+                <span className="text-[10px] text-emerald-400/80 mt-0.5 block">{tr('Captured Online', 'ऑनलाइन प्राप्त')}</span>
+              </div>
+
+              <div className="p-4 rounded-[18px] bg-[#241719] border border-[#F1E194]/15">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8A8178] block">
+                  {tr('Platform Revenue', 'प्लेटफ़ॉर्म आय')}
+                </span>
+                <span className="text-lg font-bold font-mono text-[#D4AF37] mt-1 block">
+                  {formatINR(financialOverview?.accounts?.platformFeeRevenue ?? 0)}
+                </span>
+                <span className="text-[10px] text-[#F1E194]/80 mt-0.5 block">{tr('Retained Fees', 'प्लेटफ़ॉर्म शुल्क')}</span>
+              </div>
+
+              <div className="p-4 rounded-[18px] bg-[#241719] border border-[#F1E194]/15">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8A8178] block">
+                  {tr('Pending Payables', 'लंबित पेआउट')}
+                </span>
+                <span className="text-lg font-bold font-mono text-amber-300 mt-1 block">
+                  {formatINR(financialOverview?.accounts?.pendingPayables ?? 0)}
+                </span>
+                <span className="text-[10px] text-amber-300/80 mt-0.5 block">{tr('Awaiting OTP', 'OTP सत्यापन शेष')}</span>
+              </div>
+
+              <div className="p-4 rounded-[18px] bg-[#241719] border border-[#F1E194]/15">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8A8178] block">
+                  {tr('In-Transit Payouts', 'ट्रांसफर प्रक्रिया में')}
+                </span>
+                <span className="text-lg font-bold font-mono text-blue-300 mt-1 block">
+                  {formatINR(financialOverview?.accounts?.payoutsInTransit ?? 0)}
+                </span>
+                <span className="text-[10px] text-blue-300/80 mt-0.5 block">{tr('Transfer Initiated', 'ट्रांसफर शुरू')}</span>
+              </div>
+
+              <div className="p-4 rounded-[18px] bg-[#241719] border border-[#F1E194]/15">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8A8178] block">
+                  {tr('Settled to Bank', 'बैंक में जमा')}
+                </span>
+                <span className="text-lg font-bold font-mono text-emerald-300 mt-1 block">
+                  {formatINR(financialOverview?.accounts?.settledPayouts ?? 0)}
+                </span>
+                <span className="text-[10px] text-emerald-400/80 mt-0.5 block">{tr('Bank Confirmed', 'बैंक पुष्ट')}</span>
+              </div>
+
+              <div className="p-4 rounded-[18px] bg-[#241719] border border-[#F1E194]/15">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8A8178] block">
+                  {tr('Total Refunds', 'कुल रिफंड')}
+                </span>
+                <span className="text-lg font-bold font-mono text-red-300 mt-1 block">
+                  {formatINR(financialOverview?.accounts?.refundsPaid ?? 0)}
+                </span>
+                <span className="text-[10px] text-red-400/80 mt-0.5 block">{tr('Reversed', 'वापस किया गया')}</span>
+              </div>
+            </div>
+
+            {/* Barber Payouts Management Table */}
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h3 className="font-display text-lg font-bold text-[#FFF9E8]">
+                  {tr('Barber Marketplace Payouts', 'नाई मार्केटप्लेस पेआउट्स')} ({payoutsList.length})
+                </h3>
+                <span className="text-xs text-[#8A8178]">
+                  {tr('Payouts are released only after customer OTP verification', 'ग्राहक OTP सत्यापन के बाद ही भुगतान जारी होता है')}
+                </span>
+              </div>
+
+              {payoutsList.length === 0 ? (
+                <p className="text-xs text-[#8A8178] py-4">{tr('No payout records found.', 'कोई पेआउट रिकॉर्ड नहीं मिला।')}</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#F1E194]/15 text-[#8A8178] uppercase text-[10px] tracking-wider">
+                        <th className="py-2.5 px-3">{tr('Payout ID / Booking', 'पेआउट / बुकिंग')}</th>
+                        <th className="py-2.5 px-3">{tr('Barber / Salon', 'नाई / सैलून')}</th>
+                        <th className="py-2.5 px-3">{tr('Gross', 'सकल')}</th>
+                        <th className="py-2.5 px-3">{tr('Net Payout', 'शुद्ध पेआउट')}</th>
+                        <th className="py-2.5 px-3">{tr('Status', 'स्थिति')}</th>
+                        <th className="py-2.5 px-3">{tr('Transfer Ref', 'ट्रांसफर संदर्भ')}</th>
+                        <th className="py-2.5 px-3 text-right">{tr('Governance Actions', 'कार्रवाई')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F1E194]/10">
+                      {payoutsList.map((py: any) => {
+                        const statusColors: Record<string, string> = {
+                          pending_verification: 'bg-amber-950/70 text-amber-300 border-amber-400/30',
+                          initiated: 'bg-blue-950/70 text-blue-300 border-blue-400/30',
+                          settled: 'bg-emerald-950/70 text-emerald-300 border-emerald-400/30',
+                          on_hold: 'bg-red-950/70 text-red-300 border-red-400/30',
+                          failed: 'bg-red-950/70 text-red-300 border-red-400/30',
+                          reversed: 'bg-zinc-800 text-zinc-300 border-zinc-700',
+                        };
+
+                        return (
+                          <tr key={py.id} className="hover:bg-[#111113]/50 transition-colors">
+                            <td className="py-3 px-3">
+                              <span className="font-mono text-[#F1E194] font-semibold block">{py.id}</span>
+                              <span className="text-[10px] text-[#8A8178]">#{py.appointmentId}</span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="font-semibold text-[#FFF9E8] block">{py.barberName}</span>
+                              <span className="text-[10px] text-[#8A8178]">Shop: {py.shopId}</span>
+                            </td>
+                            <td className="py-3 px-3 font-mono text-[#8A8178]">
+                              ₹{py.grossAmount}
+                            </td>
+                            <td className="py-3 px-3 font-mono text-emerald-300 font-bold">
+                              ₹{py.netPayoutAmount}
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-semibold border ${statusColors[py.status] || 'bg-zinc-800 text-zinc-300'}`}>
+                                {py.status.replace('_', ' ').toUpperCase()}
+                              </span>
+                              {py.holdReason && (
+                                <span className="text-[10px] text-amber-300 block mt-0.5 max-w-xs truncate" title={py.holdReason}>
+                                  Hold: {py.holdReason}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 font-mono text-[10px] text-[#8A8178]">
+                              {py.providerTransferId || '—'}
+                            </td>
+                            <td className="py-3 px-3 text-right space-x-2">
+                              {py.status === 'on_hold' ? (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await apiTogglePayoutHold(py.id, false);
+                                      setFinanceFeedback(tr('Payout hold released successfully.', 'पेआउट होल्ड हटा दिया गया।'));
+                                      refreshFinancialData();
+                                    } catch (e: any) {
+                                      setFinanceFeedback(e?.message || 'Failed to release hold');
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 rounded-[8px] bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 border border-emerald-400/30 text-[11px] font-semibold cursor-pointer"
+                                >
+                                  {tr('Release Hold', 'होल्ड हटाएं')}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setHoldModalPayout(py);
+                                    setHoldReasonInput('');
+                                  }}
+                                  className="px-2.5 py-1 rounded-[8px] bg-[#111113] hover:bg-[#5B0E14] text-[#F1E194] border border-[#F1E194]/25 text-[11px] font-semibold cursor-pointer"
+                                >
+                                  {tr('Apply Hold', 'होल्ड लगाएं')}
+                                </button>
+                              )}
+
+                              {py.status === 'failed' && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await apiRetryPayout(py.id);
+                                      setFinanceFeedback(tr('Payout retry initiated.', 'पेआउट पुनः प्रयास शुरू।'));
+                                      refreshFinancialData();
+                                    } catch (e: any) {
+                                      setFinanceFeedback(e?.message || 'Retry failed');
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 rounded-[8px] bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-400/30 text-[11px] font-semibold cursor-pointer"
+                                >
+                                  {tr('Retry Payout', 'पुनः प्रयास')}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Hold Reason Modal Dialog */}
+            {holdModalPayout && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                <div className="w-full max-w-md bg-[#241719] border border-[#D4AF37] p-6 rounded-[20px] space-y-4 shadow-2xl">
+                  <h3 className="font-display text-lg font-bold text-[#FFF9E8]">
+                    {tr('Apply Administrative Payout Hold', 'पेआउट पर प्रशासनिक होल्ड लगाएं')}
+                  </h3>
+                  <p className="text-xs text-[#8A8178]">
+                    {tr(
+                      `Placing payout for ${holdModalPayout.barberName} (₹${holdModalPayout.netPayoutAmount}) on hold prevents fund transfer until reviewed. A documented reason is strictly required.`,
+                      `पेआउट होल्ड करने के लिए ठोस कारण अनिवार्य है।`
+                    )}
+                  </p>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#F1E194] mb-1">
+                      {tr('Documented Reason for Hold *', 'होल्ड का दस्तावेजीकरण कारण *')}
+                    </label>
+                    <textarea
+                      value={holdReasonInput}
+                      onChange={(e) => setHoldReasonInput(e.target.value)}
+                      placeholder={tr('e.g. Client reported service dispute or pricing inquiry', 'उदा. ग्राहक ने सेवा या कीमत पर आपत्ति जताई है')}
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-[10px] bg-[#111113] border border-[#F1E194]/30 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setHoldModalPayout(null)}
+                      className="px-4 py-2 rounded-[10px] bg-[#111113] border border-[#F1E194]/20 text-xs text-[#8A8178] cursor-pointer"
+                    >
+                      {tr('Cancel', 'रद्द करें')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const clean = holdReasonInput.trim();
+                        if (!clean) {
+                          setFinanceFeedback(tr('Please enter a documented reason for the hold.', 'कृपया होल्ड का कारण दर्ज करें।'));
+                          return;
+                        }
+                        try {
+                          await apiTogglePayoutHold(holdModalPayout.id, true, clean);
+                          setHoldModalPayout(null);
+                          setFinanceFeedback(tr('Payout placed on hold successfully.', 'पेआउट पर सफलतापूर्वक होल्ड लगाया गया।'));
+                          refreshFinancialData();
+                        } catch (e: any) {
+                          setFinanceFeedback(e?.message || 'Failed to apply hold');
+                        }
+                      }}
+                      className="px-4 py-2 rounded-[10px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+                    >
+                      {tr('Confirm Hold', 'होल्ड की पुष्टि करें')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Customer Payments & Bookings with OTP Verification Audit */}
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
+              <h3 className="font-display text-lg font-bold text-[#FFF9E8] flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-[#D4AF37]" />
+                <span>{tr('Customer Payments & OTP Verification Audit', 'ग्राहक भुगतान एवं OTP सत्यापन ऑडिट')}</span>
+              </h3>
+
+              {payments.length === 0 ? (
+                <p className="text-xs text-[#8A8178] py-4">{tr('No customer payments recorded yet.', 'अभी तक कोई भुगतान नहीं मिला।')}</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {payments.map((p: any) => {
+                    const apt = appointments.find((a: any) => a.id === p.appointmentId);
+                    return (
+                      <div
+                        key={p.id}
+                        className="p-4 rounded-[14px] bg-[#111113] border border-[#F1E194]/12 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-[#FFF9E8]">
+                              {p.clientName} · {p.shopName}
+                            </span>
+                            <span className="text-[10px] font-mono text-[#D4AF37]">
+                              #{p.appointmentId}
+                            </span>
+                          </div>
+                          <p className="text-[#8A8178] mt-0.5">
+                            {p.methodDisplay || p.method} · Receipt: {p.receiptNumber} · Txn: {p.providerPaymentId || 'N/A'}
+                          </p>
+                          {apt && (
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[10px] text-[#8A8178]">
+                                Service: <strong>{apt.serviceName}</strong> (Barber: {apt.barberName})
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                apt.completionOtpStatus === 'verified'
+                                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-400/30'
+                                  : apt.completionOtpStatus === 'revoked'
+                                  ? 'bg-zinc-800 text-zinc-400'
+                                  : 'bg-amber-950 text-amber-300 border border-amber-400/30'
+                              }`}>
+                                OTP: {(apt.completionOtpStatus || 'ACTIVE').toUpperCase()}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono font-bold text-[#F1E194] text-sm">
+                            {formatINR(p.amount)}
+                          </span>
+                          <span className="px-2.5 py-1 rounded-[8px] bg-[#241719] text-[10px] uppercase font-semibold text-[#FFF9E8]">
+                            {p.status}
+                          </span>
+                          {p.status !== 'refunded' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const reason = 'Customer cancellation refund approved by administrator';
+                                try {
+                                  await apiProcessRefund(p.appointmentId, reason);
+                                  setFinanceFeedback(tr('Refund processed successfully with balanced ledger reversal.', 'रिफंड एवं लेजर रिवर्सल पूर्ण हुआ।'));
+                                  refreshFinancialData();
+                                } catch (e: any) {
+                                  setFinanceFeedback(e?.message || 'Refund failed');
+                                }
+                              }}
+                              className="px-3 py-1 rounded-[8px] bg-red-950/80 hover:bg-red-900 border border-red-400/40 text-red-200 text-[11px] font-semibold cursor-pointer"
+                            >
+                              {tr('Authorize Refund', 'रिफंड स्वीकृत करें')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Immutable Balanced Financial Ledger Audit Trail */}
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-display text-lg font-bold text-[#FFF9E8]">
+                    {tr('Immutable Financial Ledger (Double-Entry Bookkeeping)', 'अपरिवर्तनीय वित्तीय लेजर')}
+                  </h3>
+                  <p className="text-xs text-[#8A8178]">
+                    {tr('Every entry is mathematically balanced: Debits equal Credits. Historical entries cannot be modified.', 'हर प्रविष्टि संतुलित है: डेबिट और क्रेडिट बराबर हैं।')}
+                  </p>
+                </div>
+                <span className="font-mono text-xs text-[#F1E194]">
+                  {ledgerList.length} {tr('Journal Postings', 'प्रविष्टियां')}
+                </span>
+              </div>
+
+              {ledgerList.length === 0 ? (
+                <p className="text-xs text-[#8A8178] py-4">{tr('No ledger postings recorded yet.', 'अभी तक कोई लेजर प्रविष्टि नहीं है।')}</p>
+              ) : (
+                <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+                  <table className="w-full text-left text-xs border-collapse font-mono">
+                    <thead className="sticky top-0 bg-[#241719] z-10 border-b border-[#F1E194]/20 text-[10px] uppercase text-[#8A8178]">
+                      <tr>
+                        <th className="py-2 px-3">#</th>
+                        <th className="py-2 px-3">{tr('Account', 'खाता')}</th>
+                        <th className="py-2 px-3">{tr('Type', 'प्रकार')}</th>
+                        <th className="py-2 px-3">{tr('Amount', 'राशि')}</th>
+                        <th className="py-2 px-3">{tr('Ref Type', 'संदर्भ')}</th>
+                        <th className="py-2 px-3">{tr('Description', 'विवरण')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F1E194]/10 text-[11px]">
+                      {ledgerList.map((entry: any) => (
+                        <tr key={entry.id} className="hover:bg-[#111113]/40">
+                          <td className="py-2 px-3 text-[#8A8178]">{entry.entryNumber}</td>
+                          <td className="py-2 px-3 font-semibold text-[#FFF9E8]">{entry.account}</td>
+                          <td className="py-2 px-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${entry.entryType === 'DEBIT' ? 'bg-blue-950 text-blue-300' : 'bg-emerald-950 text-emerald-300'}`}>
+                              {entry.entryType}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-bold text-[#F1E194]">₹{entry.amount}</td>
+                          <td className="py-2 px-3 text-[#8A8178] text-[10px]">{entry.referenceType}</td>
+                          <td className="py-2 px-3 text-[#FFF9E8]/80 text-[10px] max-w-sm truncate" title={entry.description}>
+                            {entry.description}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

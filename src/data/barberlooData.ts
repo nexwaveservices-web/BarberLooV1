@@ -7,6 +7,8 @@ export type PageView =
   | 'profile'
   | 'barber-dashboard'
   | 'admin-dashboard'
+  | 'privacy-policy'
+  | 'terms-of-service'
   | 'auth';
 
 export const ASSETS = {
@@ -122,6 +124,10 @@ export interface AppointmentItem {
   paymentStatus?: string;
   couponCode?: string;
   completionOtp?: string;
+  completionOtpStatus?: string;
+  payoutHoldReason?: string;
+  payoutStatus?: string;
+  completionVerifiedAt?: Date | string | null;
   razorpayPaymentId?: string;
   razorpayOrderId?: string;
 }
@@ -153,48 +159,17 @@ export interface CouponItem {
   expiryDate: string;
 }
 
-export const DEFAULT_FALLBACK_SHOP: ShopItem = {
-  id: '7fa27fef-d890-449e-b9bb-85bbfeaa2998',
-  name: 'BarberLoo Flagship Salon',
-  district: 'Jalandhar',
-  address: 'Model Town Main Market, Jalandhar, Punjab',
-  phone: '+91 98765 43210',
-  rating: 4.9,
-  reviewCount: 142,
-  isOpen: true,
-  verified: true,
-  image: ASSETS.royalInterior,
-  priceTier: '₹₹₹',
-  minPrice: 450,
-  distance: '0.4 km',
-  tagline: 'Luxury Grooming & Bespoke Appointments',
-  about: 'Premier master grooming delivered by expert craftsmen in a relaxed, luxurious setting.',
-  latitude: '31.3130',
-  longitude: '75.5866',
-  pinCode: '144003',
-  landmark: 'Near Model Town Market Square',
-};
-
-// Clean production arrays with authoritative fallback shop to guarantee zero blank screens
+// Production empty initial states (all real data fetched from database / Supabase)
 export const SERVICES: ServiceItem[] = [];
 export const BARBERS: BarberItem[] = [];
-export const SHOPS: ShopItem[] = [DEFAULT_FALLBACK_SHOP];
-export const INITIAL_SHOPS: ShopItem[] = [DEFAULT_FALLBACK_SHOP];
-export const INITIAL_BARBERS: BarberItem[] = BARBERS;
-export const INITIAL_SERVICES: ServiceItem[] = SERVICES;
+export const SHOPS: ShopItem[] = [];
+export const INITIAL_SHOPS: ShopItem[] = [];
+export const INITIAL_BARBERS: BarberItem[] = [];
+export const INITIAL_SERVICES: ServiceItem[] = [];
 export const INITIAL_APPOINTMENTS: AppointmentItem[] = [];
 export const REVIEWS: ReviewItem[] = [];
 export const INITIAL_COUPONS: CouponItem[] = [];
-
-export const OPENING_HOURS = [
-  { id: 'wh-mon', day: 'Monday', hours: '09:30 – 21:00', status: 'Open', breakWindow: '14:00 – 14:45' },
-  { id: 'wh-tue', day: 'Tuesday', hours: '09:30 – 21:00', status: 'Open', breakWindow: '14:00 – 14:45' },
-  { id: 'wh-wed', day: 'Wednesday', hours: '09:30 – 21:30', status: 'Open', breakWindow: '14:30 – 15:15' },
-  { id: 'wh-thu', day: 'Thursday', hours: '09:30 – 22:00', status: 'Late Lounge', breakWindow: '15:00 – 15:45' },
-  { id: 'wh-fri', day: 'Friday', hours: '09:30 – 22:00', status: 'Late Lounge', breakWindow: '15:00 – 15:45' },
-  { id: 'wh-sat', day: 'Saturday', hours: '10:00 – 21:00', status: 'Peak Hours', breakWindow: '14:00 – 14:30' },
-  { id: 'wh-sun', day: 'Sunday', hours: '11:00 – 19:00', status: 'By Appointment', breakWindow: 'None' },
-];
+export const OPENING_HOURS: any[] = [];
 
 export interface PlatformSettingsItem {
   id: string;

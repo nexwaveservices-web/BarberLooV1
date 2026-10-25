@@ -9,16 +9,32 @@ export const SUPABASE_ANON_KEY =
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
   'sb_publishable_bUpxVfRsVPz_d0qg1QrrNA_m7zM66t6';
 
-export const getAuthToken = async (): Promise<string | null> => {
-  try {
-    const { data } = await supabase.auth.getSession();
-    return data?.session?.access_token || null;
-  } catch {
-    return null;
-  }
-};
-
+export const COOKIE_SESSION_KEY = 'barberloo_supabase_session';
+export const COOKIE_AUTH_TOKEN = 'barberloo_auth_token';
 const SESSION_STORAGE_KEY = 'barberloo_supabase_session_v1';
+
+export function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(
+    new RegExp('(?:^|;\\s*)' + name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') + '=([^;]*)')
+  );
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+export function setCookie(name: string, value: string, days = 30) {
+  if (typeof document === 'undefined') return;
+  const expires = new Date(Date.now() + days * 864e5).toUTCString();
+  const secure =
+    typeof window !== 'undefined' && window.location.protocol === 'https:'
+      ? '; Secure'
+      : '';
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax${secure}`;
+}
+
+export function deleteCookie(name: string) {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax`;
+}
 
 export interface SupabaseAuthUserSession {
   uid: string;
@@ -26,6 +42,7 @@ export interface SupabaseAuthUserSession {
   name: string;
   phone: string;
   role: 'customer' | 'barber' | 'admin';
+  token?: string;
   state_id?: string;
   city_id?: string;
   state?: string;
@@ -34,13 +51,74 @@ export interface SupabaseAuthUserSession {
   cityId?: string;
 }
 
+const hybridStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const val = localStorage.getItem(key);
+        if (val) return val;
+      }
+    } catch {}
+    return getCookie(key);
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, value);
+      }
+    } catch {}
+    setCookie(key, value, 30);
+  },
+  removeItem: (key: string): void => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(key);
+      }
+    } catch {}
+    deleteCookie(key);
+  },
+};
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    storage: typeof window !== 'undefined' ? hybridStorage : undefined,
   },
 });
+
+export const getAuthToken = async (): Promise<string | null> => {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (token) {
+      setCookie(COOKIE_AUTH_TOKEN, token, 30);
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(COOKIE_AUTH_TOKEN, token);
+        } catch {}
+      }
+      return token;
+    }
+    const cookieToken =
+      getCookie(COOKIE_AUTH_TOKEN) || getCookie('sb-access-token');
+    if (cookieToken) return cookieToken;
+
+    if (typeof localStorage !== 'undefined') {
+      const localToken = localStorage.getItem(COOKIE_AUTH_TOKEN);
+      if (localToken) return localToken;
+    }
+    return null;
+  } catch {
+    return (
+      getCookie(COOKIE_AUTH_TOKEN) ||
+      (typeof localStorage !== 'undefined'
+        ? localStorage.getItem(COOKIE_AUTH_TOKEN)
+        : null)
+    );
+  }
+};
 
 if (typeof window !== 'undefined') {
   (window as any).barberLooSupabase = supabase;
@@ -48,11 +126,28 @@ if (typeof window !== 'undefined') {
 
 export function getPersistedSupabaseUser(): SupabaseAuthUserSession | null {
   try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.uid && parsed.email) {
-      return parsed;
+    // 1. Check localStorage first
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.uid && parsed.email) {
+          return parsed;
+        }
+      }
+    }
+    // 2. Fallback to cookie
+    const cookieRaw = getCookie(COOKIE_SESSION_KEY);
+    if (cookieRaw) {
+      const parsed = JSON.parse(cookieRaw);
+      if (parsed && parsed.uid && parsed.email) {
+        if (typeof localStorage !== 'undefined') {
+          try {
+            localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(parsed));
+          } catch {}
+        }
+        return parsed;
+      }
     }
     return null;
   } catch {
@@ -60,12 +155,32 @@ export function getPersistedSupabaseUser(): SupabaseAuthUserSession | null {
   }
 }
 
-function setPersistedSupabaseUser(session: SupabaseAuthUserSession | null) {
+export function setPersistedSupabaseUser(
+  session: SupabaseAuthUserSession | null,
+  token?: string
+) {
   try {
     if (!session) {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        localStorage.removeItem(COOKIE_AUTH_TOKEN);
+      }
+      deleteCookie(COOKIE_SESSION_KEY);
+      deleteCookie(COOKIE_AUTH_TOKEN);
+      deleteCookie('sb-access-token');
     } else {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+      const raw = JSON.stringify(session);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SESSION_STORAGE_KEY, raw);
+        if (token) {
+          localStorage.setItem(COOKIE_AUTH_TOKEN, token);
+        }
+      }
+      setCookie(COOKIE_SESSION_KEY, raw, 30);
+      if (token) {
+        setCookie(COOKIE_AUTH_TOKEN, token, 30);
+        setCookie('sb-access-token', token, 30);
+      }
     }
   } catch {
     // ignore storage errors
@@ -205,12 +320,14 @@ export async function supabaseSignUpUser(
 
   await supabase.from('profiles').upsert(profileRecord, { onConflict: 'uid' });
 
+  const token = authData?.session?.access_token;
   const sessionObj: SupabaseAuthUserSession = {
     uid,
     email: cleanEmail,
     name: displayName,
     phone: cleanPhone,
     role: assignedRole,
+    token,
     state_id: profileRecord.state_id,
     city_id: profileRecord.city_id,
     state: profileRecord.state,
@@ -218,7 +335,7 @@ export async function supabaseSignUpUser(
     stateId: profileRecord.state_id,
     cityId: profileRecord.city_id,
   };
-  setPersistedSupabaseUser(sessionObj);
+  setPersistedSupabaseUser(sessionObj, token);
   return sessionObj;
 }
 
@@ -262,6 +379,7 @@ export async function supabaseSignInUser(
 
   const resolvedRole = userProfile?.role || supaUser.user_metadata?.role || 'customer';
 
+  const token = authData.session?.access_token;
   const sessionObj: SupabaseAuthUserSession = {
     uid,
     email: cleanEmail,
@@ -271,6 +389,7 @@ export async function supabaseSignInUser(
       cleanEmail.split('@')[0],
     phone: userProfile?.phone || supaUser.user_metadata?.phone || '',
     role: resolvedRole,
+    token,
     state_id: userProfile?.state_id,
     city_id: userProfile?.city_id,
     state: userProfile?.state,
@@ -279,7 +398,7 @@ export async function supabaseSignInUser(
     cityId: userProfile?.city_id,
   };
 
-  setPersistedSupabaseUser(sessionObj);
+  setPersistedSupabaseUser(sessionObj, token);
   return sessionObj;
 }
 

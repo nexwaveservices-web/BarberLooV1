@@ -34,6 +34,7 @@ import {
 } from '../lib/i18n';
 import { initiateRazorpayPayment } from '../lib/razorpay';
 import { loadShopForBooking, parseShopIdFromUrl } from '../lib/booking';
+import { getBookingUrl } from '../lib/domain';
 import { apiCalculatePricing } from '../lib/api';
 
 interface BookingPageProps {
@@ -969,6 +970,33 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   PAID • VERIFIED
                 </span>
               </div>
+
+              {bookingComplete.completionOtp && (
+                <div className="p-4 rounded-[16px] bg-[#111113] border-2 border-[#D4AF37] space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#F1E194] bg-[#241719] px-2 py-0.5 rounded border border-[#F1E194]/20">
+                        🔐 {tr('SERVICE COMPLETION OTP', 'सेवा पूर्णता OTP')}
+                      </span>
+                      <p className="text-xs text-[#FFF9E8]/90 mt-1">
+                        {tr(
+                          'Provide this 6-digit OTP to your barber only AFTER your haircut is completed to release payout.',
+                          'यह 6-अंकीय OTP अपने नाई को सेवा समाप्त होने के बाद ही दें ताकि उनकी कमाई रिलीज हो सके।'
+                        )}
+                      </p>
+                      <p className="text-[11px] text-[#8A8178] mt-0.5">
+                        {tr(
+                          'Barber earnings remain safely held in platform escrow until verified.',
+                          'सत्यापन होने तक नाई की कमाई सुरक्षित एस्क्रो में रहती है।'
+                        )}
+                      </p>
+                    </div>
+                    <div className="px-5 py-2.5 rounded-[12px] bg-[#241719] border border-[#D4AF37] font-mono text-2xl font-bold tracking-[0.3em] text-[#F1E194] text-center shadow-inner shrink-0">
+                      {bookingComplete.completionOtp}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1155,7 +1183,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                             window.history.pushState(
                               {},
                               '',
-                              `booking.html?shop_id=${encodeURIComponent(sh.id)}`
+                              getBookingUrl(sh)
                             );
                           }}
                           className={`px-3 py-1.5 rounded-[10px] text-xs font-semibold cursor-pointer transition-all ${

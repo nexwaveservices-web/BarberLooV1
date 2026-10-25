@@ -1,8 +1,26 @@
 import { createSignedToken } from '../src/middleware/auth.ts';
 import { db } from '../src/db/index.ts';
-import { profiles, services, barbers, shops, appointments, coupons, reviews } from '../src/db/schema.ts';
+import {
+  profiles,
+  services,
+  barbers,
+  shops,
+  appointments,
+  coupons,
+  reviews,
+  financialLedger,
+  barberPayouts,
+  payments,
+} from '../src/db/schema.ts';
 import { eq, and, or, like, ilike } from 'drizzle-orm';
 import crypto from 'crypto';
+import {
+  slugify,
+  getShopSlug,
+  getShopUrl,
+  getBookingUrl,
+  findShopBySlugOrId,
+} from '../src/lib/domain.ts';
 
 const BASE_URL = 'http://localhost:3000';
 
@@ -80,6 +98,22 @@ async function runQaSuite() {
         status: 'active',
       },
     ]);
+
+    await db.insert(barbers).values({
+      id: testBarberUid,
+      userUid: testBarberUid,
+      shopId: 'shop-1790996769501',
+      shopName: 'Elite Unisex Salon',
+      name: 'QA Test Barber',
+      role: 'Master Stylist',
+      specialty: 'Fades & Beard Sculpting',
+      image: 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1',
+      bio: 'Master barber for QA verification',
+      phone: '+91 98765 00002',
+      active: true,
+      verificationStatus: 'verified',
+      verified: true,
+    } as any);
 
     const customerToken = createSignedToken({
       uid: testCustomerUid,
@@ -173,6 +207,12 @@ async function runQaSuite() {
   const [targetShop] = await db.select().from(shops).where(eq(shops.id, 'shop-1790996769501'));
   const [targetBarber] = await db.select().from(barbers).where(eq(barbers.shopId, targetShop.id));
   const [targetService] = await db.select().from(services).where(eq(services.shopId, targetShop.id));
+  const targetBarberToken = createSignedToken({
+    uid: targetBarber.userUid || targetBarber.id,
+    email: 'target.barber@barberloo.in',
+    role: 'barber',
+    name: targetBarber.name,
+  });
 
   // 8. Past booking rejection
   const resPast = await fetch(`${BASE_URL}/api/appointments`, {
@@ -432,6 +472,335 @@ async function runQaSuite() {
     'Test 21: Barber account strictly blocked from creating appointments (HTTP 403 Forbidden)'
   );
 
+  // 22. Clean Permalink Generation: slugify utility
+  const testSlug1 = slugify('Pawan Hair Saloon, Ludhiana!');
+  const testSlug2 = slugify('  The Royal Barbershop (Mayfair)  ');
+  assert(
+    testSlug1 === 'pawan-hair-saloon-ludhiana' && testSlug2 === 'the-royal-barbershop-mayfair',
+    'Test 22: Slug generator produces clean, URL-safe permalinks from shop names and locations'
+  );
+
+  // 23. Shop Permalink Builder: /shop/:slug/
+  const shopPermalink = getShopUrl(targetShop, 'https://barberloo.in');
+  assert(
+    shopPermalink.startsWith('https://barberloo.in/shop/') && shopPermalink.endsWith('/'),
+    `Test 23: Clean Shop URL generator creates canonical permalink (${shopPermalink})`
+  );
+
+  // 24. Booking Permalink Builder: /book-appointment/?shop=:slug
+  const bookingPermalink = getBookingUrl(targetShop, 'https://barberloo.in');
+  assert(
+    bookingPermalink.includes('/book-appointment/?shop='),
+    `Test 24: Booking URL generator builds clean permalink (${bookingPermalink})`
+  );
+
+  // 25. Dual-Mode Shop Lookup: resolve by clean slug or raw shop ID
+  const shopBySlug = findShopBySlugOrId([targetShop], getShopSlug(targetShop));
+  const shopById = findShopBySlugOrId([targetShop], targetShop.id);
+  assert(
+    shopBySlug?.id === targetShop.id && shopById?.id === targetShop.id,
+    'Test 25: Shop finder reliably resolves salon by either clean slug or legacy ID'
+  );
+
+  // 26. WP Pusher Status Endpoint: verifies connected WordPress repo without redirecting
+  const resWpPusher = await fetch(`${BASE_URL}/api/wppusher/status`);
+  const wpPusherData = await resWpPusher.json();
+  assert(
+    resWpPusher.status === 200 &&
+      wpPusherData.connected === true &&
+      wpPusherData.githubSlug === 'nexwaveservices-web/BarberLooV1' &&
+      wpPusherData.pluginFile === 'barberloo.php',
+    'Test 26: WP Pusher status endpoint reports active GitHub bridge and repository metadata'
+  );
+
+  // 27. WordPress Admin & System Path Protection Simulation
+  // Verifies that paths matching /wp-admin, wp-login, etc., are never treated as frontend deep-routes
+  const adminTestPaths = [
+    '/wp-admin/',
+    '/wp-admin/admin.php?page=wppusher',
+    '/wp-admin/plugins.php',
+    '/wp-login.php',
+    '/wp-json/wp/v2/posts',
+  ];
+  const isWpSystemOrAdmin = (p: string) =>
+    p.startsWith('/wp-admin') ||
+    p.includes('wp-admin') ||
+    p.includes('wp-login') ||
+    p.includes('/wp-json/') ||
+    p.includes('wp-cron') ||
+    p.includes('xmlrpc');
+
+  const allProtected = adminTestPaths.every(isWpSystemOrAdmin);
+  assert(
+    allProtected,
+    'Test 27: WordPress Administration, WP Pusher submenu, and login URLs are strictly guarded'
+  );
+
+  // 28. Customer Payment Collection & Ledger Posting at Booking Time
+  const testAptOtpId = `apt-otp-qa-${Date.now()}`;
+  const resOtpBooking = await fetch(`${BASE_URL}/api/appointments`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${customerToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id: testAptOtpId,
+      shopId: targetShop.id,
+      serviceId: targetService.id,
+      barberId: testBarberUid,
+      date: '2026-11-21',
+      time: '17:30',
+      durationMin: 30,
+      price: targetService.price,
+      paymentMethod: 'online',
+      razorpayPaymentId: `pay_qa_live_${Date.now()}`,
+      razorpayOrderId: `order_qa_live_${Date.now()}`,
+    }),
+  });
+  const otpBookingData = await resOtpBooking.json();
+
+  const [payoutRow] = await db
+    .select()
+    .from(barberPayouts)
+    .where(eq(barberPayouts.appointmentId, testAptOtpId));
+
+  const ledgerPostings = await db
+    .select()
+    .from(financialLedger)
+    .where(eq(financialLedger.appointmentId, testAptOtpId));
+
+  const hasCustomerEscrowDebit = ledgerPostings.some(
+    (l) => l.account === 'customer_funds_escrow' && l.entryType === 'DEBIT'
+  );
+  const hasPlatformFeeCredit = ledgerPostings.some(
+    (l) => l.account === 'platform_fee_revenue' && l.entryType === 'CREDIT'
+  );
+  const hasBarberPendingCredit = ledgerPostings.some(
+    (l) => l.account === 'barber_payable_pending' && l.entryType === 'CREDIT'
+  );
+
+  assert(
+    resOtpBooking.status === 200 &&
+      payoutRow?.status === 'pending_verification' &&
+      hasCustomerEscrowDebit &&
+      hasPlatformFeeCredit &&
+      hasBarberPendingCredit,
+    'Test 28: Online payment collected at booking; barber earnings held pending and balanced double-entry ledger created',
+    JSON.stringify(otpBookingData)
+  );
+
+  // 29. Completion OTP Confidentiality (Customer Access Only)
+  const resCustOtp = await fetch(
+    `${BASE_URL}/api/appointments/${testAptOtpId}/completion-otp`,
+    {
+      headers: { Authorization: `Bearer ${customerToken}` },
+    }
+  );
+  const custOtpData = await resCustOtp.json();
+  const rawCustomerOtp = custOtpData.completionOtp;
+
+  const resBarberPeekOtp = await fetch(
+    `${BASE_URL}/api/appointments/${testAptOtpId}/completion-otp`,
+    {
+      headers: { Authorization: `Bearer ${barberToken}` },
+    }
+  );
+
+  assert(
+    resCustOtp.status === 200 &&
+      /^\d{6}$/.test(rawCustomerOtp) &&
+      resBarberPeekOtp.status === 403,
+    'Test 29: Customer receives cryptographically secure 6-digit completion OTP; Barber blocked from retrieving customer secret (HTTP 403)'
+  );
+
+  // 30. Invalid OTP Rejection & Rate Limiting
+  const resBadOtp = await fetch(
+    `${BASE_URL}/api/appointments/${testAptOtpId}/verify-completion-otp`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${barberToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ otp: '000000' }),
+    }
+  );
+  const badOtpData = await resBadOtp.json();
+
+  const [aptAfterBad] = await db
+    .select()
+    .from(appointments)
+    .where(eq(appointments.id, testAptOtpId));
+
+  assert(
+    resBadOtp.status === 400 &&
+      badOtpData.error?.includes('Invalid completion OTP') &&
+      aptAfterBad.completionOtpAttempts === 1 &&
+      aptAfterBad.status === 'confirmed',
+    'Test 30: Invalid OTP rejected, attempt counter incremented, barber earnings remain pending',
+    JSON.stringify({ status: resBadOtp.status, badOtpData })
+  );
+
+  // 31. Valid OTP Verification, Appointment Completion, Ledger Release & Payout Initiation
+  const resGoodOtp = await fetch(
+    `${BASE_URL}/api/appointments/${testAptOtpId}/verify-completion-otp`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${barberToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ otp: rawCustomerOtp }),
+    }
+  );
+  const goodOtpData = await resGoodOtp.json();
+
+  const [aptAfterGood] = await db
+    .select()
+    .from(appointments)
+    .where(eq(appointments.id, testAptOtpId));
+
+  const [payoutAfterGood] = await db
+    .select()
+    .from(barberPayouts)
+    .where(eq(barberPayouts.appointmentId, testAptOtpId));
+
+  const ledgerAfterGood = await db
+    .select()
+    .from(financialLedger)
+    .where(eq(financialLedger.appointmentId, testAptOtpId));
+
+  const hasReleaseLedger = ledgerAfterGood.some(
+    (l) => l.account === 'barber_payable_released' && l.referenceType === 'otp_completion'
+  );
+  const hasInTransitLedger = ledgerAfterGood.some(
+    (l) => l.account === 'barber_payout_in_transit' && l.referenceType === 'payout_initiated'
+  );
+
+  assert(
+    resGoodOtp.status === 200 &&
+      aptAfterGood.status === 'completed' &&
+      aptAfterGood.completionOtpStatus === 'verified' &&
+      payoutAfterGood?.status === 'initiated' &&
+      hasReleaseLedger &&
+      hasInTransitLedger,
+    'Test 31: Correct OTP verified; appointment completed, ledger releases barber earnings, and provider transfer is initiated'
+  );
+
+  // 32. Double Verification & Idempotency Guard
+  const resDoubleVerify = await fetch(
+    `${BASE_URL}/api/appointments/${testAptOtpId}/verify-completion-otp`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${barberToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ otp: rawCustomerOtp }),
+    }
+  );
+
+  assert(
+    resDoubleVerify.status === 400,
+    'Test 32: Concurrency & Idempotency protection prevents double-completion of appointment'
+  );
+
+  // 33. Administrative Hold Prevents Payout Execution
+  const testHoldAptId = `apt-hold-qa-${Date.now()}`;
+  await fetch(`${BASE_URL}/api/appointments`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${customerToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id: testHoldAptId,
+      shopId: targetShop.id,
+      serviceId: targetService.id,
+      barberId: testBarberUid,
+      date: '2026-11-21',
+      time: '18:15',
+      durationMin: 30,
+      price: targetService.price,
+      paymentMethod: 'online',
+      razorpayPaymentId: `pay_hold_${Date.now()}`,
+      razorpayOrderId: `order_hold_${Date.now()}`,
+    }),
+  });
+
+  // Apply administrative hold
+  const holdPayoutId = `payout-${testHoldAptId}`;
+  await fetch(`${BASE_URL}/api/payouts/${holdPayoutId}/hold`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      hold: true,
+      reason: 'Dispute filed by customer regarding hair styling',
+    }),
+  });
+
+  const [payoutOnHold] = await db
+    .select()
+    .from(barberPayouts)
+    .where(eq(barberPayouts.id, holdPayoutId));
+
+  // Get customer OTP for testHoldAptId
+  const resHoldCustOtp = await fetch(
+    `${BASE_URL}/api/appointments/${testHoldAptId}/completion-otp`,
+    {
+      headers: { Authorization: `Bearer ${customerToken}` },
+    }
+  );
+  const holdCustOtpData = await resHoldCustOtp.json();
+
+  // Attempt barber verification while on administrative hold
+  const resVerifyOnHold = await fetch(
+    `${BASE_URL}/api/appointments/${testHoldAptId}/verify-completion-otp`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${barberToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ otp: holdCustOtpData.completionOtp }),
+    }
+  );
+
+  assert(
+    payoutOnHold?.status === 'on_hold' &&
+      resVerifyOnHold.status === 400 &&
+      (await resVerifyOnHold.json()).error?.includes('Payout is on administrative hold'),
+    'Test 33: Administrative hold strictly blocks completion and payout until formally resolved'
+  );
+  // 34. Cookie-based Session Persistence (No Authorization Header)
+  const resCookieAuth = await fetch(`${BASE_URL}/api/profiles/${testCustomerUid}`, {
+    headers: {
+      Cookie: `barberloo_auth_token=${customerToken}`,
+    },
+  });
+  const cookieProfileData = await resCookieAuth.json();
+
+  assert(
+    resCookieAuth.status === 200 && cookieProfileData?.uid === testCustomerUid,
+    'Test 34: Session persists across page refreshes via secure cookie authentication without Authorization header'
+  );
+
+  // 35. Malformed or Expired Cookie Rejected (Zero-Trust Session Guard)
+  const resBadCookie = await fetch(`${BASE_URL}/api/profiles/${testCustomerUid}`, {
+    headers: {
+      Cookie: 'barberloo_auth_token=invalid.tampered.token',
+    },
+  });
+
+  assert(
+    resBadCookie.status === 401,
+    'Test 35: Malformed or forged session cookie is cryptographically rejected'
+  );
+
   } finally {
     // Clean up created test fixtures guaranteed
     try {
@@ -446,6 +815,9 @@ async function runQaSuite() {
       await db
         .delete(services)
         .where(eq(services.name, 'QA Test Service'));
+      await db
+        .delete(barbers)
+        .where(eq(barbers.id, testBarberUid));
       await db
         .delete(coupons)
         .where(

@@ -154,6 +154,18 @@ export const appointments = pgTable('appointments', {
   notes: text('notes').notNull().default(''),
   internalBarberNotes: text('internal_barber_notes').notNull().default(''),
   couponCode: text('coupon_code').notNull().default(''),
+  completionOtpHash: text('completion_otp_hash').default(''),
+  completionOtpSalt: text('completion_otp_salt').default(''),
+  completionOtpCipher: text('completion_otp_cipher').default(''),
+  completionOtpAttempts: integer('completion_otp_attempts').default(0),
+  completionOtpMaxAttempts: integer('completion_otp_max_attempts').default(5),
+  completionOtpExpiresAt: timestamp('completion_otp_expires_at'),
+  completionOtpStatus: text('completion_otp_status').default('active'), // active | verified | expired | revoked
+  completionVerifiedAt: timestamp('completion_verified_at'),
+  completionVerifiedBy: text('completion_verified_by').default(''),
+  payoutStatus: text('payout_status').default('pending_verification'), // unpaid | pending_verification | held | initiated | processed | settled | failed | reversed
+  payoutHoldReason: text('payout_hold_reason').default(''),
+  payoutHoldAppliedBy: text('payout_hold_applied_by').default(''),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -309,6 +321,51 @@ export const reports = pgTable('reports', {
   details: text('details').notNull(),
   status: text('status').notNull().default('open'), // open | investigating | resolved | dismissed
   resolutionNote: text('resolution_note').notNull().default(''),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// 16. barber_payouts (Marketplace delayed transfer records)
+export const barberPayouts = pgTable('barber_payouts', {
+  id: text('id').primaryKey(),
+  appointmentId: text('appointment_id').notNull().unique(),
+  shopId: text('shop_id').notNull().default('shop-1'),
+  barberId: text('barber_id').notNull(),
+  barberName: text('barber_name').notNull(),
+  customerUid: text('customer_uid').notNull(),
+  grossAmount: integer('gross_amount').notNull(),
+  platformFee: integer('platform_fee').notNull(),
+  netPayoutAmount: integer('net_payout_amount').notNull(),
+  currency: text('currency').notNull().default('INR'),
+  status: text('status').notNull().default('pending_verification'), // pending_verification | eligible | initiated | queued | processed | settled | failed | on_hold | reversed
+  idempotencyKey: text('idempotency_key').notNull().unique(),
+  provider: text('provider').notNull().default('razorpay_route'), // razorpay_route | razorpayx
+  providerTransferId: text('provider_transfer_id').default(''),
+  providerAccount: text('provider_account').default(''),
+  failureReason: text('failure_reason').default(''),
+  retryCount: integer('retry_count').notNull().default(0),
+  lastRetriedAt: timestamp('last_retried_at'),
+  holdReason: text('hold_reason').default(''),
+  heldBy: text('held_by').default(''),
+  initiatedAt: timestamp('initiated_at'),
+  settledAt: timestamp('settled_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// 17. financial_ledger (Immutable double-entry balanced accounting ledger)
+export const financialLedger = pgTable('financial_ledger', {
+  id: text('id').primaryKey(),
+  entryNumber: integer('entry_number').notNull(),
+  transactionId: text('transaction_id').notNull(),
+  appointmentId: text('appointment_id').notNull(),
+  account: text('account').notNull(), // customer_funds_escrow | platform_fee_revenue | barber_payable_pending | barber_payable_released | barber_payout_in_transit | barber_payout_settled | refunds_payable
+  entryType: text('entry_type').notNull(), // DEBIT | CREDIT
+  amount: integer('amount').notNull(),
+  currency: text('currency').notNull().default('INR'),
+  referenceType: text('reference_type').notNull(), // customer_payment | otp_completion | payout_initiated | payout_settled | refund | adjustment
+  referenceId: text('reference_id').notNull(),
+  description: text('description').notNull(),
+  metadataJson: text('metadata_json').default('{}'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
