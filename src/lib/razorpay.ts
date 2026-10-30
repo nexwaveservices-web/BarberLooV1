@@ -78,28 +78,41 @@ declare global {
   }
 }
 
+export const BARBERLOO_DEFAULT_LIVE_KEY_ID = 'rzp_live_Tu5l5vmBvE6xHW';
+
 export function getRazorpayKey(): string {
-  // 1. Vite injected env var (build-time / runtime)
-  const envKey = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID;
-  if (envKey && envKey.trim() && !envKey.includes('YOUR_KEY_ID')) {
-    return envKey.trim();
-  }
-
-  // 2. Global window configuration (injected by host PHP/HTML)
-  if (typeof window !== 'undefined' && window.BARBERLOO_RAZORPAY_KEY_ID) {
-    const winKey = String(window.BARBERLOO_RAZORPAY_KEY_ID).trim();
-    if (winKey && !winKey.includes('YOUR_KEY_ID')) return winKey;
-  }
-
-  // 3. Local storage admin override (configured via Admin Console)
+  // 1. Check local storage override, but purge any stale test keys (which cause Razorpay to crash in live mode)
   try {
     const stored = localStorage.getItem('barberloo_razorpay_key_id');
-    if (stored && stored.trim() && !stored.includes('YOUR_KEY_ID')) return stored.trim();
+    if (stored) {
+      const cleanStored = stored.trim();
+      // If an old test key or placeholder was stored in the user's browser, clear it immediately
+      if (cleanStored.startsWith('rzp_test_') || cleanStored.includes('YOUR_KEY_ID')) {
+        localStorage.removeItem('barberloo_razorpay_key_id');
+      } else if (cleanStored.startsWith('rzp_live_')) {
+        return cleanStored;
+      }
+    }
   } catch {
     // ignore
   }
 
-  return '';
+  // 2. Global window configuration (injected by host PHP/HTML on barberloo.in)
+  if (typeof window !== 'undefined' && window.BARBERLOO_RAZORPAY_KEY_ID) {
+    const winKey = String(window.BARBERLOO_RAZORPAY_KEY_ID).trim();
+    if (winKey && !winKey.includes('YOUR_KEY_ID') && !winKey.startsWith('rzp_test_')) {
+      return winKey;
+    }
+  }
+
+  // 3. Vite injected env var (build-time / runtime)
+  const envKey = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID;
+  if (envKey && envKey.trim() && !envKey.includes('YOUR_KEY_ID') && !envKey.startsWith('rzp_test_')) {
+    return envKey.trim();
+  }
+
+  // 4. Default authentic Live Razorpay Key for BarberLoo production
+  return BARBERLOO_DEFAULT_LIVE_KEY_ID;
 }
 
 export async function initiateRazorpayPayment(options: OpenRazorpayOptions): Promise<void> {
@@ -122,6 +135,16 @@ export async function initiateRazorpayPayment(options: OpenRazorpayOptions): Pro
       ? ` + ${options.addOns.map((a) => a.name).join(', ')}`
       : '';
 
+    // Strictly validate orderId: only pass to Razorpay if it is a genuine order ID
+    // Passing a malformed or simulated orderId causes Razorpay Checkout to crash with
+    // "Uh! oh! Something went wrong. We appreciate your patience."
+    const hasValidOrderId =
+      typeof options.orderId === 'string' &&
+      options.orderId.trim().startsWith('order_') &&
+      !options.orderId.includes('simulated') &&
+      !options.orderId.includes('undefined') &&
+      options.orderId.length > 10;
+
     const rzpOptions = {
       key,
       amount: amountPaise, // Amount is in currency subunits (paise)
@@ -129,7 +152,7 @@ export async function initiateRazorpayPayment(options: OpenRazorpayOptions): Pro
       name: options.shopName || 'BarberLoo Luxury Grooming',
       description: `${options.serviceName}${addOnsSummary} with ${options.barberName}`,
       image: 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&w=200&q=80',
-      order_id: options.orderId || undefined,
+      order_id: (hasValidOrderId && options.orderId) ? options.orderId.trim() : undefined,
       prefill: {
         name: options.clientName || 'Valued Guest',
         contact: options.clientPhone || '+91',
