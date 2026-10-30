@@ -9,6 +9,10 @@ export type PageView =
   | 'admin-dashboard'
   | 'privacy-policy'
   | 'terms-of-service'
+  | 'refund-policy'
+  | 'disclaimer'
+  | 'about-us'
+  | 'contact-us'
   | 'auth';
 
 export const ASSETS = {

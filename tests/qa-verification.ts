@@ -801,6 +801,90 @@ async function runQaSuite() {
     'Test 35: Malformed or forged session cookie is cryptographically rejected'
   );
 
+  // 36. Webhook Invalid Payload Rejection
+  const resBadWebhook = await fetch(`${BASE_URL}/api/webhooks/razorpay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert(
+    resBadWebhook.status === 400,
+    'Test 36: Invalid or empty webhook payload is rejected with HTTP 400'
+  );
+
+  // 37. Webhook Duplicate Event Deduplication (Idempotency Guard)
+  const testEventId = `evt_qa_dedup_${Date.now()}`;
+  const webhookPayload = JSON.stringify({
+    event_id: testEventId,
+    event: 'payout.processed',
+    payload: {
+      payout: { entity: { id: `payout_dummy_${Date.now()}` } },
+    },
+  });
+
+  const resWebhook1 = await fetch(`${BASE_URL}/api/webhooks/razorpay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: webhookPayload,
+  });
+  const resWebhook2 = await fetch(`${BASE_URL}/api/webhooks/razorpay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: webhookPayload,
+  });
+  const webhookData2 = await resWebhook2.json();
+
+  assert(
+    resWebhook1.status === 200 &&
+      resWebhook2.status === 200 &&
+      webhookData2.note?.includes('Duplicate event already processed'),
+    'Test 37: Duplicate webhook event safely deduplicated via idempotent in-memory event tracking'
+  );
+
+  // 38. Completion OTP rejects non-6-digit or malformed characters
+  const resAlphaOtp = await fetch(
+    `${BASE_URL}/api/appointments/${testAptOtpId}/verify-completion-otp`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${barberToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ otp: 'ABC123' }),
+    }
+  );
+  assert(
+    resAlphaOtp.status === 400,
+    'Test 38: Malformed non-numeric or short completion OTP rejected by timing-safe guard'
+  );
+
+  // 39. Concurrency Lock: Competing duplicate booking request on exact same slot is safely rejected
+  const resDuplicateBooking = await fetch(`${BASE_URL}/api/appointments`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${customerToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      shopId: targetShop.id,
+      serviceId: targetService.id,
+      barberId: testBarberUid,
+      date: '2026-11-21',
+      time: '17:30',
+      durationMin: 30,
+      price: targetService.price,
+      paymentMethod: 'online',
+      razorpayPaymentId: `pay_duplicate_concurrency_${Date.now()}`,
+    }),
+  });
+  const duplicateBookingData = await resDuplicateBooking.json();
+
+  assert(
+    resDuplicateBooking.status === 400 &&
+      duplicateBookingData.error?.includes('Double-booking prevented'),
+    'Test 39: Concurrency double-booking guard prevents conflicting reservation on same barber/chair'
+  );
+
   } finally {
     // Clean up created test fixtures guaranteed
     try {

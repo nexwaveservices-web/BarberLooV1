@@ -121,30 +121,62 @@ export async function loadShopForBooking(
 
   const supa = (typeof window !== 'undefined' && (window as any).barberLooSupabase) || supabase;
 
-  // 1. Load Shop record
+  // 1. Fast Path: If shop and its services exist in fallback bootstrap memory, avoid redundant network requests
+  const memoryShop = findShopBySlugOrId(fallbackShops, cleanId);
+  if (memoryShop) {
+    const memoryServices = fallbackServices
+      .filter((s) => (s.shopId === memoryShop.id || s.shop_id === memoryShop.id) && s.active !== false)
+      .map(mapSupabaseServiceRecord);
+    const memoryBarbers = fallbackBarbers
+      .filter((b) => (b.shopId === memoryShop.id || b.shop_id === memoryShop.id) && b.active !== false && b.verificationStatus !== 'suspended')
+      .map(mapSupabaseBarberRecord);
+
+    if (memoryServices.length > 0) {
+      console.log('BOOKING SHOP ID:', memoryShop.id);
+      console.log('SHOP RESULT:', memoryShop);
+      console.log('SERVICES RESULT:', memoryServices.length);
+      console.log('BARBERS RESULT:', memoryBarbers.length);
+      console.log('SELECTED SHOP:', memoryShop.name);
+      return {
+        shop: memoryShop,
+        services: memoryServices,
+        barbers: memoryBarbers,
+        error: null,
+      };
+    }
+  }
+
+  // 2. Parallel Scoped Fetch: Retrieve shop, services and barbers in a single roundtrip with explicit columns
   let rawShop: any = null;
-  let apiLoadedServices: any[] = [];
-  let apiLoadedBarbers: any[] = [];
+  let rawServices: any[] = [];
+  let rawBarbers: any[] = [];
 
   try {
-    const { data, error } = await supa
-      .from('shops')
-      .select('*')
-      .eq('id', cleanId)
-      .maybeSingle();
+    const [shopRes, servicesRes, barbersRes] = await Promise.all([
+      supa
+        .from('shops')
+        .select('id, owner_uid, name, district, address, phone, rating, review_count, is_open, closes_at, price_tier, min_price, verified, logo_url, image, tagline, about, qr_code_slug')
+        .eq('id', cleanId)
+        .maybeSingle(),
+      supa
+        .from('services')
+        .select('id, shop_id, index_code, name, category, duration_min, price, description, popular, active, image')
+        .eq('shop_id', cleanId),
+      supa
+        .from('barbers')
+        .select('id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, avatar, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids')
+        .eq('shop_id', cleanId),
+    ]);
 
-    if (error) {
-      console.warn('[BarberLoo] Supabase shop query warning:', error.message);
-    }
-    if (data) {
-      rawShop = data;
-    }
+    if (shopRes.data) rawShop = shopRes.data;
+    if (Array.isArray(servicesRes.data)) rawServices = servicesRes.data;
+    if (Array.isArray(barbersRes.data)) rawBarbers = barbersRes.data;
   } catch (err) {
-    console.warn('[BarberLoo] Supabase shop fetch exception:', err);
+    console.warn('[BarberLoo] Supabase scoped booking fetch error:', err);
   }
 
   if (!rawShop) {
-    rawShop = findShopBySlugOrId(fallbackShops, cleanId);
+    rawShop = memoryShop || findShopBySlugOrId(fallbackShops, cleanId);
   }
 
   // Resilient fallback to backend /api/shops/:id
@@ -155,8 +187,8 @@ export async function loadShopForBooking(
         const json = await res.json();
         if (json?.shop) {
           rawShop = json.shop;
-          if (Array.isArray(json.services)) apiLoadedServices = json.services;
-          if (Array.isArray(json.barbers)) apiLoadedBarbers = json.barbers;
+          if (Array.isArray(json.services) && rawServices.length === 0) rawServices = json.services;
+          if (Array.isArray(json.barbers) && rawBarbers.length === 0) rawBarbers = json.barbers;
         }
       }
     } catch {
@@ -180,76 +212,15 @@ export async function loadShopForBooking(
 
   const currentShop = mapSupabaseShopRecord(rawShop);
 
-  // 2. Load Services strictly scoped to this shop_id
-  let rawServices: any[] = [];
-  try {
-    const { data, error } = await supa
-      .from('services')
-      .select('*')
-      .eq('shop_id', currentShop.id);
-
-    if (error) {
-      console.warn('[BarberLoo] Supabase services query warning:', error.message);
-    }
-    if (Array.isArray(data) && data.length > 0) {
-      rawServices = data;
-    }
-  } catch (err) {
-    console.warn('[BarberLoo] Supabase services fetch exception:', err);
-  }
-
-  if (rawServices.length === 0 && apiLoadedServices.length > 0) {
-    rawServices = apiLoadedServices;
-  }
-
   if (rawServices.length === 0) {
     rawServices = fallbackServices.filter(
       (s) => s.shopId === currentShop.id || s.shop_id === currentShop.id
     );
   }
 
-  if (rawServices.length === 0) {
-    try {
-      const res = await fetch(`/api/shops/${encodeURIComponent(currentShop.id)}`);
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json.services) && json.services.length > 0) {
-          rawServices = json.services;
-        }
-        if (Array.isArray(json.barbers) && json.barbers.length > 0 && apiLoadedBarbers.length === 0) {
-          apiLoadedBarbers = json.barbers;
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
   const shopServices = rawServices
     .map(mapSupabaseServiceRecord)
     .filter((s) => s.active !== false);
-
-  // 3. Load Barbers strictly scoped to this shop_id
-  let rawBarbers: any[] = [];
-  try {
-    const { data, error } = await supa
-      .from('barbers')
-      .select('*')
-      .eq('shop_id', currentShop.id);
-
-    if (error) {
-      console.warn('[BarberLoo] Supabase barbers query warning:', error.message);
-    }
-    if (Array.isArray(data) && data.length > 0) {
-      rawBarbers = data;
-    }
-  } catch (err) {
-    console.warn('[BarberLoo] Supabase barbers fetch exception:', err);
-  }
-
-  if (rawBarbers.length === 0 && apiLoadedBarbers.length > 0) {
-    rawBarbers = apiLoadedBarbers;
-  }
 
   if (rawBarbers.length === 0) {
     rawBarbers = fallbackBarbers.filter(

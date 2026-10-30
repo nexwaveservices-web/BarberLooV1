@@ -19,11 +19,11 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
       <div className="max-w-[1360px] mx-auto px-5 sm:px-8 py-16">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-10 pb-12 border-b border-[#F1E194]/12">
           {/* Brand Column */}
-          <div className="md:col-span-6 space-y-4">
+          <div className="md:col-span-4 space-y-4">
             <div className="font-display text-3xl font-bold tracking-[0.16em] text-[#FFF9E8]">
               BARBERLOO
             </div>
-            <p className="text-sm text-[#8A8178] max-w-md leading-relaxed">
+            <p className="text-sm text-[#8A8178] max-w-sm leading-relaxed">
               {tr(
                 'India’s luxury grooming reservation and verified appointment platform. Connecting discerning clients with verified partner barbershops across Mumbai, Bengaluru, New Delhi, and beyond.',
                 'भारत का प्रमुख लग्ज़री ग्रूमिंग अपॉइंटमेंट प्लेटफ़ॉर्म। मुंबई, बेंगलुरु, नई दिल्ली और पूरे भारत में सत्यापित सैलून नेटवर्क।'
@@ -37,19 +37,28 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             </p>
           </div>
 
-          {/* Navigation */}
+          {/* Company & Discovery */}
           <div className="md:col-span-3 space-y-3">
             <h3 className="text-xs font-semibold tracking-[0.18em] uppercase text-[#F1E194]">
-              {tr('Explore', 'एक्सप्लोर करें')}
+              {tr('Company & Experience', 'कंपनी और अनुभव')}
             </h3>
             <ul className="space-y-2.5 text-sm text-[#FFF9E8]/75">
               <li>
                 <button
                   type="button"
-                  onClick={() => handleNav('home')}
+                  onClick={() => handleNav('about-us')}
                   className="hover:text-[#F1E194] transition-colors cursor-pointer"
                 >
-                  {tr('Home & Discovery', 'होम और खोज')}
+                  {tr('About BarberLoo', 'बारबरलू के बारे में')}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => handleNav('contact-us')}
+                  className="hover:text-[#F1E194] transition-colors cursor-pointer"
+                >
+                  {tr('Contact & Support', 'संपर्क एवं सहायता')}
                 </button>
               </li>
               <li>
@@ -70,13 +79,40 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   {tr('Book Appointment (IST)', 'अपॉइंटमेंट बुक करें (IST)')}
                 </button>
               </li>
+            </ul>
+          </div>
+
+          {/* Legal & Policies */}
+          <div className="md:col-span-3 space-y-3">
+            <h3 className="text-xs font-semibold tracking-[0.18em] uppercase text-[#F1E194]">
+              {tr('Legal & Compliance', 'कानूनी एवं नीतियां')}
+            </h3>
+            <ul className="space-y-2.5 text-sm text-[#FFF9E8]/75">
+              <li>
+                <button
+                  type="button"
+                  onClick={() => handleNav('refund-policy')}
+                  className="hover:text-[#F1E194] transition-colors cursor-pointer text-xs"
+                >
+                  {tr('Cancellation & Refund Policy', 'रद्दीकरण एवं रिफंड नीति')}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => handleNav('disclaimer')}
+                  className="hover:text-[#F1E194] transition-colors cursor-pointer text-xs"
+                >
+                  {tr('Legal Disclaimer', 'कानूनी अस्वीकरण (डिस्क्लेमर)')}
+                </button>
+              </li>
               <li>
                 <button
                   type="button"
                   onClick={() => handleNav('privacy-policy')}
                   className="hover:text-[#F1E194] transition-colors cursor-pointer text-xs"
                 >
-                  {tr('Privacy Policy (DPDPA)', 'गोपनीयता नीति (DPDPA)')}
+                  {tr('Privacy Policy (DPDPA 2023)', 'गोपनीयता नीति (DPDPA)')}
                 </button>
               </li>
               <li>
@@ -91,28 +127,67 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             </ul>
           </div>
 
-          {/* Cities */}
-          <div className="md:col-span-3 space-y-3">
+          {/* Indian Network & Care Desk */}
+          <div className="md:col-span-2 space-y-3">
             <h3 className="text-xs font-semibold tracking-[0.18em] uppercase text-[#F1E194]">
-              {tr('Indian Network', 'भारतीय नेटवर्क')}
+              {tr('Client Concierge', 'ग्राहक सहायता')}
             </h3>
-            <p className="text-sm text-[#8A8178] leading-relaxed">
-              {tr('Mumbai · Bengaluru · New Delhi', 'मुंबई · बेंगलुरु · नई दिल्ली')}
+            <p className="text-xs text-[#8A8178] leading-relaxed">
+              {tr('Mumbai · Bengaluru · Delhi · Punjab', 'मुंबई · बेंगलुरु · दिल्ली · पंजाब')}
               <br />
-              {tr(
-                'Standard Operating Hours: 09:30 – 21:30 IST',
-                'मानक समय: सुबह 09:30 – रात 09:30 IST'
-              )}
+              <span className="text-[#FFF9E8]/80 font-mono-num mt-1 block">
+                09:30 – 21:30 IST
+              </span>
+              <a
+                href="mailto:support@barberloo.in"
+                className="text-[#F1E194] hover:underline block mt-1"
+              >
+                support@barberloo.in
+              </a>
+              <a
+                href="tel:+919876543210"
+                className="text-[#FFF9E8]/80 hover:text-[#F1E194] block mt-0.5"
+              >
+                +91 98765 43210
+              </a>
             </p>
           </div>
         </div>
 
-        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#8A8178]">
+        <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-[#8A8178]">
           <p>
             © {new Date().getFullYear()} BarberLoo India.{' '}
             {tr('All rights reserved.', 'सर्वाधिकार सुरक्षित।')}
           </p>
-          <div className="flex items-center gap-6">
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
+            <button
+              type="button"
+              onClick={() => handleNav('about-us')}
+              className="hover:text-[#F1E194] transition-colors cursor-pointer"
+            >
+              {tr('About Us', 'हमारे बारे में')}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNav('contact-us')}
+              className="hover:text-[#F1E194] transition-colors cursor-pointer"
+            >
+              {tr('Contact Us', 'संपर्क करें')}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNav('refund-policy')}
+              className="hover:text-[#F1E194] transition-colors cursor-pointer"
+            >
+              {tr('Refund Policy', 'रिफंड नीति')}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNav('disclaimer')}
+              className="hover:text-[#F1E194] transition-colors cursor-pointer"
+            >
+              {tr('Disclaimer', 'डिस्क्लेमर')}
+            </button>
             <button
               type="button"
               onClick={() => handleNav('privacy-policy')}

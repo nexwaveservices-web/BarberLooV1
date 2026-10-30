@@ -7,6 +7,7 @@ interface SmartImageProps {
   alt: string;
   className?: string;
   fallbackLabel?: string;
+  priority?: boolean;
 }
 
 function resolveValidImageSrc(rawSrc: string): string {
@@ -47,6 +48,7 @@ export const SmartImage: React.FC<SmartImageProps> = ({
   alt,
   className = '',
   fallbackLabel,
+  priority = false,
 }) => {
   const [hasError, setHasError] = useState(false);
   const resolvedSrc = resolveValidImageSrc(src);
@@ -70,6 +72,8 @@ export const SmartImage: React.FC<SmartImageProps> = ({
     <img
       src={resolvedSrc}
       alt={alt}
+      loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
       referrerPolicy="no-referrer"
       onError={() => setHasError(true)}
       className={className}

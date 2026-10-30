@@ -88,19 +88,23 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isBarber = userRole === 'barber' || userRole === 'shop_owner';
 
   // Navigation items:
-  // Customers/Guests: Home, Shops, Book Appointment, My Bookings, Profile
-  // Barbers: Home, Shops, Barber Console, Profile (no booking creation options)
+  // Customers/Guests: Home, Shops, Book Appointment, About, Contact, My Bookings, Profile
+  // Barbers: Home, Shops, Barber Console, About, Contact, Profile (no booking creation options)
   const navItems: { id: PageView; label: string }[] = isBarber
     ? [
         { id: 'home', label: tr('Home', 'होम') },
         { id: 'shop', label: tr('Shops', 'सैलून') },
         { id: 'barber-dashboard', label: tr('Barber Console', 'बार्बर कंसोल') },
+        { id: 'about-us', label: tr('About', 'परिचय') },
+        { id: 'contact-us', label: tr('Contact', 'संपर्क') },
         { id: 'profile', label: tr('Profile', 'प्रोफ़ाइल') },
       ]
     : [
         { id: 'home', label: tr('Home', 'होम') },
         { id: 'shop', label: tr('Shops', 'सैलून') },
         { id: 'booking', label: tr('Book Appointment', 'अपॉइंटमेंट बुक करें') },
+        { id: 'about-us', label: tr('About', 'परिचय') },
+        { id: 'contact-us', label: tr('Contact', 'संपर्क') },
         { id: 'customer-dashboard', label: tr('My Bookings', 'मेरी बुकिंग') },
         { id: 'profile', label: tr('Profile', 'प्रोफ़ाइल') },
       ];
@@ -490,13 +494,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
-            <div className="pt-2 flex items-center justify-center gap-4 text-[11px] text-[#8A8178] border-t border-[#8A8178]/15">
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-[#8A8178] border-t border-[#8A8178]/15">
+              <button
+                type="button"
+                onClick={() => handleSelectPage('refund-policy')}
+                className="hover:text-[#F1E194] transition-colors cursor-pointer"
+              >
+                {tr('Refund Policy', 'रिफंड नीति')}
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => handleSelectPage('disclaimer')}
+                className="hover:text-[#F1E194] transition-colors cursor-pointer"
+              >
+                {tr('Disclaimer', 'अस्वीकरण')}
+              </button>
+              <span>•</span>
               <button
                 type="button"
                 onClick={() => handleSelectPage('privacy-policy')}
                 className="hover:text-[#F1E194] transition-colors cursor-pointer"
               >
-                {tr('Privacy Policy', 'गोपनीयता नीति')}
+                {tr('Privacy', 'गोपनीयता')}
               </button>
               <span>•</span>
               <button
@@ -504,7 +524,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => handleSelectPage('terms-of-service')}
                 className="hover:text-[#F1E194] transition-colors cursor-pointer"
               >
-                {tr('Terms of Service', 'सेवा की शर्तें')}
+                {tr('Terms', 'शर्तें')}
               </button>
             </div>
           </div>

@@ -2,11 +2,13 @@ import { createClient, RealtimeChannel } from '@supabase/supabase-js';
 import { ASSETS } from '../data/barberlooData';
 
 export const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL ||
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) ||
+  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) ||
   'https://ddusvfylhifoniobzmcq.supabase.co';
 
 export const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
+  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY) ||
   'sb_publishable_bUpxVfRsVPz_d0qg1QrrNA_m7zM66t6';
 
 export const COOKIE_SESSION_KEY = 'barberloo_supabase_session';
@@ -808,6 +810,19 @@ create policy "Allow public upload on barberloo-media"
   on storage.objects for insert
   to anon, authenticated
   with check (bucket_id = 'barberloo-media');
+
+-- ============================================================================
+-- HIGH-PERFORMANCE DATABASE INDEXES (Double-Booking, Slugs, Filters, Foreign Keys)
+-- ============================================================================
+create index if not exists appointments_barber_date_idx on public.appointments (barber_id, date);
+create index if not exists appointments_customer_uid_idx on public.appointments (customer_uid);
+create index if not exists appointments_shop_date_idx on public.appointments (shop_id, date);
+create index if not exists appointments_status_idx on public.appointments (status);
+create index if not exists services_shop_idx on public.services (shop_id);
+create index if not exists barbers_shop_idx on public.barbers (shop_id);
+create index if not exists reviews_shop_idx on public.reviews (shop_id);
+create index if not exists notifications_recipient_idx on public.notifications (recipient_uid, unread);
+create index if not exists coupons_code_idx on public.coupons (code);
 
 -- ============================================================================
 -- ENABLE SUPABASE REALTIME ON LIVE TABLES

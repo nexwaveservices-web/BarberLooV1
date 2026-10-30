@@ -239,26 +239,38 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     });
   };
 
-  const filteredAppointments = appointments.filter((apt) => {
-    const st = String(apt.status).toLowerCase();
-    if (historyFilter === 'Upcoming') {
-      return (
-        st === 'confirmed' ||
-        st === 'pending' ||
-        st === 'in_progress' ||
-        st === 'in progress'
-      );
-    }
-    if (historyFilter === 'Past') {
-      return (
-        st === 'completed' ||
-        st === 'cancelled' ||
-        st === 'no_show' ||
-        st === 'no-show'
-      );
-    }
-    return true;
-  });
+  const [appointmentsPage, setAppointmentsPage] = useState<number>(1);
+  const APPOINTMENTS_PER_PAGE = 8;
+
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter((apt) => {
+      const st = String(apt.status).toLowerCase();
+      if (historyFilter === 'Upcoming') {
+        return (
+          st === 'confirmed' ||
+          st === 'pending' ||
+          st === 'in_progress' ||
+          st === 'in progress'
+        );
+      }
+      if (historyFilter === 'Past') {
+        return (
+          st === 'completed' ||
+          st === 'cancelled' ||
+          st === 'no_show' ||
+          st === 'no-show'
+        );
+      }
+      return true;
+    });
+  }, [appointments, historyFilter]);
+
+  const paginatedAppointments = useMemo(() => {
+    return filteredAppointments.slice(
+      0,
+      appointmentsPage * APPOINTMENTS_PER_PAGE
+    );
+  }, [filteredAppointments, appointmentsPage]);
 
   const favoriteBarberIds = favorites
     .filter((f) => f.targetType === 'barber')
@@ -867,7 +879,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     <button
                       key={tab.id}
                       type="button"
-                      onClick={() => setHistoryFilter(tab.id as any)}
+                      onClick={() => {
+                        setHistoryFilter(tab.id as any);
+                        setAppointmentsPage(1);
+                      }}
                       className={`px-4 py-2 rounded-[14px] text-xs font-semibold cursor-pointer transition-colors ${
                         historyFilter === tab.id
                           ? 'bg-[#5B0E14] text-[#FFF9E8]'
@@ -889,7 +904,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 </p>
               ) : (
                 <div className="space-y-3">
-                  {filteredAppointments.map((apt: any) => {
+                  {paginatedAppointments.map((apt: any) => {
                     const isCompleted =
                       String(apt.status).toLowerCase() === 'completed';
                     const matchedPayment = payments.find(
@@ -1184,6 +1199,21 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       </div>
                     );
                   })}
+
+                  {filteredAppointments.length > paginatedAppointments.length && (
+                    <div className="pt-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setAppointmentsPage((p) => p + 1)}
+                        className="px-5 py-2.5 rounded-[16px] neu-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                      >
+                        {tr(
+                          `Load More Appointments (${filteredAppointments.length - paginatedAppointments.length} remaining)`,
+                          `और अपॉइंटमेंट्स देखें (${filteredAppointments.length - paginatedAppointments.length} शेष)`
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

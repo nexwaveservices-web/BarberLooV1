@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -5,6 +6,9 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { eq, or, and } from 'drizzle-orm';
+
+// Idempotent webhook event deduplication tracking
+const processedWebhookEvents = new Set<string>();
 import { db } from './src/db/index.ts';
 import {
   states,
@@ -24,6 +28,7 @@ import {
   platformSettings,
   barberPayouts,
   financialLedger,
+  webhookEvents,
 } from './src/db/schema.ts';
 import {
   getOrCreateUser,
@@ -105,6 +110,9 @@ async function startServer() {
   const app = express();
   const httpServer = createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  wss.on('error', (err) => {
+    console.warn('[WebSocket Warning] Server error ignored:', err?.message);
+  });
 
   // CORS: Allow verified domains
   app.use((req, res, next) => {
@@ -134,8 +142,15 @@ async function startServer() {
     next();
   });
 
-  // Support JSON payloads
-  app.use(express.json({ limit: '50mb' }));
+  // Support JSON payloads with raw body capture for cryptographic webhook verification
+  app.use(
+    express.json({
+      limit: '50mb',
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Gracefully handle PayloadTooLargeError (HTTP 413) or malformed body
@@ -1030,17 +1045,132 @@ async function startServer() {
     }
   );
 
-  // 5l. Razorpay Webhook Endpoint
-  app.post('/api/webhooks/razorpay', async (req, res) => {
+  // 5l. Razorpay Webhook Endpoint (Cryptographically Verified & Idempotent)
+  app.post('/api/webhooks/razorpay', async (req: any, res) => {
     try {
+      const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+      const signature = (req.headers['x-razorpay-signature'] as string) || '';
+
+      // Verify webhook HMAC-SHA256 signature against raw request body
+      if (webhookSecret && webhookSecret.trim() && !webhookSecret.includes('YOUR_RAZORPAY_WEBHOOK_SECRET')) {
+        if (!signature || !req.rawBody) {
+          return res.status(400).json({ error: 'Missing webhook signature or raw body' });
+        }
+        const crypto = await import('crypto');
+        const expectedSig = crypto
+          .createHmac('sha256', webhookSecret.trim())
+          .update(req.rawBody)
+          .digest('hex');
+
+        const sigBuf = Buffer.from(signature, 'hex');
+        const expBuf = Buffer.from(expectedSig, 'hex');
+        if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+          return res.status(400).json({ error: 'Invalid Razorpay webhook signature' });
+        }
+      } else if (process.env.NODE_ENV === 'production') {
+        return res.status(500).json({
+          error: 'Fatal: RAZORPAY_WEBHOOK_SECRET is not configured on the production server.',
+        });
+      }
+
+      // Safe duplicate event handling / replay protection
+      const eventId =
+        req.body?.event_id ||
+        (req.headers['x-razorpay-event-id'] as string) ||
+        (req.body?.payload?.payment?.entity?.id ? `${req.body.event}_${req.body.payload.payment.entity.id}` : null) ||
+        (req.body?.payload?.transfer?.entity?.id ? `${req.body.event}_${req.body.payload.transfer.entity.id}` : null);
+
+      if (eventId) {
+        if (processedWebhookEvents.has(eventId)) {
+          return res.json({ status: 'ok', received: true, note: 'Duplicate event already processed' });
+        }
+        processedWebhookEvents.add(eventId);
+        if (processedWebhookEvents.size > 5000) {
+          const first = processedWebhookEvents.values().next().value;
+          if (first) processedWebhookEvents.delete(first);
+        }
+
+        // Database-backed idempotency check
+        const [existingDbEvent] = await db
+          .select()
+          .from(webhookEvents)
+          .where(eq(webhookEvents.id, eventId))
+          .catch(() => []);
+
+        if (existingDbEvent) {
+          return res.json({ status: 'ok', received: true, note: 'Duplicate event already processed' });
+        }
+      }
+
       const event = req.body?.event;
       const payload = req.body?.payload;
 
       if (!event || !payload) {
-        return res.status(400).json({ error: 'Invalid webhook payload' });
+        return res.status(400).json({ error: 'Invalid webhook payload structure' });
       }
 
-      // Handle payout / transfer settlement event
+      // 1. Payment Captured Event (Confirm booking & mark payment paid)
+      if (event === 'payment.captured' && payload.payment?.entity) {
+        const paymentEntity = payload.payment.entity;
+        const rzpPaymentId = paymentEntity.id;
+        const rzpOrderId = paymentEntity.order_id;
+
+        if (rzpOrderId) {
+          await db
+            .update(appointments)
+            .set({
+              paymentStatus: 'paid',
+              status: 'confirmed',
+              razorpayPaymentId: rzpPaymentId,
+            })
+            .where(eq(appointments.razorpayOrderId, rzpOrderId))
+            .catch(() => {});
+
+          await db
+            .update(payments)
+            .set({
+              status: 'paid',
+              providerPaymentId: rzpPaymentId,
+              updatedAt: new Date(),
+            })
+            .where(eq(payments.providerOrderId, rzpOrderId))
+            .catch(() => {});
+        }
+      }
+
+      // 2. Payment Failed Event (Mark payment failed)
+      if (event === 'payment.failed' && payload.payment?.entity) {
+        const paymentEntity = payload.payment.entity;
+        const rzpOrderId = paymentEntity.order_id;
+        if (rzpOrderId) {
+          await db
+            .update(payments)
+            .set({
+              status: 'failed',
+              updatedAt: new Date(),
+            })
+            .where(eq(payments.providerOrderId, rzpOrderId))
+            .catch(() => {});
+        }
+      }
+
+      // 3. Refund Processed Event
+      if (event === 'refund.processed' && payload.refund?.entity) {
+        const refundEntity = payload.refund.entity;
+        const rzpPaymentId = refundEntity.payment_id;
+        if (rzpPaymentId) {
+          await db
+            .update(payments)
+            .set({
+              status: 'refunded',
+              updatedAt: new Date(),
+            })
+            .where(eq(payments.providerPaymentId, rzpPaymentId))
+            .catch(() => {});
+        }
+      }
+
+      // 4. Handle payout / transfer settlement event
       if (event === 'payout.processed' || event === 'transfer.processed') {
         const transferId = payload.transfer?.entity?.id || payload.payout?.entity?.id;
         if (transferId) {
@@ -1053,6 +1183,21 @@ async function startServer() {
             await confirmBarberPayoutSettlement(db, payout.id, transferId);
           }
         }
+      }
+
+      // Persist event in webhook_events audit log
+      if (eventId) {
+        await db
+          .insert(webhookEvents)
+          .values({
+            id: eventId,
+            event,
+            provider: 'razorpay',
+            entityId: (payload.payment?.entity?.id || payload.transfer?.entity?.id || payload.refund?.entity?.id || '') as string,
+            payloadJson: JSON.stringify(payload),
+            status: 'processed',
+          })
+          .catch(() => {});
       }
 
       res.json({ status: 'ok', received: true });
@@ -2252,7 +2397,16 @@ async function startServer() {
         } = req.body;
         const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
-        if (!keySecret || keySecret.includes('YOUR_RAZORPAY_SECRET')) {
+        // In production, reject unverified payments if key secret is missing
+        if (process.env.NODE_ENV === 'production') {
+          if (!keySecret || keySecret.includes('YOUR_RAZORPAY_SECRET')) {
+            return res.status(500).json({
+              verified: false,
+              error: 'Razorpay payment verification secret is not configured on the production server.',
+            });
+          }
+        } else if (!keySecret || keySecret.includes('YOUR_RAZORPAY_SECRET')) {
+          // In local test/development mode with default test mock
           return res.json({
             verified: true,
             paymentId: razorpay_payment_id,
@@ -2266,7 +2420,12 @@ async function startServer() {
           .update(`${razorpay_order_id}|${razorpay_payment_id}`)
           .digest('hex');
 
-        const isAuthentic = expectedSignature === razorpay_signature;
+        const sigBuf = Buffer.from(razorpay_signature || '', 'hex');
+        const expBuf = Buffer.from(expectedSignature, 'hex');
+        const isAuthentic =
+          sigBuf.length === expBuf.length &&
+          crypto.timingSafeEqual(sigBuf, expBuf);
+
         if (isAuthentic) {
           res.json({ verified: true, paymentId: razorpay_payment_id });
         } else {
@@ -2286,7 +2445,7 @@ async function startServer() {
   // Mount Vite or Static Dist
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);

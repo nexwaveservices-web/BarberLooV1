@@ -206,6 +206,9 @@ function barberloo_render_application($full_viewport = true) {
   </head>
   <body class="bg-[#FAF6EA] text-[#111113] antialiased selection:bg-[#5B0E14] selection:text-[#FFF9E8]">
     <div id="root"></div>
+    <script>
+      window.BARBERLOO_RAZORPAY_KEY_ID = "<?php echo esc_js(defined('RAZORPAY_KEY_ID') ? RAZORPAY_KEY_ID : get_option('barberloo_razorpay_key_id', '')); ?>";
+    </script>
     <script type="module" crossorigin src="<?php echo esc_url($js_url); ?>"></script>
   </body>
 </html>

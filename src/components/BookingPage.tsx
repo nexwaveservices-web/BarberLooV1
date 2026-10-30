@@ -35,7 +35,11 @@ import {
 import { initiateRazorpayPayment } from '../lib/razorpay';
 import { loadShopForBooking, parseShopIdFromUrl } from '../lib/booking';
 import { getBookingUrl } from '../lib/domain';
-import { apiCalculatePricing } from '../lib/api';
+import {
+  apiCalculatePricing,
+  apiCreateRazorpayOrder,
+  apiVerifyRazorpayPayment,
+} from '../lib/api';
 
 interface BookingPageProps {
   initialService: ServiceItem | null;
@@ -767,8 +771,26 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     setIsSubmitting(true);
     setBookingError('');
     try {
+      // 1. Authoritative server-side price calculation and Razorpay order creation
+      const order = await apiCreateRazorpayOrder({
+        serviceId: currentService.id,
+        couponCode: appliedCouponCode || undefined,
+        amount: finalCustomerPayment,
+        currency: 'INR',
+        notes: {
+          barberId: currentBarber.id,
+          barberName: currentBarber.name,
+          date: selectedDate,
+          time: selectedTime,
+          clientName: clientName || currentUserProfile?.name || 'Guest',
+        },
+      });
+
+      // 2. Open verified Razorpay Checkout
       await initiateRazorpayPayment({
-        amountINR: finalCustomerPayment,
+        key: order.keyId,
+        orderId: order.orderId,
+        amountINR: order.totalAmount ?? finalCustomerPayment,
         serviceName: currentService.name,
         barberName: currentBarber.name,
         shopName: currentShop?.name || currentBarber.shopName || 'BarberLoo Partner Salon',
@@ -778,6 +800,21 @@ export const BookingPage: React.FC<BookingPageProps> = ({
         appointmentId: `apt-${Date.now().toString(36)}`,
         onSuccess: async (rzpResult) => {
           try {
+            // 3. Cryptographic server-side verification of payment signature
+            const vfy = await apiVerifyRazorpayPayment({
+              razorpay_order_id: rzpResult.razorpay_order_id || order.orderId,
+              razorpay_payment_id: rzpResult.razorpay_payment_id,
+              razorpay_signature: rzpResult.razorpay_signature,
+            });
+
+            if (!vfy.verified) {
+              throw new Error(
+                vfy.error ||
+                  'Razorpay payment signature verification failed on server. Appointment was not confirmed.'
+              );
+            }
+
+            // 4. Confirm appointment only after successful server-side payment verification
             const targetShopId = currentShop?.id || selectedShopId || currentBarber.shopId || (shops.length > 0 ? shops[0].id : '');
             if (!targetShopId) {
               throw new Error('Please select a salon.');
@@ -794,30 +831,31 @@ export const BookingPage: React.FC<BookingPageProps> = ({
               time: selectedTime,
               durationMins: totalAppointmentDuration,
               durationMin: totalAppointmentDuration,
-              price: finalCustomerPayment,
-              servicePrice: displayServicePrice,
-              platformFee: displayPlatformFee,
-              totalPrice: finalCustomerPayment,
+              price: order.totalAmount ?? finalCustomerPayment,
+              servicePrice: order.servicePrice ?? displayServicePrice,
+              platformFee: order.platformFee ?? displayPlatformFee,
+              totalPrice: order.totalAmount ?? finalCustomerPayment,
               clientName: clientName || currentUserProfile?.name,
               clientPhone: clientPhone || currentUserProfile?.phone || '+91',
               notes: fullBookingNotes,
               paymentMethod: 'online',
               razorpayPaymentId: rzpResult.razorpay_payment_id,
-              razorpayOrderId: rzpResult.razorpay_order_id,
+              razorpayOrderId: rzpResult.razorpay_order_id || order.orderId,
               couponCode: appliedCouponCode || undefined,
             };
             const created = await onConfirmBooking(payload);
             setBookingComplete({
               ...(created || payload),
-              servicePrice: displayServicePrice,
-              platformFee: displayPlatformFee,
-              totalPrice: finalCustomerPayment,
+              servicePrice: order.servicePrice ?? displayServicePrice,
+              platformFee: order.platformFee ?? displayPlatformFee,
+              totalPrice: order.totalAmount ?? finalCustomerPayment,
               razorpayPaymentId: rzpResult.razorpay_payment_id,
+              razorpayOrderId: rzpResult.razorpay_order_id || order.orderId,
               paymentMethod: 'online',
             });
           } catch (err: any) {
             setBookingError(
-              err?.message || 'Error saving appointment after Razorpay payment.'
+              err?.message || 'Error confirming appointment after Razorpay payment.'
             );
           } finally {
             setIsSubmitting(false);
@@ -1731,9 +1769,21 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                 )}
 
                 {bookingError && (
-                  <div className="p-4 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs flex items-center gap-2.5">
-                    <AlertCircle className="w-4 h-4 text-[#F1E194] shrink-0" />
-                    <span>{bookingError}</span>
+                  <div className="p-4 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md border border-[#F1E194]/20">
+                    <div className="flex items-center gap-2.5">
+                      <AlertCircle className="w-4 h-4 text-[#F1E194] shrink-0" />
+                      <span>{bookingError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBookingError('');
+                        handleCompleteBooking({ preventDefault: () => {} } as any);
+                      }}
+                      className="px-3.5 py-1.5 rounded-[10px] bg-[#F1E194] text-[#5B0E14] font-semibold text-xs hover:bg-[#FFF9E8] transition-colors shrink-0 cursor-pointer text-center"
+                    >
+                      {tr('Retry Payment', 'पुनः प्रयास करें')}
+                    </button>
                   </div>
                 )}
 

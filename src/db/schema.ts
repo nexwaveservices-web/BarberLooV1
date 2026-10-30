@@ -6,6 +6,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  index,
 } from 'drizzle-orm/pg-core';
 
 // Core users table required by Firebase Auth <-> Cloud SQL linking
@@ -167,7 +168,12 @@ export const appointments = pgTable('appointments', {
   payoutHoldReason: text('payout_hold_reason').default(''),
   payoutHoldAppliedBy: text('payout_hold_applied_by').default(''),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('appointments_barber_date_idx').on(table.barberId, table.date),
+  index('appointments_customer_uid_idx').on(table.customerUid),
+  index('appointments_shop_date_idx').on(table.shopId, table.date),
+  index('appointments_status_idx').on(table.status),
+]);
 
 // 6. reviews
 export const reviews = pgTable('reviews', {
@@ -369,4 +375,14 @@ export const financialLedger = pgTable('financial_ledger', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-
+// 18. webhook_events (Persistent idempotency tracking and audit trail for Razorpay webhooks)
+export const webhookEvents = pgTable('webhook_events', {
+  id: text('id').primaryKey(), // event_id (e.g. evt_xxxx)
+  event: text('event').notNull(),
+  provider: text('provider').notNull().default('razorpay'),
+  entityId: text('entity_id').default(''),
+  payloadJson: text('payload_json').default('{}'),
+  status: text('status').notNull().default('processed'), // processed | error | ignored
+  errorMessage: text('error_message').default(''),
+  processedAt: timestamp('processed_at').defaultNow(),
+});

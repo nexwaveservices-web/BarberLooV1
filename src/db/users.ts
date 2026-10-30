@@ -1710,6 +1710,36 @@ export async function processAppointmentRefund(
     .from(barberPayouts)
     .where(eq(barberPayouts.id, payoutId));
 
+  let razorpayRefundId = '';
+  const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (
+    appointment.razorpayPaymentId &&
+    !appointment.razorpayPaymentId.startsWith('pay_audit_') &&
+    keyId &&
+    keySecret &&
+    !keyId.includes('YOUR_KEY_ID') &&
+    !keySecret.includes('YOUR_RAZORPAY_SECRET')
+  ) {
+    try {
+      const Razorpay = (await import('razorpay')).default;
+      const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+      const refundPaise = Math.round(totalPrice * 100);
+      const rzpRefund = await razorpay.payments.refund(appointment.razorpayPaymentId, {
+        amount: refundPaise,
+        notes: {
+          appointmentId: appointment.id,
+          reason,
+          clientName: appointment.clientName,
+        },
+      });
+      razorpayRefundId = rzpRefund?.id || '';
+    } catch (err: any) {
+      throw new Error(`Razorpay refund API rejected: ${err.message || 'Gateway refund error'}`);
+    }
+  }
+
   return await db.transaction(async (tx) => {
     // Update appointment
     const [updatedApt] = await tx
@@ -1751,11 +1781,11 @@ export async function processAppointmentRefund(
       currency: 'INR',
       provider: 'razorpay',
       providerOrderId: appointment.razorpayOrderId || '',
-      providerPaymentId: `ref_${Date.now()}`,
+      providerPaymentId: razorpayRefundId || `ref_${Date.now()}`,
       method: 'online',
-      methodDisplay: 'Refund Reversal',
+      methodDisplay: razorpayRefundId ? `Razorpay Refund (${razorpayRefundId})` : 'Refund Reversal',
       status: 'refunded',
-      receiptNumber: `REF-${appointment.id.toUpperCase()}`,
+      receiptNumber: razorpayRefundId ? `RZP-REF-${razorpayRefundId}` : `REF-${appointment.id.toUpperCase()}`,
     });
 
     // Balanced Ledger Reversal:

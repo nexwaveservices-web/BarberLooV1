@@ -20,6 +20,10 @@ import { BarberDashboard } from './components/BarberDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { TermsOfServicePage } from './components/TermsOfServicePage';
+import { RefundPolicyPage } from './components/RefundPolicyPage';
+import { DisclaimerPage } from './components/DisclaimerPage';
+import { AboutUsPage } from './components/AboutUsPage';
+import { ContactUsPage } from './components/ContactUsPage';
 import { EasyBar } from './components/EasyBar';
 import { Footer } from './components/Footer';
 import {
@@ -310,6 +314,50 @@ export default function App() {
         setCurrentPage('terms-of-service');
         return;
       }
+      if (
+        pathname === '/refund-policy' ||
+        pathname === '/refund-policy/' ||
+        pathname === '/cancellation-policy' ||
+        pathname === '/cancellation-policy/' ||
+        pathname === '/return-policy' ||
+        pathname === '/return-policy/' ||
+        params.get('page') === 'refund-policy' ||
+        params.get('page') === 'cancellation-policy' ||
+        params.get('page') === 'return-policy'
+      ) {
+        setCurrentPage('refund-policy');
+        return;
+      }
+      if (
+        pathname === '/disclaimer' ||
+        pathname === '/disclaimer/' ||
+        params.get('page') === 'disclaimer'
+      ) {
+        setCurrentPage('disclaimer');
+        return;
+      }
+      if (
+        pathname === '/about-us' ||
+        pathname === '/about-us/' ||
+        pathname === '/about' ||
+        pathname === '/about/' ||
+        params.get('page') === 'about-us' ||
+        params.get('page') === 'about'
+      ) {
+        setCurrentPage('about-us');
+        return;
+      }
+      if (
+        pathname === '/contact-us' ||
+        pathname === '/contact-us/' ||
+        pathname === '/contact' ||
+        pathname === '/contact/' ||
+        params.get('page') === 'contact-us' ||
+        params.get('page') === 'contact'
+      ) {
+        setCurrentPage('contact-us');
+        return;
+      }
 
       // 8. Homepage default
       if (pathname === '/' || pathname === '' || params.get('page') === 'home') {
@@ -348,24 +396,35 @@ export default function App() {
     );
   }, [activeUserUid, notifications]);
 
+  const appointmentsRef = React.useRef(appointments);
+  useEffect(() => {
+    appointmentsRef.current = appointments;
+  }, [appointments]);
+
   useEffect(() => {
     if (!activeUserUid) return;
     const stopTicker = startBackgroundReminderTicker(() => {
-      loadBootstrapState(activeUserUid);
-      checkAndNotifyAppointmentReminders(activeUserUid, appointments, (page) =>
+      checkAndNotifyAppointmentReminders(activeUserUid, appointmentsRef.current, (page) =>
         setCurrentPage(page as PageView)
       );
     });
     return stopTicker;
-  }, [activeUserUid, appointments, loadBootstrapState]);
+  }, [activeUserUid]);
 
   useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const disconnect = connectRealtimeSocket((event) => {
       if (event.type === 'state:updated') {
-        loadBootstrapState(activeUserUid);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          loadBootstrapState(activeUserUid);
+        }, 1200);
       }
     });
-    return disconnect;
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      disconnect();
+    };
   }, [activeUserUid, loadBootstrapState]);
 
   useEffect(() => {
@@ -1061,6 +1120,25 @@ export default function App() {
 
           {currentPage === 'terms-of-service' && (
             <TermsOfServicePage onNavigate={handleNavigate} />
+          )}
+
+          {currentPage === 'refund-policy' && (
+            <RefundPolicyPage onNavigate={handleNavigate} />
+          )}
+
+          {currentPage === 'disclaimer' && (
+            <DisclaimerPage onNavigate={handleNavigate} />
+          )}
+
+          {currentPage === 'about-us' && (
+            <AboutUsPage onNavigate={handleNavigate} />
+          )}
+
+          {currentPage === 'contact-us' && (
+            <ContactUsPage
+              onNavigate={handleNavigate}
+              currentUserProfile={currentUserProfile}
+            />
           )}
         </main>
 

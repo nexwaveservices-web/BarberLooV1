@@ -4,8 +4,12 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const razorpayKeyId = process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '';
   return {
     plugins: [react(), tailwindcss()],
+    define: {
+      'import.meta.env.VITE_RAZORPAY_KEY_ID': JSON.stringify(razorpayKeyId),
+    },
     resolve: {
       alias: {
         '@': path.resolve('.'),

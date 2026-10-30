@@ -171,6 +171,12 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [filterOpenOnly, setFilterOpenOnly] = useState<boolean>(false);
   const [selectedPriceTier, setSelectedPriceTier] = useState<string>('all');
+  const [shopsVisibleCount, setShopsVisibleCount] = useState<number>(12);
+
+  useEffect(() => {
+    setShopsVisibleCount(12);
+  }, [searchQuery, filterOpenOnly, selectedCategory, selectedPriceTier, sortBy]);
+
   // Directions modal state
   const [directionsModalOpen, setDirectionsModalOpen] = useState(false);
   const [directionsTargetShop, setDirectionsTargetShop] = useState<any | null>(null);
@@ -253,6 +259,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({
         }
         return 0;
       });
+
+    const paginatedShops = filteredShops.slice(0, shopsVisibleCount);
 
     return (
       <div className="bg-[#EFE9DD] min-h-[85vh] py-10 px-4 sm:px-8">
@@ -423,8 +431,9 @@ export const ShopPage: React.FC<ShopPageProps> = ({
           ) : (
             /* Shop Listing Grid (List View) */
             filteredShops.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredShops.map((s: any) => {
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {paginatedShops.map((s: any) => {
                   const isClosed = s.status === 'closed' || s.isOpen === false;
                   const shopReviewCount =
                     safeReviews.filter(
@@ -553,6 +562,22 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   );
                 })}
               </div>
+
+              {filteredShops.length > paginatedShops.length && (
+                <div className="pt-4 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setShopsVisibleCount((prev) => prev + 12)}
+                    className="px-6 py-3 rounded-[16px] neu-btn-gold text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                  >
+                    {tr(
+                      `Load More Salons (${filteredShops.length - paginatedShops.length} remaining)`,
+                      `और सैलून देखें (${filteredShops.length - paginatedShops.length} शेष)`
+                    )}
+                  </button>
+                </div>
+              )}
+            </>
             ) : (
               <div className="max-w-md mx-auto text-center py-16 rounded-[24px] neu-flat p-8 space-y-4">
                 <Store className="w-10 h-10 text-[#5B0E14] mx-auto opacity-75" />

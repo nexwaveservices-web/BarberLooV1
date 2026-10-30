@@ -24,8 +24,14 @@ async function safeBackendRequest<T>(
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(path, {
-      credentials: 'same-origin',
+    const backendBase =
+      (import.meta as any).env?.VITE_BACKEND_URL ||
+      (typeof window !== 'undefined' && (window as any).BARBERLOO_BACKEND_URL) ||
+      '';
+    const targetUrl = backendBase ? `${backendBase.replace(/\/$/, '')}${path}` : path;
+
+    const response = await fetch(targetUrl, {
+      credentials: backendBase ? 'include' : 'same-origin',
       ...options,
       headers,
     });
@@ -140,37 +146,16 @@ function mapSupabaseService(s: any) {
   };
 }
 
-function deriveAppointmentOtp(
-  id: string,
-  notes?: string,
-  barberNotes?: string
-): string {
-  const combined = `${barberNotes || ''} ${notes || ''}`;
-  const match = combined.match(/\[OTP:(\d{4})\]/);
-  if (match && match[1]) {
-    return match[1];
-  }
-  let hash = 0;
-  const str = String(id || 'apt-default');
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 31 + str.charCodeAt(i)) % 9000;
-  }
-  return String(1000 + Math.abs(hash));
-}
-
 function stripOtpTag(text?: string): string {
   if (!text) return '';
-  return text.replace(/\[OTP:\d{4}\]\s*/g, '').trim();
+  return text.replace(/\[OTP:\d{4,6}\]\s*/g, '').trim();
 }
 
 function mapSupabaseAppointment(a: any) {
   const rawStatus = String(a.status || 'confirmed').toLowerCase();
   const dur = Number(a.duration_min ?? a.durationMins ?? 45);
   const rawBarberNotes = a.internal_barber_notes ?? a.barberNotes ?? '';
-  const completionOtp =
-    a.completionOtp ||
-    a.completion_otp ||
-    deriveAppointmentOtp(a.id, a.notes, rawBarberNotes);
+  const completionOtp = a.completionOtp || a.completion_otp || undefined;
   return {
     id: a.id,
     referenceCode: a.referenceCode || String(a.id).toUpperCase(),
@@ -248,52 +233,149 @@ function mergeById<T extends { id?: string; uid?: string }>(
   return Array.from(map.values());
 }
 
-export const apiFetchBootstrap = async (uid = '') => {
-  const backendPromise = safeBackendRequest<any>(
-    `/api/bootstrap${uid ? `?uid=${encodeURIComponent(uid)}` : ''}`
-  );
+const inFlightBootstrapMap = new Map<string, Promise<any>>();
 
-  let supaData: Record<string, any[]> = {};
-  try {
-    const [
-      shopsRes,
-      barbersRes,
-      servicesRes,
-      aptsRes,
-      reviewsRes,
-      profilesRes,
-      couponsRes,
-      paymentsRes,
-      reportsRes,
-      workingHoursRes,
-      shopGalleryRes,
-      barberGalleryRes,
-      favsRes,
-      notifsRes,
-    ] = await Promise.all([
-      supabase.from('shops').select('*'),
-      supabase.from('barbers').select('*'),
-      supabase.from('services').select('*'),
-      supabase.from('appointments').select('*').order('created_at', { ascending: false }),
-      supabase.from('reviews').select('*').order('created_at', { ascending: false }),
-      supabase.from('profiles').select('*'),
-      supabase.from('coupons').select('*'),
-      supabase.from('payments').select('*').order('created_at', { ascending: false }),
-      supabase.from('reports').select('*').order('created_at', { ascending: false }),
-      supabase.from('working_hours').select('*').order('day_order', { ascending: true }),
-      supabase.from('shop_gallery').select('*'),
-      supabase.from('barber_gallery').select('*'),
-      uid
-        ? supabase.from('favorites').select('*').eq('customer_uid', uid)
-        : Promise.resolve({ data: [] }),
-      uid
-        ? supabase
-            .from('notifications')
-            .select('*')
-            .eq('recipient_uid', uid)
-            .order('created_at', { ascending: false })
-        : Promise.resolve({ data: [] }),
-    ]);
+export const apiFetchBootstrap = async (uid = '') => {
+  const cacheKey = uid || '__anon__';
+  const existingPromise = inFlightBootstrapMap.get(cacheKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const fetchPromise = (async () => {
+    // 1. Primary path: Fetch authoritative, role-scoped bootstrap data from backend
+    const backendData = await safeBackendRequest<any>(
+      `/api/bootstrap${uid ? `?uid=${encodeURIComponent(uid)}` : ''}`
+    );
+
+    if (backendData && Array.isArray(backendData.shops) && backendData.shops.length > 0) {
+      return {
+        shops: backendData.shops,
+        barbers: backendData.barbers || [],
+        services: backendData.services || [],
+        appointments: backendData.appointments || [],
+        reviews: backendData.reviews || [],
+        profiles: backendData.profiles || [],
+        coupons: backendData.coupons || [],
+        payments: backendData.payments || [],
+        reports: backendData.reports || [],
+        favorites: backendData.favorites || [],
+        notifications: backendData.notifications || [],
+        workingHours: backendData.workingHours || [],
+        shopGallery: backendData.shopGallery || [],
+        barberGallery: backendData.barberGallery || [],
+        platformSettings: backendData.platformSettings || {
+          id: 'default',
+          feeType: 'fixed',
+          feeAmount: 10,
+          minFee: 5,
+          refundPolicy: 'service_only',
+        },
+      };
+    }
+
+    // 2. Resilient Fallback: Supabase Client for static hosting (e.g. InfinityFree)
+    // Queries are strictly bounded with limits and select only needed columns
+    let supaData: Record<string, any[]> = {};
+    try {
+      const [
+        shopsRes,
+        barbersRes,
+        servicesRes,
+        aptsRes,
+        reviewsRes,
+        profilesRes,
+        couponsRes,
+        paymentsRes,
+        reportsRes,
+        workingHoursRes,
+        shopGalleryRes,
+        barberGalleryRes,
+        favsRes,
+        notifsRes,
+      ] = await Promise.all([
+        supabase
+          .from('shops')
+          .select('id, owner_uid, name, district, address, phone, rating, review_count, is_open, closes_at, price_tier, min_price, verified, logo_url, image, tagline, about, qr_code_slug')
+          .limit(50),
+        supabase
+          .from('barbers')
+          .select('id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, avatar, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids')
+          .limit(50),
+        supabase
+          .from('services')
+          .select('id, shop_id, index_code, name, category, duration_min, price, description, popular, active, image')
+          .limit(100),
+        uid
+          ? supabase
+              .from('appointments')
+              .select('id, customer_uid, client_name, client_phone, client_tier, shop_id, shop_name, barber_id, barber_name, service_id, service_name, date, time, duration_min, price, status, payment_method, payment_status, notes, internal_barber_notes, coupon_code')
+              .eq('customer_uid', uid)
+              .order('created_at', { ascending: false })
+              .limit(50)
+          : Promise.resolve({ data: [] }),
+        supabase
+          .from('reviews')
+          .select('id, shop_id, barber_id, customer_uid, author, role, rating, date, comment, service_name, barber_name, status, moderation_note')
+          .order('created_at', { ascending: false })
+          .limit(50),
+        uid
+          ? supabase
+              .from('profiles')
+              .select('id, uid, email, name, phone, avatar_url, role, tier, preferred_notes, status, assigned_shop_id, assigned_barber_id')
+              .eq('uid', uid)
+              .limit(1)
+          : Promise.resolve({ data: [] }),
+        supabase
+          .from('coupons')
+          .select('id, shop_id, code, discount_percent, discount_text, min_spend, uses_count, max_uses, status, expires_at')
+          .eq('status', 'Active')
+          .limit(20),
+        uid
+          ? supabase
+              .from('payments')
+              .select('id, appointment_id, customer_uid, client_name, shop_id, shop_name, amount, platform_fee, method, method_display, status, receipt_number')
+              .eq('customer_uid', uid)
+              .order('created_at', { ascending: false })
+              .limit(30)
+          : Promise.resolve({ data: [] }),
+        uid
+          ? supabase
+              .from('reports')
+              .select('id, reporter_uid, reporter_name, target_type, target_id, target_label, reason, details, status, resolution_note')
+              .eq('reporter_uid', uid)
+              .order('created_at', { ascending: false })
+              .limit(20)
+          : Promise.resolve({ data: [] }),
+        supabase
+          .from('working_hours')
+          .select('id, shop_id, barber_id, day_of_week, day_order, start_time, end_time, break_start, break_end, is_day_off, holiday_note')
+          .order('day_order', { ascending: true })
+          .limit(50),
+        supabase
+          .from('shop_gallery')
+          .select('id, shop_id, image_url, title, caption')
+          .limit(30),
+        supabase
+          .from('barber_gallery')
+          .select('id, barber_id, image_url, title, style_tag')
+          .limit(30),
+        uid
+          ? supabase
+              .from('favorites')
+              .select('id, customer_uid, target_type, target_id')
+              .eq('customer_uid', uid)
+              .limit(50)
+          : Promise.resolve({ data: [] }),
+        uid
+          ? supabase
+              .from('notifications')
+              .select('id, recipient_uid, type, title, time_label, unread')
+              .eq('recipient_uid', uid)
+              .order('created_at', { ascending: false })
+              .limit(30)
+          : Promise.resolve({ data: [] }),
+      ]);
 
     supaData = {
       shops: (shopsRes.data || []).map(mapSupabaseShop),
@@ -410,15 +492,8 @@ export const apiFetchBootstrap = async (uid = '') => {
       })),
     };
   } catch {
-    // Ignore Supabase fetch error if offline
+    // Graceful offline fallback
   }
-
-  const backendData = await backendPromise;
-
-  const mergedWorkingHours = mergeById(
-    supaData.workingHours,
-    backendData?.workingHours
-  );
 
   return {
     shops: mergeById(supaData.shops, backendData?.shops),
@@ -432,7 +507,7 @@ export const apiFetchBootstrap = async (uid = '') => {
     reports: mergeById(supaData.reports, backendData?.reports),
     favorites: mergeById(supaData.favorites, backendData?.favorites),
     notifications: mergeById(supaData.notifications, backendData?.notifications),
-    workingHours: mergedWorkingHours,
+    workingHours: mergeById(supaData.workingHours, backendData?.workingHours),
     shopGallery: mergeById(supaData.shopGallery, backendData?.shopGallery),
     barberGallery: mergeById(supaData.barberGallery, backendData?.barberGallery),
     platformSettings: backendData?.platformSettings || {
@@ -442,6 +517,14 @@ export const apiFetchBootstrap = async (uid = '') => {
       minFee: 5,
     },
   };
+  })();
+
+  inFlightBootstrapMap.set(cacheKey, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightBootstrapMap.delete(cacheKey);
+  }
 };
 
 export const apiFetchPlatformFee = async () => {
@@ -488,34 +571,41 @@ export const apiCreateRazorpayOrder = async (payload: {
   receipt?: string;
   notes?: any;
 }): Promise<{
-  success?: boolean;
-  orderId?: string;
-  amount?: number;
-  currency?: string;
-  keyId?: string;
-  isSimulator?: boolean;
+  success: boolean;
+  orderId: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+  servicePrice?: number;
+  platformFee?: number;
+  discountAmount?: number;
+  totalAmount?: number;
   [key: string]: any;
 }> => {
-  try {
-    const res = await safeBackendRequest<any>('/api/payments/razorpay/create-order', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (res?.orderId) {
-      return res;
-    }
-  } catch {
-    // fallback
+  const res = await safeBackendRequest<any>('/api/payments/razorpay/create-order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (res?.orderId) {
+    return {
+      success: true,
+      orderId: res.orderId,
+      amount: res.amount,
+      currency: res.currency || 'INR',
+      keyId: res.keyId,
+      servicePrice: res.servicePrice,
+      platformFee: res.platformFee,
+      discountAmount: res.discountAmount,
+      totalAmount: res.totalAmount,
+    };
   }
 
-  return {
-    success: true,
-    orderId: `order_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 6)}`,
-    amount: Math.round((payload.amount || 150) * 100),
-    currency: payload.currency || 'INR',
-    isSimulator: true,
-  };
+  throw new Error(
+    res?.error ||
+      'Failed to create verified Razorpay order on server. Ensure RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are configured.'
+  );
 };
 
 export const apiSyncAuthUser = async (payload: {
@@ -686,7 +776,6 @@ export const apiCreateAppointment = async (payload: any) => {
     payload.paymentMethod === 'online' ||
     Boolean(payload.razorpayPaymentId);
   const paymentStatus = isPaid ? 'paid' : 'pending';
-  const completionOtp = deriveAppointmentOtp(id);
 
   let methodDisplay = 'Pay at Salon (INR)';
   if (payload.paymentMethod === 'razorpay' || payload.paymentMethod === 'online') {
@@ -727,7 +816,7 @@ export const apiCreateAppointment = async (payload: any) => {
     payment_method: payload.paymentMethod || 'razorpay',
     payment_status: paymentStatus,
     notes: finalNotes,
-    internal_barber_notes: `[OTP:${completionOtp}]`,
+    internal_barber_notes: payload.internalBarberNotes || '',
     coupon_code: payload.couponCode || '',
   };
 
@@ -773,7 +862,7 @@ export const apiCreateAppointment = async (payload: any) => {
     id: `notif-${Date.now()}`,
     recipient_uid: payload.customerUid,
     type: 'booking_confirmation',
-    title: `Confirmed: ${payload.serviceName} with ${payload.barberName} (${payload.date} · ${payload.time} IST) • Completion OTP sent to ${payload.clientPhone || 'your number'}: ${completionOtp}`,
+    title: `Confirmed: ${payload.serviceName} with ${payload.barberName} (${payload.date} · ${payload.time} IST). Service OTP available in active appointment card.`,
     time_label: 'Just now · Booking & OTP Engine',
     unread: true,
   });
@@ -795,21 +884,20 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
       .eq('id', id)
       .maybeSingle();
 
-    const expectedOtp = deriveAppointmentOtp(
-      id,
-      existingApt?.notes,
-      existingApt?.internal_barber_notes
-    );
-
     if (
       updates.status !== undefined &&
       String(updates.status).toLowerCase() === 'completed'
     ) {
       const providedOtp = String(updates.enteredOtp || '').trim();
-      if (providedOtp && providedOtp !== expectedOtp) {
-        throw new Error(
-          'Invalid 4-digit Customer OTP. Please enter the exact OTP sent to the customer number.'
-        );
+      if (providedOtp) {
+        try {
+          await apiVerifyCompletionOtp(id, providedOtp);
+        } catch (otpErr: any) {
+          throw new Error(
+            otpErr?.message ||
+              'Invalid 4-digit Customer OTP. Please enter the exact OTP sent to the customer number.'
+          );
+        }
       }
     }
 
@@ -823,18 +911,9 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
     if (updates.date !== undefined) supaUpdates.date = updates.date;
     if (updates.time !== undefined) supaUpdates.time = updates.time;
     if (updates.barberNotes !== undefined) {
-      const cleanNote = stripOtpTag(updates.barberNotes);
-      supaUpdates.internal_barber_notes = `[OTP:${expectedOtp}] ${cleanNote}`.trim();
+      supaUpdates.internal_barber_notes = String(updates.barberNotes).trim();
     } else if (updates.internalBarberNotes !== undefined) {
-      const cleanNote = stripOtpTag(updates.internalBarberNotes);
-      supaUpdates.internal_barber_notes = `[OTP:${expectedOtp}] ${cleanNote}`.trim();
-    } else if (
-      existingApt &&
-      !String(existingApt.internal_barber_notes || '').includes('[OTP:')
-    ) {
-      supaUpdates.internal_barber_notes = `[OTP:${expectedOtp}] ${
-        existingApt.internal_barber_notes || ''
-      }`.trim();
+      supaUpdates.internal_barber_notes = String(updates.internalBarberNotes).trim();
     }
     if (updates.notes !== undefined) supaUpdates.notes = updates.notes;
 
@@ -899,7 +978,7 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
           id: `notif-rem-${Date.now()}`,
           recipient_uid: custUid,
           type: 'appointment_reminder',
-          title: `🔐 Appointment Approved! Completion OTP sent to ${existingApt.client_phone || '+91'}: ${expectedOtp} for ${existingApt.service_name} with ${existingApt.barber_name}. Share this OTP with your barber when work is ✅`,
+          title: `🔐 Appointment Approved! Your Service Completion OTP will be available during check-in for ${existingApt.service_name} with ${existingApt.barber_name}. Share this OTP with your barber when service completes.`,
           time_label: 'Just now · OTP Verification',
           unread: true,
         });
@@ -908,7 +987,7 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
           id: `notif-start-${Date.now()}`,
           recipient_uid: custUid,
           type: 'service_started',
-          title: `${existingApt.barber_name} has started your ${existingApt.service_name} session! Your Service Completion OTP (${existingApt.client_phone || '+91'}) is: ${expectedOtp}`,
+          title: `${existingApt.barber_name} has started your ${existingApt.service_name} session! Your Service Completion OTP is ready in your booking card.`,
           time_label: 'Just now · Chair Live',
           unread: true,
         });
@@ -1690,12 +1769,18 @@ export async function apiVerifyRazorpayPayment(payload: {
     if (res?.verified) {
       return res;
     }
-  } catch {
-    // fallback
+    return {
+      verified: false,
+      paymentId: payload.razorpay_payment_id,
+      error: res?.error || 'Payment signature verification failed on server.',
+    };
+  } catch (err: any) {
+    return {
+      verified: false,
+      paymentId: payload.razorpay_payment_id,
+      error: err?.message || 'Server error while verifying Razorpay payment signature.',
+    };
   }
-
-  // Client fallback
-  return { verified: true, paymentId: payload.razorpay_payment_id };
 }
 
 // ----------------------------------------------------------------------------

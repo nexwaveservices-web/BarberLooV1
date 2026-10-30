@@ -27,3 +27,4 @@ export const createPool = () => {
 const pool = createPool();
 
 export const db = drizzle(pool, { schema });
+
