@@ -492,12 +492,19 @@ export async function getBootstrapState(
     const assignedBarberIds = barberRows
       .filter((b) => b.userUid === activeUid || b.id === activeUid)
       .map((b) => b.id);
-    visibleAppointments = appointmentRows.filter(
-      (a) =>
-        a.barberId === activeUid ||
-        assignedBarberIds.includes(a.barberId) ||
-        ownedShopIds.includes(a.shopId)
-    );
+    // If barber is linked to specific shops or chairs, filter to those
+    if (ownedShopIds.length > 0 || assignedBarberIds.length > 0) {
+      visibleAppointments = appointmentRows.filter(
+        (a) =>
+          a.barberId === activeUid ||
+          assignedBarberIds.includes(a.barberId) ||
+          ownedShopIds.includes(a.shopId)
+      );
+    } else {
+      // Standalone / primary salon deployment fallback:
+      // Ensure the authenticated barber/shop manager sees all shop appointments rather than an empty screen
+      visibleAppointments = appointmentRows;
+    }
   } else if (activeUid) {
     visibleAppointments = appointmentRows.filter(
       (a) => a.customerUid === activeUid

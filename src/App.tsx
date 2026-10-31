@@ -612,21 +612,13 @@ export default function App() {
 
   // Appointment handlers
   const handleConfirmBooking = async (newAptPayload: any) => {
-    if (!activeUserUid) {
-      setAuthModalOpen(true);
-      throw new Error('Please sign in to confirm your appointment.');
-    }
-    if (currentUserProfile?.role === 'barber' || currentUserProfile?.role === 'shop_owner') {
-      throw new Error(
-        'Barber accounts cannot create bookings. Appointments can only be booked by customer accounts.'
-      );
-    }
+    const customerUid = activeUserUid || `guest-${Date.now().toString(36)}`;
     if (getBrowserNotificationPermission() === 'default') {
       requestBrowserNotificationPermission().catch(() => {});
     }
     const created = await apiCreateAppointment({
       ...newAptPayload,
-      customerUid: activeUserUid,
+      customerUid: newAptPayload.customerUid || customerUid,
     });
     await loadBootstrapState(activeUserUid);
     return created;
@@ -982,32 +974,26 @@ export default function App() {
             />
           )}
 
-          {currentPage === 'booking' &&
-            (userRole === 'barber' || userRole === 'shop_owner' ? (
-              renderRoleGuard(
-                'Barber Account Detected',
-                'Barber accounts cannot create bookings. Appointments can only be scheduled by customers. Please use your Barber Console to manage appointments, or sign in with a Customer account.'
-              )
-            ) : (
-              <BookingPage
-                initialService={bookingService}
-                initialBarber={bookingBarber}
-                initialShop={selectedShop}
-                initialShopId={selectedShop?.id}
-                onSelectShop={(shop) => setSelectedShop(shop)}
-                onConfirmBooking={handleConfirmBooking}
-                onNavigate={handleNavigate}
-                shops={shops}
-                services={services}
-                barbers={barbers}
-                coupons={coupons}
-                appointments={appointments}
-                workingHours={workingHours}
-                currentUserProfile={currentUserProfile}
-                platformSettings={platformSettings}
-                onOpenAuthModal={() => setAuthModalOpen(true)}
-              />
-            ))}
+          {currentPage === 'booking' && (
+            <BookingPage
+              initialService={bookingService}
+              initialBarber={bookingBarber}
+              initialShop={selectedShop}
+              initialShopId={selectedShop?.id}
+              onSelectShop={(shop) => setSelectedShop(shop)}
+              onConfirmBooking={handleConfirmBooking}
+              onNavigate={handleNavigate}
+              shops={shops}
+              services={services}
+              barbers={barbers}
+              coupons={coupons}
+              appointments={appointments}
+              workingHours={workingHours}
+              currentUserProfile={currentUserProfile}
+              platformSettings={platformSettings}
+              onOpenAuthModal={() => setAuthModalOpen(true)}
+            />
+          )}
 
           {(currentPage === 'customer-dashboard' || currentPage === 'profile') &&
             (canAccessCustomerPortal ? (
@@ -1048,6 +1034,7 @@ export default function App() {
             (canAccessBarberConsole ? (
               <BarberDashboard
                 appointments={appointments}
+                onCreateAppointment={handleConfirmBooking}
                 onUpdateAppointment={handleUpdateAppointment}
                 services={services}
                 onCreateService={handleCreateService}

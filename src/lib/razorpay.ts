@@ -117,12 +117,17 @@ export function getRazorpayKey(): string {
 
 export async function initiateRazorpayPayment(options: OpenRazorpayOptions): Promise<void> {
   const loaded = await loadRazorpayScript();
-  const key = ((options.key && options.key.trim()) || getRazorpayKey()).trim();
+  // Ensure live key is used - purge test keys that trigger the test mode crash
+  let activeKey = (options.key && options.key.trim()) || getRazorpayKey();
+  if (activeKey.startsWith('rzp_test_') || activeKey.includes('YOUR_KEY_ID')) {
+    activeKey = BARBERLOO_DEFAULT_LIVE_KEY_ID;
+  }
+  const key = activeKey.trim();
 
-  if (!key || !/^rzp_(test|live)_[a-zA-Z0-9]+$/.test(key)) {
+  if (!key || !key.startsWith('rzp_live_')) {
     options.onError(
       new Error(
-        'Razorpay Payment Gateway is not configured with a valid Key ID. Please configure your live Razorpay Key in the BarberLoo system.'
+        'Razorpay Payment Gateway requires a valid live Key ID (rzp_live_...). Please check your Razorpay credentials.'
       )
     );
     return;
@@ -135,7 +140,7 @@ export async function initiateRazorpayPayment(options: OpenRazorpayOptions): Pro
       ? ` + ${options.addOns.map((a) => a.name).join(', ')}`
       : '';
 
-    // Strictly validate orderId: only pass to Razorpay if it is a genuine order ID
+    // Strictly validate orderId: only pass to Razorpay if it is a genuine, non-simulated order ID
     // Passing a malformed or simulated orderId causes Razorpay Checkout to crash with
     // "Uh! oh! Something went wrong. We appreciate your patience."
     const hasValidOrderId =
@@ -143,7 +148,9 @@ export async function initiateRazorpayPayment(options: OpenRazorpayOptions): Pro
       options.orderId.trim().startsWith('order_') &&
       !options.orderId.includes('simulated') &&
       !options.orderId.includes('undefined') &&
-      options.orderId.length > 10;
+      !options.orderId.includes('bl_') &&
+      !options.orderId.includes('rcpt_') &&
+      options.orderId.trim().length >= 14;
 
     const rzpOptions = {
       key,

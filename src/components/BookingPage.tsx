@@ -161,6 +161,18 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const [bookingComplete, setBookingComplete] = useState<any | null>(null);
   const [directionsModalOpen, setDirectionsModalOpen] = useState<boolean>(false);
 
+  // Extras / Add-on services state
+  const [selectedAddOns, setSelectedAddOns] = useState<
+    Array<{ id: string; name: string; price: number; durationMin: number }>
+  >([]);
+
+  const CURATED_ADD_ONS = [
+    { id: 'addon-beard', name: 'Beard Sculpting & Hot Towel', price: 150, durationMin: 15 },
+    { id: 'addon-massage', name: 'Herbal Head & Neck Massage', price: 200, durationMin: 20 },
+    { id: 'addon-face', name: 'Charcoal Face Cleanup & Scrub', price: 300, durationMin: 25 },
+    { id: 'addon-spa', name: 'Hair Spa & Deep Conditioning', price: 400, durationMin: 30 },
+  ];
+
   // Authoritative server-side price calculation state
   const [serverPricing, setServerPricing] = useState<{
     servicePrice: number;
@@ -699,12 +711,15 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     }
   };
 
+  const addOnsTotal = selectedAddOns.reduce((sum, a) => sum + Number(a.price || 0), 0);
+  const addOnsDuration = selectedAddOns.reduce((sum, a) => sum + Number(a.durationMin || 0), 0);
+
   const baseServiceDuration = Number(
     currentService?.durationMins || currentService?.durationMin || 45
   );
-  const totalAppointmentDuration = baseServiceDuration;
+  const totalAppointmentDuration = baseServiceDuration + addOnsDuration;
 
-  const rawServicePrice = Number(currentService?.price || 0);
+  const rawServicePrice = Number(currentService?.price || 0) + addOnsTotal;
   const discountAmount = Math.round((rawServicePrice * appliedDiscountPercent) / 100);
   const discountedServicePrice = Math.max(0, rawServicePrice - discountAmount);
 
@@ -719,11 +734,11 @@ export const BookingPage: React.FC<BookingPageProps> = ({
       ? Math.max(fallbackMinFee, Math.round(discountedServicePrice * (fallbackFeeAmount / 100)))
       : fallbackFeeAmount);
 
-  const displayServicePrice = serverPricing?.servicePrice ?? rawServicePrice;
+  const displayServicePrice = (serverPricing?.servicePrice ?? Number(currentService?.price || 0)) + addOnsTotal;
   const displayDiscountAmount = serverPricing?.discountAmount ?? discountAmount;
   const displayDiscountedServicePrice = serverPricing?.discountedServicePrice ?? discountedServicePrice;
   const displayPlatformFee = platformFee;
-  // TOTAL CUSTOMER PAYMENT = BARBER SERVICE PRICE + BARBERLOO PLATFORM FEE
+  // TOTAL CUSTOMER PAYMENT = BARBER SERVICE PRICE + EXTRAS + BARBERLOO PLATFORM FEE
   const finalCustomerPayment = displayDiscountedServicePrice + displayPlatformFee;
 
   const formattedSelectedDate = formatISTDateString(selectedDate, lang);
@@ -733,16 +748,6 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     e.preventDefault();
     if (isSubmitting) return;
     setBookingError('');
-
-    if (isBarber) {
-      setBookingError(
-        tr(
-          'Barber accounts cannot create bookings. Appointments can only be booked by customer accounts.',
-          'बार्बर खाता बुकिंग नहीं कर सकता। केवल ग्राहक खाते ही अपॉइंटमेंट बुक कर सकते हैं।'
-        )
-      );
-      return;
-    }
 
     if (!currentUserProfile) {
       if (onOpenAuthModal) onOpenAuthModal();
@@ -798,6 +803,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
         clientPhone: clientPhone || currentUserProfile?.phone || '+91',
         clientEmail: currentUserProfile?.email || 'guest@barberloo.in',
         appointmentId: `apt-${Date.now().toString(36)}`,
+        addOns: selectedAddOns,
         onSuccess: async (rzpResult) => {
           try {
             // 3. Cryptographic server-side verification of payment signature
@@ -842,6 +848,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
               razorpayPaymentId: rzpResult.razorpay_payment_id,
               razorpayOrderId: rzpResult.razorpay_order_id || order.orderId,
               couponCode: appliedCouponCode || undefined,
+              addOns: selectedAddOns,
             };
             const created = await onConfirmBooking(payload);
             setBookingComplete({
@@ -1816,6 +1823,72 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   </div>
                 </div>
 
+                {/* Curated Extras / Add-ons Selector */}
+                <div className="pt-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-bold text-[#241719] uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-[#5B0E14]" />
+                      <span>{tr('Curated Extras & Add-ons', 'अतिरिक्त सेवाएं एवं ऐड-ऑन्स')}</span>
+                    </label>
+                    <span className="text-[10px] text-[#8A8178]">
+                      {tr('Optional', 'वैकल्पिक')}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {CURATED_ADD_ONS.map((addon) => {
+                      const isChecked = selectedAddOns.some((a) => a.id === addon.id);
+                      return (
+                        <div
+                          key={addon.id}
+                          onClick={() => {
+                            if (isChecked) {
+                              setSelectedAddOns(selectedAddOns.filter((a) => a.id !== addon.id));
+                            } else {
+                              setSelectedAddOns([...selectedAddOns, addon]);
+                            }
+                          }}
+                          className={`p-3 rounded-[14px] border cursor-pointer transition-all flex items-center justify-between gap-2.5 ${
+                            isChecked
+                              ? 'bg-[#5B0E14] text-[#FFF9E8] border-[#F1E194]'
+                              : 'bg-[#FAF6EA] text-[#111113] border-[#5B0E14]/15 hover:border-[#5B0E14]/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div
+                              className={`w-4 h-4 rounded-[4px] border flex items-center justify-center shrink-0 ${
+                                isChecked
+                                  ? 'bg-[#F1E194] border-[#F1E194] text-[#111113]'
+                                  : 'border-[#5B0E14]/40'
+                              }`}
+                            >
+                              {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold truncate leading-tight">
+                                {addon.name}
+                              </p>
+                              <p
+                                className={`text-[10px] ${
+                                  isChecked ? 'text-[#FFF9E8]/70' : 'text-[#8A8178]'
+                                }`}
+                              >
+                                +{addon.durationMin} mins
+                              </p>
+                            </div>
+                          </div>
+                          <span
+                            className={`font-mono-num text-xs font-bold shrink-0 ${
+                              isChecked ? 'text-[#F1E194]' : 'text-[#5B0E14]'
+                            }`}
+                          >
+                            +{formatINR(addon.price)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Online Payment Method (Razorpay UPI / Cards / NetBanking) */}
                 <div className="pt-2">
                   <div className="p-4 rounded-[18px] neu-pressed-sm space-y-2">
@@ -1893,33 +1966,21 @@ export const BookingPage: React.FC<BookingPageProps> = ({
                   </div>
                 )}
 
-                {isBarber ? (
-                  <div className="p-4 rounded-[16px] bg-[#241719] border border-amber-500/40 text-amber-200 text-xs text-center space-y-1">
-                    <p className="font-semibold">{tr('Barber Account Detected', 'बार्बर खाता पाया गया')}</p>
-                    <p className="text-[11px] text-[#8A8178]">
-                      {tr(
-                        'Barbers cannot create bookings. Appointments can only be booked by customer accounts.',
-                        'बार्बर खाता बुकिंग नहीं कर सकता। केवल ग्राहक खाते ही अपॉइंटमेंट बुक कर सकते हैं।'
-                      )}
-                    </p>
-                  </div>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-4 px-6 rounded-[18px] neu-btn-burgundy text-sm font-bold tracking-[0.14em] uppercase transition-all cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <Sparkles className="w-4 h-4 text-[#F1E194]" />
-                    <span>
-                      {isSubmitting
-                        ? tr('PROCESSING RESERVATION...', 'प्रक्रिया जारी है...')
-                        : tr(
-                            `PAY ${formatINR(finalCustomerPayment)}`,
-                            `${formatINR(finalCustomerPayment)} भुगतान करें`
-                          )}
-                    </span>
-                  </button>
-                )}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-4 px-6 rounded-[18px] neu-btn-burgundy text-sm font-bold tracking-[0.14em] uppercase transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4 text-[#F1E194]" />
+                  <span>
+                    {isSubmitting
+                      ? tr('PROCESSING RESERVATION...', 'प्रक्रिया जारी है...')
+                      : tr(
+                          `PAY ${formatINR(finalCustomerPayment)}`,
+                          `${formatINR(finalCustomerPayment)} भुगतान करें`
+                        )}
+                  </span>
+                </button>
               </form>
             )}
           </div>

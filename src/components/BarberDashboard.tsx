@@ -40,6 +40,7 @@ import { BarberLocationPicker } from './BarberLocationPicker';
 
 interface BarberDashboardProps {
   appointments: AppointmentItem[];
+  onCreateAppointment?: (payload: any) => Promise<any>;
   onUpdateAppointment?: (id: string, updates: any) => Promise<void>;
   services?: any[];
   onCreateService?: (payload: any) => Promise<void>;
@@ -77,6 +78,7 @@ interface BarberDashboardProps {
 
 export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   appointments,
+  onCreateAppointment,
   onUpdateAppointment,
   services = [],
   onCreateService,
@@ -247,6 +249,31 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   const [noteAptId, setNoteAptId] = useState<string | null>(null);
   const [noteInput, setNoteInput] = useState('');
 
+  // Walk-in / Direct Client Booking state
+  const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
+  const [walkInClientName, setWalkInClientName] = useState('');
+  const [walkInClientPhone, setWalkInClientPhone] = useState('');
+  const [walkInServiceId, setWalkInServiceId] = useState('');
+  const [walkInBarberId, setWalkInBarberId] = useState('');
+  const [walkInDate, setWalkInDate] = useState(new Date().toISOString().slice(0, 10));
+  const [walkInTime, setWalkInTime] = useState('14:30');
+  const [walkInPaymentMethod, setWalkInPaymentMethod] = useState<'salon_cash' | 'online'>('salon_cash');
+  const [walkInPaymentStatus, setWalkInPaymentStatus] = useState<'paid' | 'pending'>('paid');
+  const [walkInNotes, setWalkInNotes] = useState('');
+  const [selectedWalkInExtras, setSelectedWalkInExtras] = useState<string[]>([]);
+  const [walkInSubmitting, setWalkInSubmitting] = useState(false);
+  const [walkInSuccessMsg, setWalkInSuccessMsg] = useState('');
+  const [walkInError, setWalkInError] = useState('');
+  const [copiedOtpId, setCopiedOtpId] = useState<string | null>(null);
+
+  const AVAILABLE_EXTRAS = [
+    { id: 'ext-beard', name: 'Beard Sculpting & Hot Towel', price: 150, durationMin: 15 },
+    { id: 'ext-massage', name: 'Herbal Head & Neck Massage', price: 200, durationMin: 20 },
+    { id: 'ext-face', name: 'Charcoal Face Cleanup & Scrub', price: 300, durationMin: 25 },
+    { id: 'ext-spa', name: 'Hair Spa & Conditioning', price: 400, durationMin: 30 },
+    { id: 'ext-mustache', name: 'Mustache Styling & Trim', price: 80, durationMin: 10 },
+  ];
+
   const activeShop = shops[0] || null;
 
   // Suspension & Governance State for Logged-In Barber
@@ -293,6 +320,101 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
       // silent
     } finally {
       setAppealSubmitting(false);
+    }
+  };
+
+  const handleCreateWalkInBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!walkInClientName.trim()) {
+      setWalkInError(tr('Please enter the customer full name.', 'कृपया ग्राहक का पूरा नाम दर्ज करें।'));
+      return;
+    }
+    if (!walkInClientPhone.trim()) {
+      setWalkInError(tr('Please enter customer phone number.', 'कृपया ग्राहक का फ़ोन नंबर दर्ज करें।'));
+      return;
+    }
+    const targetShop = activeShop || shops[0];
+    if (!targetShop) {
+      setWalkInError(tr('Please select or register a salon first.', 'कृपया पहले एक सैलून चुनें।'));
+      return;
+    }
+    const srv = services.find((s) => s.id === walkInServiceId) || services[0];
+    if (!srv) {
+      setWalkInError(tr('Please select a service from your menu.', 'कृपया मेनू से एक सेवा चुनें।'));
+      return;
+    }
+    const brb = barbers.find((b) => b.id === walkInBarberId) || linkedBarber || barbers[0] || {
+      id: 'master-barber',
+      name: `${targetShop.name} Master Barber`,
+    };
+
+    setWalkInSubmitting(true);
+    setWalkInError('');
+
+    try {
+      const selectedExtrasList = AVAILABLE_EXTRAS.filter((x) =>
+        selectedWalkInExtras.includes(x.id)
+      );
+      const extrasCost = selectedExtrasList.reduce((sum, x) => sum + x.price, 0);
+      const extrasDuration = selectedExtrasList.reduce((sum, x) => sum + x.durationMin, 0);
+      const basePrice = Number(srv.price || 500);
+      const baseDuration = Number(srv.durationMin || srv.durationMins || 45);
+      const serviceTotal = basePrice + extrasCost;
+      const platformFee = 10;
+      const totalCustomerPrice = serviceTotal + platformFee;
+      const generatedOtp = String(Math.floor(100000 + Math.random() * 900000));
+
+      const extrasNotes = selectedExtrasList.length > 0
+        ? `[Extras: ${selectedExtrasList.map((x) => `${x.name} (+₹${x.price})`).join(', ')}]`
+        : '';
+      const notesCombined = `Direct / Walk-in Booking ${extrasNotes} ${walkInNotes ? `| ${walkInNotes}` : ''}`.trim();
+
+      const bookingPayload = {
+        clientName: walkInClientName.trim(),
+        clientPhone: walkInClientPhone.trim(),
+        shopId: targetShop.id,
+        shopName: targetShop.name,
+        serviceId: srv.id,
+        serviceName: srv.name,
+        barberId: brb.id,
+        barberName: brb.name,
+        barberAvatar: brb.avatar || brb.image,
+        date: walkInDate,
+        time: walkInTime,
+        durationMin: baseDuration + extrasDuration,
+        durationMins: baseDuration + extrasDuration,
+        price: totalCustomerPrice,
+        servicePrice: serviceTotal,
+        platformFee,
+        totalPrice: totalCustomerPrice,
+        status: 'confirmed',
+        paymentMethod: walkInPaymentMethod === 'online' ? 'online' : 'pay_at_shop',
+        paymentStatus: walkInPaymentStatus,
+        notes: notesCombined,
+        internalBarberNotes: `[OTP:${generatedOtp}] Walk-in created by barber console`,
+        completionOtp: generatedOtp,
+        addOns: selectedExtrasList,
+      };
+
+      if (onCreateAppointment) {
+        await onCreateAppointment(bookingPayload);
+      }
+
+      setWalkInSuccessMsg(
+        tr(
+          `✓ Appointment booked successfully for ${walkInClientName}! Service Completion OTP is: ${generatedOtp}. Customer can share this code upon completion.`,
+          `✓ ${walkInClientName} के लिए अपॉइंटमेंट सफलतापूर्वक बुक हुआ! सेवा पूर्णता OTP है: ${generatedOtp}. कार्य पूरा होने पर ग्राहक यह कोड बताएं।`
+        )
+      );
+      setIsWalkInModalOpen(false);
+      setWalkInClientName('');
+      setWalkInClientPhone('');
+      setSelectedWalkInExtras([]);
+      setWalkInNotes('');
+    } catch (err: any) {
+      setWalkInError(err?.message || 'Failed to create booking.');
+    } finally {
+      setWalkInSubmitting(false);
     }
   };
 
@@ -879,13 +1001,54 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
         {activeTab === 'appointments' && (
           <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 sm:p-8 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <h2 className="font-display text-3xl font-bold">
-                {tr('Client Appointments (IST)', 'ग्राहक अपॉइंटमेंट्स (IST)')}
-              </h2>
-              <div className="px-3.5 py-1.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-[#F1E194] text-xs font-semibold tracking-wider">
-                {appointments.length} {tr('Customer Bookings', 'ग्राहक बुकिंग')}
+              <div>
+                <h2 className="font-display text-3xl font-bold">
+                  {tr('Client Appointments (IST)', 'ग्राहक अपॉइंटमेंट्स (IST)')}
+                </h2>
+                <p className="text-xs text-[#8A8178] mt-0.5">
+                  {tr('Live customer bookings, walk-ins, service OTP verification & add-on extras.', 'लाइव ग्राहक बुकिंग, वॉक-इन, सेवा OTP सत्यापन और अतिरिक्त सेवाएं।')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsWalkInModalOpen(true);
+                    setWalkInSuccessMsg('');
+                    setWalkInError('');
+                    if (!walkInServiceId && services.length > 0) {
+                      setWalkInServiceId(services[0].id);
+                    }
+                    if (!walkInBarberId && barbers.length > 0) {
+                      setWalkInBarberId(linkedBarber?.id || barbers[0].id);
+                    }
+                  }}
+                  className="px-4 py-2.5 rounded-[14px] bg-[#F1E194] hover:bg-[#FFF9E8] text-[#111113] text-xs font-bold inline-flex items-center gap-2 shadow-md cursor-pointer transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{tr('+ Book Walk-in / Direct Client', '+ नई ग्राहक बुकिंग / वॉक-इन')}</span>
+                </button>
+                <div className="px-3.5 py-2 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-[#F1E194] text-xs font-semibold tracking-wider">
+                  {appointments.length} {tr('Bookings', 'बुकिंग')}
+                </div>
               </div>
             </div>
+
+            {walkInSuccessMsg && (
+              <div className="p-4 rounded-[16px] bg-emerald-950/80 border border-emerald-400/40 text-emerald-200 text-xs flex items-center justify-between gap-3 shadow-lg">
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <span>{walkInSuccessMsg}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWalkInSuccessMsg('')}
+                  className="p-1 text-emerald-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             {appointments.length === 0 ? (
               <p className="text-xs text-[#8A8178] py-8">
                 {tr(
@@ -969,6 +1132,37 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                               ? `· Barber Note: ${apt.barberNotes}`
                               : ''}
                           </p>
+                        )}
+
+                        {/* Extras / Add-on Services Display */}
+                        {Boolean((apt as any).addOnsText) && (
+                          <div className="flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-[8px] bg-[#241719] border border-[#D4AF37]/40 text-[#F1E194] text-[11px] font-medium w-fit">
+                            <span>✨ {tr('Extras / Add-ons:', 'अतिरिक्त सेवाएं:')}</span>
+                            <span className="font-semibold text-[#FFF9E8]">{(apt as any).addOnsText}</span>
+                          </div>
+                        )}
+
+                        {/* Customer 6-Digit Completion OTP Tag */}
+                        {Boolean((apt as any).completionOtp) && (
+                          <div className="flex items-center gap-2 mt-2 px-3 py-1.5 rounded-[10px] bg-[#111113] border border-[#F1E194]/40 text-[#F1E194] text-xs font-mono w-fit">
+                            <span>🔐 {tr('Service OTP:', 'सेवा पूर्णता OTP:')}</span>
+                            <strong className="tracking-widest text-[#FFF9E8] bg-[#241719] px-2 py-0.5 rounded border border-[#F1E194]/25">
+                              {(apt as any).completionOtp}
+                            </strong>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (navigator.clipboard) {
+                                  navigator.clipboard.writeText(String((apt as any).completionOtp));
+                                  setCopiedOtpId(apt.id);
+                                  setTimeout(() => setCopiedOtpId(null), 2500);
+                                }
+                              }}
+                              className="text-[10px] text-[#D4AF37] hover:text-[#FFF9E8] underline cursor-pointer ml-1"
+                            >
+                              {copiedOtpId === apt.id ? tr('Copied! ✓', 'कॉपी हो गया! ✓') : tr('Copy OTP', 'कॉपी OTP')}
+                            </button>
+                          </div>
                         )}
                       </div>
 
@@ -1140,13 +1334,13 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                                 type="button"
                                 onClick={async () => {
                                   const clean = enteredOtp.trim();
-                                  if (!clean || clean.length !== 6) {
+                                  if (!clean || clean.length < 4 || clean.length > 6) {
                                     setOtpFeedback({
                                       id: apt.id,
                                       isError: true,
                                       text: tr(
-                                        'Please enter a valid 6-digit numeric completion OTP.',
-                                        'कृपया 6 अंकों का सही पूर्णता OTP दर्ज करें।'
+                                        'Please enter a valid 4 to 6-digit numeric completion OTP.',
+                                        'कृपया 4 से 6 अंकों का सही पूर्णता OTP दर्ज करें।'
                                       ),
                                     });
                                     return;
@@ -2891,6 +3085,266 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
         onClose={() => setSelectedQrShop(null)}
         platformSettings={platformSettings}
       />
+
+      {/* Walk-in / Direct Client Booking Modal */}
+      {isWalkInModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="max-w-xl w-full rounded-[24px] bg-[#1a1113] border border-[#F1E194]/30 p-6 sm:p-8 space-y-5 text-[#FFF9E8] shadow-2xl my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F1E194]/15">
+              <div>
+                <span className="text-[10px] uppercase font-bold tracking-widest text-[#F1E194] bg-[#241719] px-2.5 py-0.5 rounded border border-[#F1E194]/20">
+                  {tr('BARBER & SALON CONSOLE', 'बार्बर और सैलून कंसोल')}
+                </span>
+                <h3 className="font-display text-2xl font-bold mt-1 text-[#FFF9E8]">
+                  {tr('Book Client / Walk-in Appointment', 'ग्राहक अपॉइंटमेंट / वॉक-इन बुक करें')}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsWalkInModalOpen(false)}
+                className="p-2 rounded-full bg-[#111113] hover:bg-[#241719] text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {walkInError && (
+              <div className="p-3.5 rounded-[12px] bg-[#5B0E14] border border-red-400/40 text-xs text-red-100 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-300 shrink-0" />
+                <span>{walkInError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateWalkInBooking} className="space-y-4 text-xs">
+              {/* Customer Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-[#8A8178] mb-1 font-semibold">
+                    {tr('Client Full Name *', 'ग्राहक का पूरा नाम *')}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Rahul Sharma"
+                    value={walkInClientName}
+                    onChange={(e) => setWalkInClientName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#8A8178] mb-1 font-semibold">
+                    {tr('Client Phone Number *', 'ग्राहक का फ़ोन नंबर *')}
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="+91 98765 43210"
+                    value={walkInClientPhone}
+                    onChange={(e) => setWalkInClientPhone(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  />
+                </div>
+              </div>
+
+              {/* Service & Barber Selection */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-[#8A8178] mb-1 font-semibold">
+                    {tr('Select Service *', 'सेवा चुनें *')}
+                  </label>
+                  <select
+                    value={walkInServiceId}
+                    onChange={(e) => setWalkInServiceId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  >
+                    {services.map((srv) => (
+                      <option key={srv.id} value={srv.id}>
+                        {srv.name} — {formatINR(srv.price)} ({srv.durationMins || srv.durationMin || 45}m)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[#8A8178] mb-1 font-semibold">
+                    {tr('Select Barber *', 'बार्बर चुनें *')}
+                  </label>
+                  <select
+                    value={walkInBarberId}
+                    onChange={(e) => setWalkInBarberId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  >
+                    {barbers.map((brb) => (
+                      <option key={brb.id} value={brb.id}>
+                        {brb.name} ({brb.role || 'Barber'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Extras & Add-ons Section */}
+              <div className="p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/20 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-[#F1E194] text-xs">
+                    ✨ {tr('Extras & Add-on Services', 'अतिरिक्त सेवाएं (Add-ons)')}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178]">
+                    {tr('Optional add-ons for the client', 'ग्राहक के लिए अतिरिक्त सेवाएं')}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {AVAILABLE_EXTRAS.map((extra) => {
+                    const isChecked = selectedWalkInExtras.includes(extra.id);
+                    return (
+                      <label
+                        key={extra.id}
+                        className={`flex items-center gap-2 p-2 rounded-[10px] border cursor-pointer transition-colors ${
+                          isChecked
+                            ? 'bg-[#241719] border-[#F1E194]/50 text-[#F1E194]'
+                            : 'bg-[#1a1113] border-white/10 text-[#FFF9E8]/80 hover:border-[#F1E194]/30'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedWalkInExtras([...selectedWalkInExtras, extra.id]);
+                            } else {
+                              setSelectedWalkInExtras(selectedWalkInExtras.filter((id) => id !== extra.id));
+                            }
+                          }}
+                          className="rounded text-[#5B0E14] focus:ring-[#F1E194]"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-[11px] truncate">{extra.name}</p>
+                          <p className="text-[10px] text-[#8A8178]">+{formatINR(extra.price)} · {extra.durationMin}m</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Date & Time Slot */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-[#8A8178] mb-1 font-semibold">
+                    {tr('Appointment Date (IST) *', 'अपॉइंटमेंट की तारीख *')}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={walkInDate}
+                    onChange={(e) => setWalkInDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#8A8178] mb-1 font-semibold">
+                    {tr('Time Slot (IST) *', 'समय स्लॉट *')}
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={walkInTime}
+                    onChange={(e) => setWalkInTime(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  />
+                </div>
+              </div>
+
+              {/* Payment Method & Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-[#8A8178] mb-1 font-semibold">
+                    {tr('Payment Collection', 'भुगतान माध्यम')}
+                  </label>
+                  <select
+                    value={walkInPaymentMethod}
+                    onChange={(e) => setWalkInPaymentMethod(e.target.value as any)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  >
+                    <option value="salon_cash">{tr('Pay at Salon (Cash / UPI QR)', 'दुकान पर नकद / UPI')}</option>
+                    <option value="online">{tr('Online Razorpay Payment', 'रेज़रपे ऑनलाइन भुगतान')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[#8A8178] mb-1 font-semibold">
+                    {tr('Payment Status', 'भुगतान स्थिति')}
+                  </label>
+                  <select
+                    value={walkInPaymentStatus}
+                    onChange={(e) => setWalkInPaymentStatus(e.target.value as any)}
+                    className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  >
+                    <option value="paid">{tr('Paid / Captured ✅', 'भुगतान प्राप्त ✅')}</option>
+                    <option value="pending">{tr('Pending Payment ⏳', 'भुगतान शेष ⏳')}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Client Notes */}
+              <div>
+                <label className="block text-[#8A8178] mb-1 font-semibold">
+                  {tr('Internal Notes / Hair Styling Preferences', 'विशेष निर्देश या स्टाइलिंग प्राथमिकता')}
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Skin fade with low taper, herbal shampoo requested"
+                  value={walkInNotes}
+                  onChange={(e) => setWalkInNotes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/25 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                />
+              </div>
+
+              {/* Price Calculation Summary */}
+              {(() => {
+                const srv = services.find((s) => s.id === walkInServiceId) || services[0];
+                const base = Number(srv?.price || 500);
+                const extrasCost = AVAILABLE_EXTRAS.filter((x) =>
+                  selectedWalkInExtras.includes(x.id)
+                ).reduce((sum, x) => sum + x.price, 0);
+                const fee = 10;
+                const total = base + extrasCost + fee;
+                return (
+                  <div className="p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/20 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="text-[#8A8178] block">{tr('Total Payable (Service + Extras + Fee)', 'कुल राशि (सेवा + अतिरिक्त + शुल्क)')}</span>
+                      <span className="font-semibold text-[#FFF9E8] text-[11px]">
+                        {formatINR(base)} (Base) + {formatINR(extrasCost)} (Extras) + {formatINR(fee)} (Fee)
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-mono-num font-bold text-xl text-[#F1E194]">{formatINR(total)}</span>
+                      <span className="text-[10px] text-emerald-400 block">🔐 6-digit OTP Generated</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsWalkInModalOpen(false)}
+                  className="w-1/3 py-3 rounded-[14px] bg-[#241719] border border-[#F1E194]/20 text-[#8A8178] hover:text-[#FFF9E8] font-semibold tracking-wider uppercase cursor-pointer"
+                >
+                  {tr('Cancel', 'रद्द करें')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={walkInSubmitting}
+                  className="w-2/3 py-3 rounded-[14px] bg-[#F1E194] hover:bg-[#FFF9E8] text-[#111113] font-bold text-xs uppercase tracking-wider shadow-lg cursor-pointer transition-all disabled:opacity-50"
+                >
+                  {walkInSubmitting
+                    ? tr('Creating Booking...', 'बुकिंग जारी है...')
+                    : tr('Confirm & Create Booking ✅', 'पुष्टि करें और बुक करें ✅')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
