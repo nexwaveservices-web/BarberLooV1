@@ -164,7 +164,7 @@ export async function loadShopForBooking(
         .eq('shop_id', cleanId),
       supa
         .from('barbers')
-        .select('id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, avatar, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids')
+        .select('id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids')
         .eq('shop_id', cleanId),
     ]);
 

@@ -332,7 +332,7 @@ export const apiFetchBootstrap = async (uid = '') => {
           .limit(50),
         supabase
           .from('barbers')
-          .select('id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, avatar, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids')
+          .select('id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids')
           .limit(50),
         supabase
           .from('services')
@@ -348,34 +348,25 @@ export const apiFetchBootstrap = async (uid = '') => {
           .select('id, shop_id, barber_id, customer_uid, author, role, rating, date, comment, service_name, barber_name, status, moderation_note')
           .order('created_at', { ascending: false })
           .limit(50),
-        uid
-          ? supabase
-              .from('profiles')
-              .select('id, uid, email, name, phone, avatar_url, role, tier, preferred_notes, status, assigned_shop_id, assigned_barber_id')
-              .eq('uid', uid)
-              .limit(1)
-          : Promise.resolve({ data: [] }),
+        supabase
+          .from('profiles')
+          .select('id, uid, email, name, phone, role, tier, preferred_notes, status, assigned_shop_id, assigned_barber_id')
+          .limit(100),
         supabase
           .from('coupons')
           .select('id, shop_id, code, discount_percent, discount_text, min_spend, uses_count, max_uses, status, expires_at')
           .eq('status', 'Active')
           .limit(20),
-        uid
-          ? supabase
-              .from('payments')
-              .select('id, appointment_id, customer_uid, client_name, shop_id, shop_name, amount, platform_fee, method, method_display, status, receipt_number')
-              .eq('customer_uid', uid)
-              .order('created_at', { ascending: false })
-              .limit(30)
-          : Promise.resolve({ data: [] }),
-        uid
-          ? supabase
-              .from('reports')
-              .select('id, reporter_uid, reporter_name, target_type, target_id, target_label, reason, details, status, resolution_note')
-              .eq('reporter_uid', uid)
-              .order('created_at', { ascending: false })
-              .limit(20)
-          : Promise.resolve({ data: [] }),
+        supabase
+          .from('payments')
+          .select('id, appointment_id, customer_uid, client_name, shop_id, shop_name, amount, platform_fee, method, method_display, status, receipt_number')
+          .order('created_at', { ascending: false })
+          .limit(100),
+        supabase
+          .from('reports')
+          .select('id, reporter_uid, reporter_name, target_type, target_id, target_label, reason, details, status, resolution_note')
+          .order('created_at', { ascending: false })
+          .limit(50),
         supabase
           .from('working_hours')
           .select('id, shop_id, barber_id, day_of_week, day_order, start_time, end_time, break_start, break_end, is_day_off, holiday_note')
