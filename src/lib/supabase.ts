@@ -367,14 +367,18 @@ export async function supabaseSignInUser(
   // 2. Fetch user's profile from database
   const { data: existingRows } = await supabase
     .from('profiles')
-    .select('*')
+    .select(
+      'id, uid, email, name, phone, avatar_url, role, tier, preferred_notes, reward_balance, status, assigned_shop_id, assigned_barber_id'
+    )
     .eq('uid', uid);
   let userProfile = existingRows?.[0] || null;
 
   if (!userProfile) {
     const { data: emailRows } = await supabase
       .from('profiles')
-      .select('*')
+      .select(
+        'id, uid, email, name, phone, avatar_url, role, tier, preferred_notes, reward_balance, status, assigned_shop_id, assigned_barber_id'
+      )
       .eq('email', cleanEmail);
     userProfile = emailRows?.[0] || null;
   }
@@ -392,12 +396,12 @@ export async function supabaseSignInUser(
     phone: userProfile?.phone || supaUser.user_metadata?.phone || '',
     role: resolvedRole,
     token,
-    state_id: userProfile?.state_id,
-    city_id: userProfile?.city_id,
-    state: userProfile?.state,
-    city: userProfile?.city,
-    stateId: userProfile?.state_id,
-    cityId: userProfile?.city_id,
+    state_id: (userProfile as any)?.state_id || supaUser.user_metadata?.state_id,
+    city_id: (userProfile as any)?.city_id || supaUser.user_metadata?.city_id,
+    state: (userProfile as any)?.state || supaUser.user_metadata?.state,
+    city: (userProfile as any)?.city || supaUser.user_metadata?.city,
+    stateId: (userProfile as any)?.state_id || supaUser.user_metadata?.state_id,
+    cityId: (userProfile as any)?.city_id || supaUser.user_metadata?.city_id,
   };
 
   setPersistedSupabaseUser(sessionObj, token);

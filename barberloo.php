@@ -286,7 +286,7 @@ add_action('rest_api_init', function () {
 
 function barberloo_plugin_get_razorpay_credentials() {
     $key_id = defined('RAZORPAY_KEY_ID') ? RAZORPAY_KEY_ID : get_option('barberloo_razorpay_key_id', 'rzp_live_Tu5l5vmBvE6xHW');
-    $key_secret = defined('RAZORPAY_KEY_SECRET') ? RAZORPAY_KEY_SECRET : get_option('barberloo_razorpay_key_secret', 'pJaZ56eB25ctra194umQdaRS');
+    $key_secret = defined('RAZORPAY_KEY_SECRET') ? RAZORPAY_KEY_SECRET : get_option('barberloo_razorpay_key_secret', '');
     
     if (empty($key_id) && getenv('RAZORPAY_KEY_ID')) {
         $key_id = getenv('RAZORPAY_KEY_ID');

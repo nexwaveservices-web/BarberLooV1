@@ -328,45 +328,45 @@ export const apiFetchBootstrap = async (uid = '') => {
       ] = await Promise.all([
         supabase
           .from('shops')
-          .select('id, owner_uid, name, district, address, phone, rating, review_count, is_open, closes_at, price_tier, min_price, verified, logo_url, image, tagline, about, qr_code_slug')
-          .limit(50),
+          .select('id, owner_uid, name, district, city, address, phone, rating, review_count, is_open, closes_at, price_tier, min_price, verified, approval_status, logo_url, image, tagline, about, qr_code_slug')
+          .limit(100),
         supabase
           .from('barbers')
           .select('id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids')
-          .limit(50),
+          .limit(100),
         supabase
           .from('services')
           .select('id, shop_id, index_code, name, category, duration_min, price, description, popular, active, image')
-          .limit(100),
+          .limit(200),
         supabase
           .from('appointments')
-          .select('id, customer_uid, client_name, client_phone, client_tier, shop_id, shop_name, barber_id, barber_name, service_id, service_name, date, time, duration_min, price, status, payment_method, payment_status, notes, internal_barber_notes, coupon_code')
+          .select('id, customer_uid, client_name, client_phone, client_tier, shop_id, shop_name, barber_id, barber_name, service_id, service_name, date, time, duration_min, price, status, payment_method, payment_status, notes, internal_barber_notes, coupon_code, created_at')
           .order('created_at', { ascending: false })
-          .limit(100),
+          .limit(250),
         supabase
           .from('reviews')
           .select('id, shop_id, barber_id, customer_uid, author, role, rating, date, comment, service_name, barber_name, status, moderation_note')
           .order('created_at', { ascending: false })
-          .limit(50),
+          .limit(100),
         supabase
           .from('profiles')
           .select('id, uid, email, name, phone, role, tier, preferred_notes, status, assigned_shop_id, assigned_barber_id')
-          .limit(100),
+          .limit(200),
         supabase
           .from('coupons')
           .select('id, shop_id, code, discount_percent, discount_text, min_spend, uses_count, max_uses, status, expires_at')
           .eq('status', 'Active')
-          .limit(20),
+          .limit(50),
         supabase
           .from('payments')
-          .select('id, appointment_id, customer_uid, client_name, shop_id, shop_name, amount, platform_fee, method, method_display, status, receipt_number')
+          .select('id, appointment_id, customer_uid, client_name, shop_id, shop_name, amount, platform_fee, method, method_display, status, receipt_number, created_at')
           .order('created_at', { ascending: false })
-          .limit(100),
+          .limit(250),
         supabase
           .from('reports')
           .select('id, reporter_uid, reporter_name, target_type, target_id, target_label, reason, details, status, resolution_note')
           .order('created_at', { ascending: false })
-          .limit(50),
+          .limit(100),
         supabase
           .from('working_hours')
           .select('id, shop_id, barber_id, day_of_week, day_order, start_time, end_time, break_start, break_end, is_day_off, holiday_note')
@@ -396,6 +396,26 @@ export const apiFetchBootstrap = async (uid = '') => {
               .limit(30)
           : Promise.resolve({ data: [] }),
       ]);
+
+    const checkQueryErr = (tbl: string, res: any) => {
+      if (res?.error) {
+        console.warn(`[BarberLoo Supabase Error in ${tbl}]: code ${res.error.code} - ${res.error.message}`);
+      }
+    };
+    checkQueryErr('shops', shopsRes);
+    checkQueryErr('barbers', barbersRes);
+    checkQueryErr('services', servicesRes);
+    checkQueryErr('appointments', aptsRes);
+    checkQueryErr('reviews', reviewsRes);
+    checkQueryErr('profiles', profilesRes);
+    checkQueryErr('coupons', couponsRes);
+    checkQueryErr('payments', paymentsRes);
+    checkQueryErr('reports', reportsRes);
+    checkQueryErr('working_hours', workingHoursRes);
+    checkQueryErr('shop_gallery', shopGalleryRes);
+    checkQueryErr('barber_gallery', barberGalleryRes);
+    checkQueryErr('favorites', favsRes);
+    checkQueryErr('notifications', notifsRes);
 
     supaData = {
       shops: (shopsRes.data || []).map(mapSupabaseShop),
@@ -511,8 +531,8 @@ export const apiFetchBootstrap = async (uid = '') => {
         unread: n.unread ?? true,
       })),
     };
-  } catch {
-    // Graceful offline fallback
+  } catch (err: any) {
+    console.error('[BarberLoo Supabase Bootstrap Exception]:', err?.message || err);
   }
 
   return {
@@ -686,7 +706,7 @@ export const apiSyncAuthUser = async (payload: {
   try {
     const { data: existing } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, uid, email, name, phone, avatar_url, role, tier, preferred_notes, reward_balance, status, assigned_shop_id, assigned_barber_id')
       .eq('uid', payload.uid)
       .maybeSingle();
     if (existing) {
@@ -900,7 +920,7 @@ export const apiCreateAppointment = async (payload: any) => {
     try {
       const { data: cpn } = await supabase
         .from('coupons')
-        .select('*')
+        .select('id, uses_count')
         .eq('code', String(payload.couponCode).toUpperCase())
         .maybeSingle();
       if (cpn) {
@@ -954,7 +974,7 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
   try {
     const { data: existingApt } = await supabase
       .from('appointments')
-      .select('*')
+      .select('id, customer_uid, client_name, client_phone, client_tier, shop_id, shop_name, barber_id, barber_name, service_id, service_name, date, time, duration_min, price, status, payment_method, payment_status, notes, internal_barber_notes')
       .eq('id', id)
       .maybeSingle();
 
@@ -1353,7 +1373,7 @@ export const apiUpdateWorkingHours = async (id: string, updates: any) => {
   try {
     const { data: existing } = await supabase
       .from('working_hours')
-      .select('*')
+      .select('id, shop_id, barber_id, day_of_week, day_order, start_time, end_time, break_start, break_end, is_day_off, holiday_note')
       .eq('id', id)
       .maybeSingle();
 
@@ -1511,7 +1531,7 @@ export const apiToggleFavorite = async (
   try {
     const { data: existing } = await supabase
       .from('favorites')
-      .select('*')
+      .select('id, customer_uid, target_type, target_id')
       .eq('customer_uid', customerUid)
       .eq('target_type', targetType)
       .eq('target_id', targetId);
@@ -1536,7 +1556,7 @@ export const apiToggleFavorite = async (
 
   const { data: freshFavs } = await supabase
     .from('favorites')
-    .select('*')
+    .select('id, customer_uid, target_type, target_id')
     .eq('customer_uid', customerUid);
   const mappedFavs = (freshFavs || []).map((f: any) => ({
     id: f.id,

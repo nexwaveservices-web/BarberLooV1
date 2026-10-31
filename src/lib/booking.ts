@@ -155,7 +155,7 @@ export async function loadShopForBooking(
     const [shopRes, servicesRes, barbersRes] = await Promise.all([
       supa
         .from('shops')
-        .select('id, owner_uid, name, district, address, phone, rating, review_count, is_open, closes_at, price_tier, min_price, verified, logo_url, image, tagline, about, qr_code_slug')
+        .select('id, owner_uid, name, district, city, address, phone, rating, review_count, is_open, closes_at, price_tier, min_price, verified, approval_status, logo_url, image, tagline, about, qr_code_slug')
         .eq('id', cleanId)
         .maybeSingle(),
       supa
@@ -168,11 +168,15 @@ export async function loadShopForBooking(
         .eq('shop_id', cleanId),
     ]);
 
+    if (shopRes.error) console.warn('[BarberLoo Booking shop error]:', shopRes.error.message);
+    if (servicesRes.error) console.warn('[BarberLoo Booking services error]:', servicesRes.error.message);
+    if (barbersRes.error) console.warn('[BarberLoo Booking barbers error]:', barbersRes.error.message);
+
     if (shopRes.data) rawShop = shopRes.data;
     if (Array.isArray(servicesRes.data)) rawServices = servicesRes.data;
     if (Array.isArray(barbersRes.data)) rawBarbers = barbersRes.data;
-  } catch (err) {
-    console.warn('[BarberLoo] Supabase scoped booking fetch error:', err);
+  } catch (err: any) {
+    console.warn('[BarberLoo] Supabase scoped booking fetch error:', err?.message || err);
   }
 
   if (!rawShop) {
