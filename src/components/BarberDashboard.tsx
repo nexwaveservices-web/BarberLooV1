@@ -362,7 +362,11 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
       const serviceTotal = basePrice + extrasCost;
       const platformFee = 10;
       const totalCustomerPrice = serviceTotal + platformFee;
-      const generatedOtp = String(Math.floor(100000 + Math.random() * 900000));
+      const generatedOtp = String(
+        typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues
+          ? (window.crypto.getRandomValues(new Uint32Array(1))[0] % 900000) + 100000
+          : (Date.now() % 900000) + 100000
+      );
 
       const extrasNotes = selectedExtrasList.length > 0
         ? `[Extras: ${selectedExtrasList.map((x) => `${x.name} (+₹${x.price})`).join(', ')}]`
@@ -459,6 +463,28 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
     .reduce((sum, a) => sum + (Number(a.price) || 0), 0);
   const weeklyRevenueINR = totalRealRevenueINR;
   const monthlyRevenueINR = totalRealRevenueINR;
+  const todayAppointments = useMemo(() => {
+    return appointments.filter((a) => a.date === todayIso);
+  }, [appointments, todayIso]);
+
+  const upcomingAppointments = useMemo(() => {
+    return appointments.filter((a) => {
+      const st = String(a.status || '').toLowerCase();
+      return st === 'confirmed' || st === 'pending' || st === 'in_progress';
+    });
+  }, [appointments]);
+
+  const activeServicesCount = useMemo(() => {
+    return services.filter((s) => s.active !== false).length;
+  }, [services]);
+
+  const pendingPayoutsINR = useMemo(() => {
+    return completedApts.reduce(
+      (sum, a) => sum + (Number(a.servicePrice ?? (a.price - (a.platformFee ?? 10))) || 0),
+      0
+    );
+  }, [completedApts]);
+
   const cancellationRatePct =
     appointments.length > 0
       ? Math.round((cancelledApts.length / appointments.length) * 100)
@@ -636,41 +662,70 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
             </p>
           </div>
 
-          {/* Real KPI Summary */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="px-4 py-3 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+          {/* Real KPI Summary (Section 4 Requirement) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
-                {tr('Bookings', 'कुल बुकिंग')}
+                {tr("Today's Appts", 'आज की बुकिंग')}
               </span>
-              <span className="font-mono-num text-xl font-bold text-[#FFF9E8]">
-                {appointments.length}
+              <span className="font-mono-num text-xl font-bold text-[#F1E194]">
+                {todayAppointments.length}
               </span>
             </div>
-            <div className="px-4 py-3 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+              <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                {tr('Upcoming', 'आगामी')}
+              </span>
+              <span className="font-mono-num text-xl font-bold text-[#FFF9E8]">
+                {upcomingAppointments.length}
+              </span>
+            </div>
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr('Completed Cuts', 'पूर्ण कट')}
               </span>
-              <span className="font-mono-num text-xl font-bold text-[#F1E194]">
+              <span className="font-mono-num text-xl font-bold text-emerald-400">
                 {completedApts.length}
               </span>
             </div>
-            <div className="px-4 py-3 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
-                {tr('Services', 'सेवाएं')}
+                {tr('Cancelled', 'रद्द')}
               </span>
-              <span className="font-mono-num text-xl font-bold text-[#FFF9E8]">
-                {services.length}
+              <span className="font-mono-num text-xl font-bold text-rose-300">
+                {cancelledApts.length}
               </span>
             </div>
-            <div className="px-4 py-3 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
-                {tr('Service Revenue', 'सेवा राजस्व (दुकान)')}
+                {tr("Today's Earnings", 'आज की कमाई')}
               </span>
-              <span className="font-mono-num text-xl font-bold text-[#F1E194]">
+              <span className="font-mono-num text-base font-bold text-[#F1E194]">
+                {formatINR(dailyRevenueINR)}
+              </span>
+            </div>
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+              <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                {tr('Total Earnings', 'कुल कमाई')}
+              </span>
+              <span className="font-mono-num text-base font-bold text-[#F1E194]">
                 {formatINR(totalServiceRevenueINR)}
               </span>
-              <span className="text-[9px] text-[#8A8178] block mt-0.5">
-                {tr('Paid by clients: ', 'कुल ग्राहक भुगतान: ')}{formatINR(totalCustomerPaidINR)}
+            </div>
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+              <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                {tr('Pending Payouts', 'लंबित भुगतान')}
+              </span>
+              <span className="font-mono-num text-base font-bold text-[#FFF9E8]">
+                {formatINR(pendingPayoutsINR)}
+              </span>
+            </div>
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+              <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                {tr('Clients Served', 'कुल ग्राहक')}
+              </span>
+              <span className="font-mono-num text-base font-bold text-[#FFF9E8]">
+                {customerDirectory.length}
               </span>
             </div>
           </div>

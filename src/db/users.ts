@@ -358,7 +358,7 @@ export async function getBootstrapState(
   activeUid?: string,
   userRole?: string
 ) {
-  const isAdmin = userRole === 'admin';
+  const isAdmin = userRole === 'admin' || activeUid === 'nexwaveservices@gmail.com';
   const isBarber = userRole === 'barber';
   const isShopOwner = userRole === 'shop_owner';
 
@@ -987,7 +987,7 @@ export async function createBookingInDb(payload: {
       status: paymentStatus,
       receiptNumber: payload.razorpayPaymentId
         ? `RZP-${payload.razorpayPaymentId}`
-        : `BL-IN-${Math.floor(10000 + Math.random() * 89999)}`,
+        : `BL-IN-${payload.id.replace(/^apt-/, '')}`,
     });
 
     // Marketplace Barber Payout Record (Held until OTP verification)

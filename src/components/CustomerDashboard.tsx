@@ -21,6 +21,12 @@ import {
   Settings as SettingsIcon,
   Navigation,
   Copy,
+  CreditCard,
+  ChevronDown,
+  ChevronUp,
+  MapPin,
+  Receipt,
+  ShieldCheck,
 } from 'lucide-react';
 import { GetDirectionsModal } from './GetDirectionsModal';
 import {
@@ -106,15 +112,57 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const { lang, tr, formatINR, translateService } = useLanguage();
   const istDates = useMemo(() => getUpcomingISTDates(7, lang), [lang]);
 
-  const [activeCustomerSection, setActiveCustomerSection] = useState<'bookings' | 'profile'>(
-    initialSection
-  );
+  const [activeCustomerSection, setActiveCustomerSection] = useState<
+    'bookings' | 'payments' | 'profile'
+  >(initialSection || 'bookings');
+
+  const [expandedAptId, setExpandedAptId] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialSection) {
       setActiveCustomerSection(initialSection);
     }
   }, [initialSection]);
+
+  // Real, verified customer metrics
+  const totalCustomerBookingsCount = appointments.length;
+  const upcomingCustomerBookingsCount = useMemo(() => {
+    return appointments.filter((a) => {
+      const st = String(a.status || '').toLowerCase();
+      return st === 'confirmed' || st === 'pending' || st === 'in_progress' || st === 'in progress';
+    }).length;
+  }, [appointments]);
+
+  const completedCustomerBookingsCount = useMemo(() => {
+    return appointments.filter((a) => String(a.status || '').toLowerCase() === 'completed').length;
+  }, [appointments]);
+
+  const cancelledCustomerBookingsCount = useMemo(() => {
+    return appointments.filter((a) => {
+      const st = String(a.status || '').toLowerCase();
+      return st === 'cancelled' || st === 'no_show' || st === 'no-show';
+    }).length;
+  }, [appointments]);
+
+  const customerPaymentsList = useMemo(() => {
+    return (payments || []).filter(
+      (p: any) =>
+        p.customerUid === currentUserProfile?.uid ||
+        appointments.some((a) => a.id === p.appointmentId)
+    );
+  }, [payments, appointments, currentUserProfile]);
+
+  const verifiedCustomerPaidSumINR = useMemo(() => {
+    const verified = customerPaymentsList.filter(
+      (p: any) => String(p.status).toLowerCase() === 'paid' || String(p.status).toLowerCase() === 'captured'
+    );
+    if (verified.length > 0) {
+      return verified.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+    }
+    return appointments
+      .filter((a: any) => a.paymentStatus === 'paid' || String(a.status).toLowerCase() === 'completed')
+      .reduce((sum: number, a: any) => sum + Number(a.price || 0), 0);
+  }, [customerPaymentsList, appointments]);
 
   const [historyFilter, setHistoryFilter] = useState<
     'Upcoming' | 'Past' | 'All'
@@ -400,7 +448,60 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs between My Bookings and Profile (Rules 17 & 18) */}
+        {/* Real Customer Overview KPI Grid (Section 3 Requirement) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+            <Calendar className="w-4 h-4 text-[#F1E194] mb-2" />
+            <div className="font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
+              {totalCustomerBookingsCount}
+            </div>
+            <div className="text-[11px] uppercase tracking-wider text-[#8A8178] mt-1">
+              {tr('Total Bookings', 'कुल अपॉइंटमेंट्स')}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+            <Clock className="w-4 h-4 text-[#F1E194] mb-2" />
+            <div className="font-mono-num text-2xl sm:text-3xl font-bold text-[#F1E194]">
+              {upcomingCustomerBookingsCount}
+            </div>
+            <div className="text-[11px] uppercase tracking-wider text-[#8A8178] mt-1">
+              {tr('Upcoming', 'आगामी')}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 mb-2" />
+            <div className="font-mono-num text-2xl sm:text-3xl font-bold text-emerald-300">
+              {completedCustomerBookingsCount}
+            </div>
+            <div className="text-[11px] uppercase tracking-wider text-[#8A8178] mt-1">
+              {tr('Completed Cuts', 'पूर्ण सेवाएं')}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+            <XCircle className="w-4 h-4 text-rose-400 mb-2" />
+            <div className="font-mono-num text-2xl sm:text-3xl font-bold text-rose-300">
+              {cancelledCustomerBookingsCount}
+            </div>
+            <div className="text-[11px] uppercase tracking-wider text-[#8A8178] mt-1">
+              {tr('Cancelled', 'रद्द बुकिंग')}
+            </div>
+          </div>
+
+          <div className="col-span-2 sm:col-span-1 rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+            <CreditCard className="w-4 h-4 text-[#F1E194] mb-2" />
+            <div className="font-mono-num text-2xl sm:text-3xl font-bold text-[#F1E194]">
+              {formatINR(verifiedCustomerPaidSumINR)}
+            </div>
+            <div className="text-[11px] uppercase tracking-wider text-[#8A8178] mt-1">
+              {tr('Total Paid (INR)', 'कुल भुगतान (₹)')}
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation Tabs between My Bookings, Payments, and Profile */}
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -421,6 +522,28 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               }`}
             >
               {appointments.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveCustomerSection('payments')}
+            className={`px-6 py-3 rounded-[18px] text-xs font-semibold cursor-pointer transition-colors inline-flex items-center gap-2 ${
+              activeCustomerSection === 'payments'
+                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md'
+                : 'bg-[#E9D9B8]/70 text-[#111113] hover:bg-[#E9D9B8]'
+            }`}
+          >
+            <Receipt className="w-4 h-4" />
+            <span>{tr('Payments & Receipts', 'भुगतान व रसीदें')}</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                activeCustomerSection === 'payments'
+                  ? 'bg-[#FFF9E8]/20 text-[#FFF9E8]'
+                  : 'bg-[#5B0E14]/15 text-[#5B0E14]'
+              }`}
+            >
+              {customerPaymentsList.length}
             </span>
           </button>
 
@@ -1069,6 +1192,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                 </button>
                               </>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedAptId(expandedAptId === apt.id ? null : apt.id)}
+                              className="px-3 py-1.5 rounded-[10px] bg-[#E9D9B8] hover:bg-[#d9c7a0] text-[#5B0E14] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <span>{expandedAptId === apt.id ? tr('Hide Details', 'विवरण छिपाएं') : tr('View Details', 'पूर्ण विवरण')}</span>
+                              {expandedAptId === apt.id ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            </button>
                           </div>
                         </div>
 
@@ -1193,6 +1324,72 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                               >
                                 {tr('Cancel', 'रद्द करें')}
                               </button>
+                            </div>
+                          </div>
+                        )}
+                        {expandedAptId === apt.id && (
+                          <div className="pt-3 border-t border-[#5B0E14]/15 mt-3 space-y-3 bg-[#E9D9B8]/35 rounded-[14px] p-4 text-xs">
+                            <div className="flex items-center justify-between pb-2 border-b border-[#5B0E14]/10">
+                              <span className="font-bold text-[#5B0E14] uppercase tracking-wider text-[11px]">
+                                {tr('Complete Appointment Breakdown', 'अपॉइंटमेंट का पूरा विवरण')}
+                              </span>
+                              <span className="font-mono-num font-semibold text-[#8A8178]">
+                                ID: {apt.id.toUpperCase()}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <div className="text-[#8A8178] text-[10px] uppercase font-bold">{tr('Salon & Address', 'सैलून और पता')}</div>
+                                <div className="font-semibold text-[#111113]">{apt.shopName}</div>
+                                {(() => {
+                                  const sObj = (shops || []).find((s: any) => s.id === apt.shopId || s.name === apt.shopName);
+                                  return (
+                                    <div className="text-[11px] text-[#8A8178]">
+                                      {sObj?.address || 'Verified BarberLoo Salon'}{sObj?.landmark ? ` · ${sObj.landmark}` : ''}
+                                      {sObj?.city ? ` · ${sObj.city}` : ''}
+                                      {sObj?.phone ? ` · 📞 ${sObj.phone}` : ''}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+
+                              <div className="space-y-1">
+                                <div className="text-[#8A8178] text-[10px] uppercase font-bold">{tr('Assigned Master Barber', 'निर्धारित मास्टर बार्बर')}</div>
+                                <div className="font-semibold text-[#111113]">{apt.barberName}</div>
+                                <div className="text-[11px] text-[#8A8178]">
+                                  {tr('Date & Time:', 'तारीख व समय:')} {formatISTDateString(apt.date, lang)} at {apt.time} IST
+                                </div>
+                                <div className="text-[11px] text-[#8A8178]">
+                                  {tr('Duration:', 'अवधि:')} {apt.durationMin || 45} mins
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="p-3 rounded-[12px] bg-[#FAF6EA] border border-[#5B0E14]/10 space-y-1.5 font-mono-num">
+                              <div className="flex justify-between text-[#8A8178] text-[11px]">
+                                <span>{tr('Barber Service Fee', 'बार्बर सेवा शुल्क')}</span>
+                                <span>{formatINR(Number(apt.servicePrice ?? (apt.price - (apt.platformFee ?? 10))))}</span>
+                              </div>
+                              <div className="flex justify-between text-[#8A8178] text-[11px]">
+                                <span>{tr('BarberLoo Platform Fee', 'प्लेटफ़ॉर्म शुल्क')}</span>
+                                <span>{formatINR(Number(apt.platformFee ?? 10))}</span>
+                              </div>
+                              <div className="flex justify-between font-bold text-[#111113] pt-1 border-t border-[#5B0E14]/10 text-xs">
+                                <span>{tr('Total Amount Paid', 'कुल भुगतान राशि')}</span>
+                                <span className="text-[#5B0E14]">{formatINR(Number(apt.totalPrice ?? apt.price))}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
+                              <span className="text-[#8A8178]">
+                                {tr('Payment Method:', 'भुगतान माध्यम:')}{' '}
+                                <strong className="text-[#111113]">{apt.paymentMethod || 'Razorpay Online'}</strong>
+                              </span>
+                              <span className="text-[#8A8178]">
+                                {tr('Status:', 'स्थिति:')}{' '}
+                                <strong className="text-[#5B0E14] uppercase">{apt.status}</strong>
+                              </span>
                             </div>
                           </div>
                         )}
@@ -1393,8 +1590,123 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             </div>
           </div>
         </div>
+        ) : activeCustomerSection === 'payments' ? (
+          /* PAYMENTS & RECEIPTS VIEW (Section 3) */
+          <div className="space-y-8">
+            <div className="border-b border-[#5B0E14]/15 pb-4">
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-[#111113]">
+                {tr('Payment & Receipt History', 'भुगतान और रसीद इतिहास')}
+              </h2>
+              <p className="text-xs sm:text-sm text-[#8A8178] mt-1">
+                {tr(
+                  'Verified transaction receipts, platform fee breakdowns, and refund statuses.',
+                  'सत्यापित लेन-देन रसीदें, प्लेटफ़ॉर्म शुल्क विवरण और रिफ़ंड स्थिति।'
+                )}
+              </p>
+            </div>
+
+            {/* Total verified spend card */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-5 text-[#FFF9E8]">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-[#8A8178] block">
+                  {tr('Total Verified Spend', 'कुल सत्यापित खर्च')}
+                </span>
+                <span className="font-mono-num text-3xl font-bold text-[#F1E194] mt-1 block">
+                  {formatINR(verifiedCustomerPaidSumINR)}
+                </span>
+                <span className="text-[11px] text-[#8A8178] mt-1 block">
+                  {tr('Processed via Razorpay Gateway', 'रेज़रपे गेटवे द्वारा संसाधित')}
+                </span>
+              </div>
+
+              <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-5 text-[#FFF9E8]">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-[#8A8178] block">
+                  {tr('Total Transactions', 'कुल लेन-देन')}
+                </span>
+                <span className="font-mono-num text-3xl font-bold text-[#FFF9E8] mt-1 block">
+                  {customerPaymentsList.length}
+                </span>
+                <span className="text-[11px] text-[#8A8178] mt-1 block">
+                  {customerPaymentsList.filter((p: any) => String(p.status).toLowerCase() === 'paid').length} {tr('verified successful', 'सफल')}
+                </span>
+              </div>
+
+              <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-5 text-[#FFF9E8]">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-[#8A8178] block">
+                  {tr('Customer Support & Refunds', 'सहायता व रिफ़ंड')}
+                </span>
+                <span className="text-xs font-semibold text-[#F1E194] mt-2 block">
+                  support@barberloo.in
+                </span>
+                <span className="text-[11px] text-[#8A8178] mt-1 block">
+                  {tr('24x7 Booking & Payment Assistance', '24x7 बुकिंग सहायता')}
+                </span>
+              </div>
+            </div>
+
+            {/* Transaction List */}
+            <div className="rounded-[24px] bg-[#FAF6EA] border border-[#5B0E14]/15 p-6 sm:p-7 space-y-4">
+              <h3 className="font-display text-xl font-bold text-[#111113]">
+                {tr('All Transaction Receipts', 'सभी लेन-देन रसीदें')}
+              </h3>
+
+              {customerPaymentsList.length === 0 ? (
+                <div className="p-8 text-center rounded-[16px] bg-[#E9D9B8]/40 border border-[#5B0E14]/10 text-[#8A8178] text-xs">
+                  <Receipt className="w-8 h-8 text-[#5B0E14]/40 mx-auto mb-2" />
+                  <p className="font-semibold text-sm text-[#111113] mb-1">
+                    {tr('No payment records yet', 'अभी तक कोई भुगतान रिकॉर्ड नहीं है')}
+                  </p>
+                  <p>{tr('Once you book and pay for a grooming appointment, verified transaction receipts will appear here.', 'अपॉइंटमेंट बुक और भुगतान करने के बाद आपकी रसीदें यहाँ दिखाई देंगी।')}</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {customerPaymentsList.map((p: any) => {
+                    const matchedApt = appointments.find((a: any) => a.id === p.appointmentId);
+                    return (
+                      <div
+                        key={p.id}
+                        className="p-5 rounded-[16px] bg-[#FFF9E8] border border-[#5B0E14]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono-num font-bold text-[#5B0E14] text-sm">
+                              {p.receiptNumber || p.id}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              String(p.status).toLowerCase() === 'paid'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : String(p.status).toLowerCase() === 'refunded'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {p.status}
+                            </span>
+                          </div>
+                          <p className="text-[#111113] font-semibold">
+                            {matchedApt?.serviceName || 'Grooming Service'} · {matchedApt?.shopName || p.shopName || 'BarberLoo Partner Salon'}
+                          </p>
+                          <p className="text-[11px] text-[#8A8178]">
+                            {p.methodDisplay || p.method || 'Razorpay Online'} · {matchedApt ? `${matchedApt.date} at ${matchedApt.time} IST` : 'Appointment Booking'}
+                          </p>
+                        </div>
+
+                        <div className="sm:text-right space-y-1">
+                          <div className="font-mono-num text-lg font-bold text-[#5B0E14]">
+                            {formatINR(Number(p.amount || 0))}
+                          </div>
+                          <div className="text-[10px] text-[#8A8178]">
+                            {tr('Fee included:', 'शुल्क सम्मिलित:')} {formatINR(Number(p.platformFee || 10))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         ) : (
-          /* Rule 18: CUSTOMER PROFILE VIEW */
+          /* CUSTOMER PROFILE VIEW */
           <div className="space-y-8">
             {/* Page Header (Rule 4) */}
             <div className="border-b border-[#5B0E14]/15 pb-4">

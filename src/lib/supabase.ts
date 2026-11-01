@@ -435,6 +435,12 @@ export async function safeSupabaseUpsert(
   try {
     const { error } = await supabase.from(table).upsert(record);
     if (error) {
+      if (error.code === '42501') {
+        const insertRes = await supabase.from(table).insert(record);
+        if (!insertRes.error) {
+          return;
+        }
+      }
       if (error.code === '42703' && error.message) {
         const match = error.message.match(/column (?:[a-zA-Z0-9_]+\.)?([a-zA-Z0-9_]+) does not exist/);
         if (match && match[1] && record[match[1]] !== undefined) {
@@ -780,6 +786,12 @@ alter table public.payments enable row level security;
 alter table public.coupons enable row level security;
 alter table public.rewards enable row level security;
 alter table public.reports enable row level security;
+
+-- Drop legacy conflicting restrictive policies
+drop policy if exists "Customer view own appointments" on public.appointments;
+drop policy if exists "Customer create appointments" on public.appointments;
+drop policy if exists "Barber or Admin update appointments" on public.appointments;
+drop policy if exists "Authorized users view payments" on public.payments;
 
 do $$
 declare

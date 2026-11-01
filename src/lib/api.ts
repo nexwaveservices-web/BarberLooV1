@@ -265,6 +265,24 @@ function mergeById<T extends { id?: string; uid?: string }>(
   return Array.from(map.values());
 }
 
+if (typeof window !== 'undefined' && window.localStorage) {
+  try {
+    window.localStorage.removeItem('barberloo_recent_appointments_v1');
+  } catch {}
+}
+
+export function getLocalRecentAppointments(): any[] {
+  return [];
+}
+
+export function saveLocalRecentAppointment(_apt: any): void {
+  // Production integrity: Central database is the sole authoritative state
+}
+
+export function updateLocalRecentAppointment(_id: string, _updates: any): void {
+  // Production integrity: Central database is the sole authoritative state
+}
+
 const inFlightBootstrapMap = new Map<string, Promise<any>>();
 
 export const apiFetchBootstrap = async (uid = '') => {
@@ -306,10 +324,56 @@ export const apiFetchBootstrap = async (uid = '') => {
       };
     }
 
-    // 2. Resilient Fallback: Supabase Client for static hosting (e.g. InfinityFree)
-    // Queries are strictly bounded with limits and select only needed columns
+    // Resilient Fallback: Supabase Client for static hosting (e.g. InfinityFree)
+    // Uses safeSupabaseSelect with automatic 42703 fallback to select('*')
     let supaData: Record<string, any[]> = {};
     try {
+      const safeFetchTable = async (
+        table: string,
+        columns: string,
+        order?: { col: string; asc?: boolean },
+        limit = 100,
+        filters?: Array<{ col: string; val: any }>
+      ) => {
+        try {
+          let q = supabase.from(table).select(columns);
+          if (filters) {
+            for (const f of filters) {
+              q = q.eq(f.col, f.val);
+            }
+          }
+          if (order) {
+            q = q.order(order.col, { ascending: order.asc ?? false });
+          }
+          if (limit) {
+            q = q.limit(limit);
+          }
+          const res = await q;
+          if (!res.error) return res;
+          // If error 42703 (non-existent column), automatically recover with select('*')
+          if (res.error.code === '42703') {
+            console.warn(`[Supabase 42703 Recovery on ${table}]: Falling back to select('*')`);
+            let retryQ = supabase.from(table).select('*');
+            if (filters) {
+              for (const f of filters) {
+                retryQ = retryQ.eq(f.col, f.val);
+              }
+            }
+            if (order) {
+              retryQ = retryQ.order(order.col, { ascending: order.asc ?? false });
+            }
+            if (limit) {
+              retryQ = retryQ.limit(limit);
+            }
+            const retryRes = await retryQ;
+            if (!retryRes.error) return retryRes;
+          }
+          return res;
+        } catch (err: any) {
+          return { data: [], error: err };
+        }
+      };
+
       const [
         shopsRes,
         barbersRes,
@@ -326,74 +390,96 @@ export const apiFetchBootstrap = async (uid = '') => {
         favsRes,
         notifsRes,
       ] = await Promise.all([
-        supabase
-          .from('shops')
-          .select('id, owner_uid, name, district, city, address, phone, rating, review_count, is_open, closes_at, price_tier, min_price, verified, approval_status, logo_url, image, tagline, about, qr_code_slug')
-          .limit(100),
-        supabase
-          .from('barbers')
-          .select('id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids')
-          .limit(100),
-        supabase
-          .from('services')
-          .select('id, shop_id, index_code, name, category, duration_min, price, description, popular, active, image')
-          .limit(200),
-        supabase
-          .from('appointments')
-          .select('id, customer_uid, client_name, client_phone, client_tier, shop_id, shop_name, barber_id, barber_name, service_id, service_name, date, time, duration_min, price, status, payment_method, payment_status, notes, internal_barber_notes, coupon_code, created_at')
-          .order('created_at', { ascending: false })
-          .limit(250),
-        supabase
-          .from('reviews')
-          .select('id, shop_id, barber_id, customer_uid, author, role, rating, date, comment, service_name, barber_name, status, moderation_note')
-          .order('created_at', { ascending: false })
-          .limit(100),
-        supabase
-          .from('profiles')
-          .select('id, uid, email, name, phone, role, tier, preferred_notes, status, assigned_shop_id, assigned_barber_id')
-          .limit(200),
-        supabase
-          .from('coupons')
-          .select('id, shop_id, code, discount_percent, discount_text, min_spend, uses_count, max_uses, status, expires_at')
-          .eq('status', 'Active')
-          .limit(50),
-        supabase
-          .from('payments')
-          .select('id, appointment_id, customer_uid, client_name, shop_id, shop_name, amount, platform_fee, method, method_display, status, receipt_number, created_at')
-          .order('created_at', { ascending: false })
-          .limit(250),
-        supabase
-          .from('reports')
-          .select('id, reporter_uid, reporter_name, target_type, target_id, target_label, reason, details, status, resolution_note')
-          .order('created_at', { ascending: false })
-          .limit(100),
-        supabase
-          .from('working_hours')
-          .select('id, shop_id, barber_id, day_of_week, day_order, start_time, end_time, break_start, break_end, is_day_off, holiday_note')
-          .order('day_order', { ascending: true })
-          .limit(50),
-        supabase
-          .from('shop_gallery')
-          .select('id, shop_id, image_url, title, caption')
-          .limit(30),
-        supabase
-          .from('barber_gallery')
-          .select('id, barber_id, image_url, title, style_tag')
-          .limit(30),
+        safeFetchTable(
+          'shops',
+          'id, owner_uid, name, district, city, address, phone, rating, review_count, is_open, closes_at, price_tier, min_price, verified, approval_status, logo_url, image, tagline, about, qr_code_slug',
+          undefined,
+          100
+        ),
+        safeFetchTable(
+          'barbers',
+          'id, user_uid, shop_id, name, role, rating, review_count, experience_years, specialty, shop_name, price_from, image, bio, featured, active, verified, verification_status, chair_break_active, assigned_service_ids',
+          undefined,
+          100
+        ),
+        safeFetchTable(
+          'services',
+          'id, shop_id, index_code, name, category, duration_min, price, description, popular, active, image',
+          undefined,
+          200
+        ),
+        safeFetchTable(
+          'appointments',
+          'id, customer_uid, client_name, client_phone, shop_id, shop_name, barber_id, barber_name, service_id, service_name, date, time, duration_min, price, status, payment_method, payment_status, notes, internal_barber_notes, coupon_code, created_at',
+          { col: 'created_at', asc: false },
+          250
+        ),
+        safeFetchTable(
+          'reviews',
+          'id, shop_id, barber_id, customer_uid, author, role, rating, date, comment, service_name, barber_name, status, moderation_note',
+          { col: 'created_at', asc: false },
+          100
+        ),
+        safeFetchTable(
+          'profiles',
+          'id, uid, email, name, phone, role, preferred_notes, status, assigned_shop_id, assigned_barber_id',
+          undefined,
+          200
+        ),
+        safeFetchTable(
+          'coupons',
+          'id, shop_id, code, discount_percent, discount_text, min_spend, uses_count, max_uses, status, expires_at',
+          undefined,
+          50,
+          [{ col: 'status', val: 'Active' }]
+        ),
+        safeFetchTable(
+          'payments',
+          'id, appointment_id, customer_uid, client_name, shop_id, shop_name, amount, platform_fee, method, method_display, status, receipt_number, created_at',
+          { col: 'created_at', asc: false },
+          250
+        ),
+        safeFetchTable(
+          'reports',
+          'id, reporter_uid, reporter_name, target_type, target_id, target_label, reason, details, status, resolution_note',
+          { col: 'created_at', asc: false },
+          100
+        ),
+        safeFetchTable(
+          'working_hours',
+          'id, shop_id, barber_id, day_of_week, day_order, start_time, end_time, break_start, break_end, is_day_off, holiday_note',
+          { col: 'day_order', asc: true },
+          50
+        ),
+        safeFetchTable(
+          'shop_gallery',
+          'id, shop_id, image_url, title, caption',
+          undefined,
+          30
+        ),
+        safeFetchTable(
+          'barber_gallery',
+          'id, barber_id, image_url, title, style_tag',
+          undefined,
+          30
+        ),
         uid
-          ? supabase
-              .from('favorites')
-              .select('id, customer_uid, target_type, target_id')
-              .eq('customer_uid', uid)
-              .limit(50)
+          ? safeFetchTable(
+              'favorites',
+              'id, customer_uid, target_type, target_id',
+              undefined,
+              50,
+              [{ col: 'customer_uid', val: uid }]
+            )
           : Promise.resolve({ data: [] }),
         uid
-          ? supabase
-              .from('notifications')
-              .select('id, recipient_uid, type, title, time_label, unread')
-              .eq('recipient_uid', uid)
-              .order('created_at', { ascending: false })
-              .limit(30)
+          ? safeFetchTable(
+              'notifications',
+              'id, recipient_uid, type, title, time_label, unread',
+              { col: 'created_at', asc: false },
+              30,
+              [{ col: 'recipient_uid', val: uid }]
+            )
           : Promise.resolve({ data: [] }),
       ]);
 
@@ -539,7 +625,10 @@ export const apiFetchBootstrap = async (uid = '') => {
     shops: mergeById(supaData.shops, backendData?.shops),
     barbers: mergeById(supaData.barbers, backendData?.barbers),
     services: mergeById(supaData.services, backendData?.services),
-    appointments: mergeById(supaData.appointments, backendData?.appointments),
+    appointments: mergeById(
+      supaData.appointments,
+      backendData?.appointments
+    ),
     reviews: mergeById(supaData.reviews, backendData?.reviews),
     profiles: mergeById(supaData.profiles, backendData?.profiles, 'uid'),
     coupons: mergeById(supaData.coupons, backendData?.coupons),
@@ -867,7 +956,11 @@ export const apiCreateAppointment = async (payload: any) => {
 
   const completionOtp =
     payload.completionOtp ||
-    String(Math.floor(100000 + Math.random() * 900000));
+    String(
+      typeof crypto !== 'undefined' && crypto.getRandomValues
+        ? (crypto.getRandomValues(new Uint32Array(1))[0] % 900000) + 100000
+        : (Date.now() % 900000) + 100000
+    );
 
   let finalNotes = payload.notes || '';
   if (Array.isArray(payload.addOns) && payload.addOns.length > 0) {
@@ -948,7 +1041,7 @@ export const apiCreateAppointment = async (payload: any) => {
     status: paymentStatus,
     receipt_number: payload.razorpayPaymentId
       ? `RZP-${payload.razorpayPaymentId}`
-      : `BL-IN-${Math.floor(10000 + Math.random() * 89999)}`,
+      : `BL-IN-${id.replace(/^apt-/, '')}`,
   });
 
   await safeSupabaseUpsert('notifications', {
@@ -965,16 +1058,17 @@ export const apiCreateAppointment = async (payload: any) => {
     body: JSON.stringify({ ...payload, id }),
   });
 
+  const mapped = mapSupabaseAppointment(supaApt);
   clearBootstrapCache();
   broadcastSupabaseEvent('state:updated', { entity: 'appointments' });
-  return backendCreated || mapSupabaseAppointment(supaApt);
+  return backendCreated || mapped;
 };
 
 export const apiUpdateAppointment = async (id: string, updates: any) => {
   try {
     const { data: existingApt } = await supabase
       .from('appointments')
-      .select('id, customer_uid, client_name, client_phone, client_tier, shop_id, shop_name, barber_id, barber_name, service_id, service_name, date, time, duration_min, price, status, payment_method, payment_status, notes, internal_barber_notes')
+      .select('id, customer_uid, client_name, client_phone, shop_id, shop_name, barber_id, barber_name, service_id, service_name, date, time, duration_min, price, status, payment_method, payment_status, notes, internal_barber_notes')
       .eq('id', id)
       .maybeSingle();
 
@@ -1123,6 +1217,7 @@ export const apiUpdateAppointment = async (id: string, updates: any) => {
       body: JSON.stringify(updates),
     }
   );
+  updateLocalRecentAppointment(id, updates);
   clearBootstrapCache();
   broadcastSupabaseEvent('state:updated', { entity: 'appointments' });
   return updated;
@@ -1873,14 +1968,6 @@ export async function apiVerifyRazorpayPayment(payload: {
 
     if (res?.verified) {
       return res;
-    }
-
-    // 3. Resilient fallback: If payment_id was provided and valid
-    if (payload.razorpay_payment_id && !res) {
-      return {
-        verified: true,
-        paymentId: payload.razorpay_payment_id,
-      };
     }
 
     return {

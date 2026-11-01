@@ -1093,6 +1093,8 @@ export default function App() {
                 onUpdateReport={handleUpdateReport}
                 onUpdatePayment={handleUpdatePayment}
                 onBroadcastNotification={handleBroadcastShopNotification}
+                onUpdateAppointment={handleUpdateAppointment}
+                onCancelAppointment={handleCancelAppointment}
               />
             ) : (
               renderRoleGuard(

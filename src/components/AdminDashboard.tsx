@@ -17,6 +17,15 @@ import {
   QrCode,
   AlertTriangle,
   RefreshCw,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Copy,
+  ExternalLink,
+  Scissors,
+  Phone,
+  ChevronRight,
+  X,
 } from 'lucide-react';
 import { useLanguage, getCurrentISTDisplay, formatISTDateString } from '../lib/i18n';
 import { SUPABASE_URL, SUPABASE_SQL_SCHEMA } from '../lib/supabase';
@@ -68,6 +77,8 @@ interface AdminDashboardProps {
     targetRole?: 'customer' | 'barber' | 'all' | 'specific';
     specificUid?: string;
   }) => Promise<any>;
+  onUpdateAppointment?: (id: string, updates: any) => Promise<void>;
+  onCancelAppointment?: (id: string) => Promise<void>;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -90,12 +101,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateReport,
   onUpdatePayment,
   onBroadcastNotification,
+  onUpdateAppointment,
+  onCancelAppointment,
 }) => {
   const { lang, tr, formatINR } = useLanguage();
   const istNow = getCurrentISTDisplay(lang);
 
   const [activeSection, setActiveSection] = useState<
     | 'overview'
+    | 'appointments'
     | 'fee_settings'
     | 'sla'
     | 'users'
@@ -353,6 +367,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const totalGmvINR = totalCustomerPaymentINR;
 
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayAppointmentsCount = appointments.filter(
+    (a: any) => a.date === todayIso
+  ).length;
+
+  const upcomingAppointmentsCount = appointments.filter((a: any) => {
+    const st = String(a.status || '').toLowerCase();
+    return st === 'confirmed' || st === 'pending' || st === 'in_progress';
+  }).length;
+
+  const activeShopsCount = shops.filter(
+    (s: any) => s.isOpen !== false && s.approvalStatus !== 'suspended'
+  ).length;
+
+  const inactiveShopsCount = shops.filter(
+    (s: any) => s.isOpen === false || s.approvalStatus === 'suspended'
+  ).length;
+
+  const verifiedPaymentsCount = payments.filter(
+    (p: any) => String(p.status).toLowerCase() === 'paid' || String(p.status).toLowerCase() === 'captured'
+  ).length;
+
+  const pendingPaymentsCount = payments.filter(
+    (p: any) => String(p.status).toLowerCase() === 'pending' || String(p.status).toLowerCase() === 'created'
+  ).length;
+
+  const pendingRefundsCount = reports.filter(
+    (r: any) => (r.targetType === 'refund' || r.reason === 'refund') && r.status === 'open'
+  ).length;
+
+  const pendingPayoutsINR = useMemo(() => {
+    const completedApts = appointments.filter((a: any) => String(a.status || '').toLowerCase() === 'completed');
+    return completedApts.reduce(
+      (sum: number, a: any) => sum + (Number(a.servicePrice ?? (a.price - (a.platformFee ?? 10))) || 0),
+      0
+    );
+  }, [appointments]);
+
   const popularServiceName = useMemo(() => {
     if (appointments.length === 0) return '-';
     const counts: Record<string, number> = {};
@@ -432,6 +484,153 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  // Appointment Management State & Handlers
+  const [appointmentSearch, setAppointmentSearch] = useState('');
+  const [appointmentStatusFilter, setAppointmentStatusFilter] = useState<
+    'all' | 'today' | 'upcoming' | 'completed' | 'cancelled'
+  >('all');
+  const [appointmentShopFilter, setAppointmentShopFilter] = useState('all');
+  const [selectedAppointmentDetails, setSelectedAppointmentDetails] =
+    useState<AppointmentItem | null>(null);
+  const [appointmentActionFeedback, setAppointmentActionFeedback] = useState('');
+  const [isProcessingAppointmentAction, setIsProcessingAppointmentAction] =
+    useState(false);
+  const [adminRefundModalApt, setAdminRefundModalApt] =
+    useState<AppointmentItem | null>(null);
+  const [adminRefundReason, setAdminRefundReason] = useState(
+    'Service not rendered / Customer request / Admin discretion'
+  );
+
+  const todayDateStr = useMemo(() => {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  }, []);
+
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter((apt: any) => {
+      const q = appointmentSearch.trim().toLowerCase();
+      if (q) {
+        const matchesQ =
+          String(apt.id || '').toLowerCase().includes(q) ||
+          String(apt.clientName || '').toLowerCase().includes(q) ||
+          String(apt.clientPhone || '').toLowerCase().includes(q) ||
+          String(apt.barberName || '').toLowerCase().includes(q) ||
+          String(apt.shopName || '').toLowerCase().includes(q) ||
+          String(apt.serviceName || '').toLowerCase().includes(q);
+        if (!matchesQ) return false;
+      }
+
+      const st = String(apt.status || apt.rawStatus || '').toLowerCase();
+      if (appointmentStatusFilter === 'today') {
+        if (apt.date !== todayDateStr) return false;
+      } else if (appointmentStatusFilter === 'upcoming') {
+        if (st !== 'confirmed' && st !== 'pending' && st !== 'in_progress')
+          return false;
+      } else if (appointmentStatusFilter === 'completed') {
+        if (st !== 'completed') return false;
+      } else if (appointmentStatusFilter === 'cancelled') {
+        if (st !== 'cancelled') return false;
+      }
+
+      if (appointmentShopFilter !== 'all') {
+        if (apt.shopId !== appointmentShopFilter) return false;
+      }
+
+      return true;
+    });
+  }, [
+    appointments,
+    appointmentSearch,
+    appointmentStatusFilter,
+    appointmentShopFilter,
+    todayDateStr,
+  ]);
+
+  const handleAdminCompleteAppointment = async (apt: AppointmentItem) => {
+    if (!onUpdateAppointment || isProcessingAppointmentAction) return;
+    setIsProcessingAppointmentAction(true);
+    setAppointmentActionFeedback('');
+    try {
+      await onUpdateAppointment(apt.id, {
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+      });
+      setAppointmentActionFeedback(
+        tr(
+          `✓ Appointment #${apt.id.slice(0, 8)} marked as completed.`,
+          `✓ अपॉइंटमेंट #${apt.id.slice(0, 8)} पूर्ण चिह्नित किया गया।`
+        )
+      );
+      if (selectedAppointmentDetails?.id === apt.id) {
+        setSelectedAppointmentDetails({ ...apt, status: 'completed' });
+      }
+      setTimeout(() => setAppointmentActionFeedback(''), 4000);
+    } catch (err: any) {
+      setAppointmentActionFeedback(
+        `⚠️ ${err?.message || 'Failed to update appointment'}`
+      );
+    } finally {
+      setIsProcessingAppointmentAction(false);
+    }
+  };
+
+  const handleAdminCancelAppointment = async (apt: AppointmentItem) => {
+    if (isProcessingAppointmentAction) return;
+    setIsProcessingAppointmentAction(true);
+    setAppointmentActionFeedback('');
+    try {
+      if (onCancelAppointment) {
+        await onCancelAppointment(apt.id);
+      } else if (onUpdateAppointment) {
+        await onUpdateAppointment(apt.id, { status: 'cancelled' });
+      }
+      setAppointmentActionFeedback(
+        tr(
+          `✓ Appointment #${apt.id.slice(0, 8)} cancelled.`,
+          `✓ अपॉइंटमेंट #${apt.id.slice(0, 8)} रद्द किया गया।`
+        )
+      );
+      if (selectedAppointmentDetails?.id === apt.id) {
+        setSelectedAppointmentDetails({ ...apt, status: 'cancelled' });
+      }
+      setTimeout(() => setAppointmentActionFeedback(''), 4000);
+    } catch (err: any) {
+      setAppointmentActionFeedback(
+        `⚠️ ${err?.message || 'Failed to cancel appointment'}`
+      );
+    } finally {
+      setIsProcessingAppointmentAction(false);
+    }
+  };
+
+  const handleAdminProcessRefundSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminRefundModalApt || isProcessingAppointmentAction) return;
+    setIsProcessingAppointmentAction(true);
+    try {
+      await apiProcessRefund(adminRefundModalApt.id, adminRefundReason);
+      if (onUpdateAppointment) {
+        await onUpdateAppointment(adminRefundModalApt.id, {
+          paymentStatus: 'refunded',
+          status: 'cancelled',
+        });
+      }
+      setAppointmentActionFeedback(
+        tr(
+          `✓ Full refund initiated for appointment #${adminRefundModalApt.id.slice(0, 8)}.`,
+          `✓ अपॉइंटमेंट #${adminRefundModalApt.id.slice(0, 8)} हेतु पूर्ण रिफ़ंड प्रक्रिया शुरू की गई।`
+        )
+      );
+      setAdminRefundModalApt(null);
+      setTimeout(() => setAppointmentActionFeedback(''), 4500);
+    } catch (err: any) {
+      setAppointmentActionFeedback(
+        `⚠️ Refund error: ${err?.message || 'Unable to process refund'}`
+      );
+    } finally {
+      setIsProcessingAppointmentAction(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#111113] text-[#FFF9E8] py-10 sm:py-14">
       <div className="max-w-[1360px] mx-auto px-5 sm:px-8 space-y-8">
@@ -456,61 +655,113 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        {/* Real Platform KPIs (Total Users, Customers, Barbers, Shops, Appointments, Completed, Revenue) */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-5">
+        {/* Real Platform KPIs (Section 5 Requirement: 10 Comprehensive Platform Metrics) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
             <Users className="w-4 h-4 text-[#F1E194] mb-2" />
-            <div className="font-display font-mono-num text-3xl font-bold text-[#FFF9E8]">
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {profiles.length}
             </div>
-            <div className="text-xs text-[#8A8178] mt-1">
+            <div className="text-[11px] text-[#8A8178] mt-1">
               {tr('Users', 'कुल उपयोगकर्ता')} ({totalCustomers}{' '}
               {tr('Cust', 'ग्राहक')} · {totalBarbersCount}{' '}
               {tr('Barbers', 'बार्बर')})
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
             <Store className="w-4 h-4 text-[#F1E194] mb-2" />
-            <div className="font-display font-mono-num text-3xl font-bold text-[#FFF9E8]">
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {shops.length}
             </div>
-            <div className="text-xs text-[#8A8178] mt-1">
-              {tr('Partner Salons', 'पार्टनर सैलून')} ·{' '}
-              {shops.filter((s: any) => s.verified).length}{' '}
-              {tr('Verified', 'सत्यापित')}
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Partner Salons', 'पार्टनर सैलून')} ({activeShopsCount}{' '}
+              {tr('Active', 'सक्रिय')} · {inactiveShopsCount}{' '}
+              {tr('Inactive', 'निष्क्रिय')})
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
             <Calendar className="w-4 h-4 text-[#F1E194] mb-2" />
-            <div className="font-display font-mono-num text-3xl font-bold text-[#FFF9E8]">
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {appointments.length}
             </div>
-            <div className="text-xs text-[#8A8178] mt-1">
-              {tr('Bookings', 'बुकिंग')} ({completedBookingsCount}{' '}
-              {tr('Completed', 'पूर्ण')})
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Bookings', 'बुकिंग')} ({todayAppointmentsCount}{' '}
+              {tr('Today', 'आज')} · {upcomingAppointmentsCount}{' '}
+              {tr('Upcoming', 'आगामी')})
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 mb-2" />
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-emerald-300">
+              {completedBookingsCount}
+            </div>
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Completed', 'पूर्ण')} · {cancelledBookingsCount}{' '}
+              {tr('Cancelled', 'रद्द')} ({cancellationRate}%)
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+            <CreditCard className="w-4 h-4 text-[#F1E194] mb-2" />
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#F1E194]">
+              {formatINR(totalPlatformFeesINR)}
+            </div>
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Platform Fee Revenue', 'प्लेटफ़ॉर्म शुल्क कमाई')}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
             <TrendingUp className="w-4 h-4 text-[#F1E194] mb-2" />
-            <div className="font-display font-mono-num text-3xl font-bold text-[#F1E194]">
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {formatINR(totalGmvINR)}
             </div>
-            <div className="text-xs text-[#8A8178] mt-1">
-              {tr('Platform Revenue (INR)', 'कुल राजस्व (₹ INR)')}
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Total Customer GMV', 'कुल सकल बिक्री')}
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+            <CreditCard className="w-4 h-4 text-[#F1E194] mb-2" />
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-emerald-400">
+              {verifiedPaymentsCount}
+            </div>
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Verified Payments', 'सत्यापित भुगतान')} ({pendingPaymentsCount}{' '}
+              {tr('Pending', 'लंबित')})
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+            <CreditCard className="w-4 h-4 text-amber-400 mb-2" />
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#F1E194]">
+              {formatINR(pendingPayoutsINR)}
+            </div>
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Pending Payouts', 'लंबित बार्बर भुगतान')}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
             <Tag className="w-4 h-4 text-[#F1E194] mb-2" />
-            <div className="font-display font-mono-num text-3xl font-bold text-[#FFF9E8]">
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {coupons.length}
             </div>
-            <div className="text-xs text-[#8A8178] mt-1">
-              {tr('Active Coupons', 'सक्रिय कूपन')} · {cancellationRate}%{' '}
-              {tr('Cancel Rate', 'रद्द दर')}
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Active Coupons', 'सक्रिय कूपन')}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+            <AlertTriangle className="w-4 h-4 text-rose-400 mb-2" />
+            <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-rose-300">
+              {pendingRefundsCount}
+            </div>
+            <div className="text-[11px] text-[#8A8178] mt-1">
+              {tr('Pending Refunds / Reports', 'लंबित रिफ़ंड / शिकायतें')}
             </div>
           </div>
         </div>
@@ -518,7 +769,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* Navigation Tabs */}
         <div className="flex flex-wrap gap-2">
           {[
-            { id: 'overview', label: tr('Bookings & Analytics', 'बुकिंग और एनालिटिक्स') },
+            { id: 'overview', label: tr('Executive Overview', 'कार्यकारी अवलोकन') },
+            { id: 'appointments', label: tr(`Appointments (${appointments.length})`, `अपॉइंटमेंट्स (${appointments.length})`) },
             { id: 'fee_settings', label: tr('Platform Fee & Financials', 'प्लेटफ़ॉर्म शुल्क व राजस्व') },
             { id: 'sla', label: tr(`🛡️ SLA Governance (${platformSla.overallScorePercent}%)`, `🛡️ SLA प्रबंधन (${platformSla.overallScorePercent}%)`) },
             { id: 'users', label: tr('Users & Barber Verification', 'उपयोगकर्ता और बार्बर सत्यापन') },
@@ -743,6 +995,834 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* APPOINTMENTS & BOOKING GOVERNANCE SECTION */}
+        {activeSection === 'appointments' && (
+          <div className="space-y-6">
+            {/* Header & Controls */}
+            <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-6 space-y-5">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider uppercase text-[#F1E194] mb-1">
+                    <Calendar className="w-4 h-4" />
+                    <span>{tr('CENTRAL BOOKING ENGINE', 'केंद्रीय बुकिंग प्रबंधन')}</span>
+                  </div>
+                  <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
+                    {tr('Platform Appointment Governance', 'प्लेटफ़ॉर्म अपॉइंटमेंट्स व बुकिंग प्रबंधन')}
+                  </h2>
+                  <p className="text-xs text-[#8A8178] mt-1">
+                    {tr(
+                      'Search, inspect, verify completion OTP, process refunds, or cancel bookings in real time.',
+                      'रियल-टाइम में खोजें, सत्यापन OTP जांचें, रिफ़ंड संसाधित करें या बुकिंग रद्द करें।'
+                    )}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs font-mono-num text-[#F1E194] bg-[#111113] border border-[#F1E194]/20 px-4 py-2 rounded-[14px]">
+                  <span>{tr('Total Live Bookings:', 'कुल लाइव बुकिंग:')}</span>
+                  <strong className="text-base font-bold text-[#FFF9E8]">{appointments.length}</strong>
+                </div>
+              </div>
+
+              {appointmentActionFeedback && (
+                <div className="p-3.5 rounded-[14px] bg-[#F1E194]/15 border border-[#F1E194]/40 text-[#F1E194] text-xs font-medium flex items-center justify-between animate-fadeIn">
+                  <span>{appointmentActionFeedback}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAppointmentActionFeedback('')}
+                    className="text-[#FFF9E8]/60 hover:text-[#FFF9E8] cursor-pointer ml-3"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Search, Shop, and Status Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 pt-1">
+                {/* Search Bar */}
+                <div className="md:col-span-7 relative">
+                  <Search className="w-4 h-4 text-[#8A8178] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={appointmentSearch}
+                    onChange={(e) => setAppointmentSearch(e.target.value)}
+                    placeholder={tr(
+                      'Search by customer, phone, barber, salon, booking ID...',
+                      'ग्राहक, फ़ोन, बार्बर, सैलून या बुकिंग ID से खोजें...'
+                    )}
+                    className="w-full bg-[#111113] border border-[#F1E194]/20 rounded-[14px] pl-10 pr-4 py-2.5 text-xs text-[#FFF9E8] placeholder-[#8A8178] focus:outline-none focus:border-[#F1E194]"
+                  />
+                  {appointmentSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setAppointmentSearch('')}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#8A8178] hover:text-[#FFF9E8] text-xs cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Shop Filter */}
+                <div className="md:col-span-5">
+                  <select
+                    value={appointmentShopFilter}
+                    onChange={(e) => setAppointmentShopFilter(e.target.value)}
+                    className="w-full bg-[#111113] border border-[#F1E194]/20 rounded-[14px] px-3.5 py-2.5 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194] cursor-pointer"
+                  >
+                    <option value="all">{tr('All Partner Salons', 'सभी पार्टनर सैलून')}</option>
+                    {shops.map((sh: any) => (
+                      <option key={sh.id} value={sh.id}>
+                        {sh.name} ({sh.city || sh.district || 'India'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Status Filter Chips */}
+              <div className="flex flex-wrap gap-2 pt-1 border-t border-[#F1E194]/10">
+                {[
+                  { id: 'all', label: tr('All Bookings', 'सभी बुकिंग'), count: appointments.length },
+                  {
+                    id: 'today',
+                    label: tr("Today's Appointments", 'आज के अपॉइंटमेंट्स'),
+                    count: appointments.filter((a: any) => a.date === todayDateStr).length,
+                  },
+                  {
+                    id: 'upcoming',
+                    label: tr('Upcoming / In-Progress', 'आगामी व सक्रिय'),
+                    count: upcomingAppointmentsCount,
+                  },
+                  {
+                    id: 'completed',
+                    label: tr('Completed Cuts', 'पूर्ण बाल कटाई'),
+                    count: completedBookingsCount,
+                  },
+                  {
+                    id: 'cancelled',
+                    label: tr('Cancelled Bookings', 'रद्द बुकिंग'),
+                    count: cancelledBookingsCount,
+                  },
+                ].map((chip) => (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => setAppointmentStatusFilter(chip.id as any)}
+                    className={`px-3.5 py-1.5 rounded-[12px] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                      appointmentStatusFilter === chip.id
+                        ? 'bg-[#F1E194] text-[#111113]'
+                        : 'bg-[#111113] text-[#FFF9E8]/70 border border-[#F1E194]/15 hover:border-[#F1E194]/40 hover:text-[#FFF9E8]'
+                    }`}
+                  >
+                    <span>{chip.label}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono-num ${
+                        appointmentStatusFilter === chip.id
+                          ? 'bg-[#111113]/20 text-[#111113] font-bold'
+                          : 'bg-[#241719] text-[#F1E194]'
+                      }`}
+                    >
+                      {chip.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Results Counter & Metrics Summary */}
+            <div className="flex flex-wrap items-center justify-between text-xs text-[#8A8178] px-1">
+              <span>
+                {tr('Showing', 'दिखा रहे हैं')}{' '}
+                <strong className="text-[#FFF9E8] font-mono-num">{filteredAppointments.length}</strong>{' '}
+                {tr('matching appointments of', 'कुल में से')}{' '}
+                <strong className="text-[#FFF9E8] font-mono-num">{appointments.length}</strong>
+              </span>
+              <div className="flex items-center gap-4 text-[11px]">
+                <span>
+                  {tr('Filtered Value:', 'फ़िल्टर मूल्य:')}{' '}
+                  <strong className="text-[#F1E194] font-mono-num">
+                    {formatINR(
+                      filteredAppointments.reduce((s: number, a: any) => s + (Number(a.price) || 0), 0)
+                    )}
+                  </strong>
+                </span>
+                <span>
+                  {tr('Platform Fees:', 'प्लेटफ़ॉर्म शुल्क:')}{' '}
+                  <strong className="text-emerald-400 font-mono-num">
+                    {formatINR(
+                      filteredAppointments.reduce((s: number, a: any) => s + (Number(a.platformFee ?? 10) || 0), 0)
+                    )}
+                  </strong>
+                </span>
+              </div>
+            </div>
+
+            {/* Appointments List / Table */}
+            {filteredAppointments.length === 0 ? (
+              <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 p-12 text-center space-y-3">
+                <Calendar className="w-12 h-12 text-[#F1E194]/40 mx-auto" />
+                <h3 className="font-display text-xl font-bold text-[#FFF9E8]">
+                  {tr('No Appointments Found', 'कोई अपॉइंटमेंट नहीं मिला')}
+                </h3>
+                <p className="text-xs text-[#8A8178] max-w-md mx-auto">
+                  {tr(
+                    'No appointments matched your search query or filter criteria. Clear your filters or try a different search term.',
+                    'आपकी खोज या फ़िल्टर के अनुसार कोई अपॉइंटमेंट नहीं मिला। कृपया फ़िल्टर रीसेट करें।'
+                  )}
+                </p>
+                {(appointmentSearch || appointmentStatusFilter !== 'all' || appointmentShopFilter !== 'all') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppointmentSearch('');
+                      setAppointmentStatusFilter('all');
+                      setAppointmentShopFilter('all');
+                    }}
+                    className="px-4 py-2 rounded-[12px] bg-[#F1E194] text-[#111113] text-xs font-semibold hover:bg-[#FFF9E8] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>{tr('Reset All Filters', 'सभी फ़िल्टर रीसेट करें')}</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-[24px] bg-[#241719] border border-[#F1E194]/20 overflow-hidden shadow-xl">
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#F1E194]/15 bg-[#111113]/70 text-[#8A8178] uppercase tracking-wider text-[10px]">
+                        <th className="py-3.5 px-4 font-semibold">{tr('Booking ID / Date', 'बुकिंग ID / तारीख')}</th>
+                        <th className="py-3.5 px-4 font-semibold">{tr('Customer Details', 'ग्राहक विवरण')}</th>
+                        <th className="py-3.5 px-4 font-semibold">{tr('Salon & Barber', 'सैलून व बार्बर')}</th>
+                        <th className="py-3.5 px-4 font-semibold">{tr('Service & Price', 'सेवा व मूल्य')}</th>
+                        <th className="py-3.5 px-4 font-semibold text-center">{tr('Payment', 'भुगतान')}</th>
+                        <th className="py-3.5 px-4 font-semibold text-center">{tr('OTP', 'OTP')}</th>
+                        <th className="py-3.5 px-4 font-semibold text-center">{tr('Status', 'स्थिति')}</th>
+                        <th className="py-3.5 px-4 font-semibold text-right">{tr('Actions', 'कार्रवाई')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F1E194]/10">
+                      {filteredAppointments.map((apt: any) => {
+                        const st = String(apt.status || apt.rawStatus || '').toLowerCase();
+                        const isPaid = String(apt.paymentStatus || '').toLowerCase() === 'paid' || apt.paidOnline;
+                        const isCompleted = st === 'completed';
+                        const isCancelled = st === 'cancelled';
+                        const otpCode = apt.completionOtp || apt.otp || '----';
+
+                        return (
+                          <tr key={apt.id} className="hover:bg-[#111113]/40 transition-colors">
+                            {/* Booking ID & Date */}
+                            <td className="py-4 px-4 font-mono-num">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-[#F1E194] text-xs">
+                                  #{String(apt.id || '').slice(0, 8).toUpperCase()}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyText(`apt-${apt.id}`, apt.id)}
+                                  className="text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+                                  title={tr('Copy Full Booking ID', 'पूरी बुकिंग ID कॉपी करें')}
+                                >
+                                  {copiedKey === `apt-${apt.id}` ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                              <div className="text-[11px] text-[#FFF9E8] mt-0.5">
+                                {formatISTDateString(apt.date, lang)}
+                              </div>
+                              <div className="text-[10px] text-[#8A8178] flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                <span>{apt.time} IST</span>
+                                {apt.durationMinutes && (
+                                  <span>· {apt.durationMinutes} {tr('min', 'मिनट')}</span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Customer Details */}
+                            <td className="py-4 px-4">
+                              <div className="font-semibold text-[#FFF9E8]">
+                                {apt.clientName || tr('Guest Client', 'अतिथि ग्राहक')}
+                              </div>
+                              <div className="text-[11px] text-[#8A8178] flex items-center gap-1 mt-0.5 font-mono-num">
+                                <Phone className="w-3 h-3 text-[#F1E194]/70" />
+                                <span>{apt.clientPhone || '—'}</span>
+                              </div>
+                              {apt.customerUid && (
+                                <div className="text-[9px] text-[#8A8178]/60 font-mono-num truncate max-w-[140px]">
+                                  UID: {apt.customerUid.slice(0, 10)}...
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Salon & Barber */}
+                            <td className="py-4 px-4">
+                              <div className="font-semibold text-[#FFF9E8] flex items-center gap-1">
+                                <Store className="w-3 h-3 text-[#F1E194]" />
+                                <span className="truncate max-w-[160px]">{apt.shopName || 'BarberLoo Salon'}</span>
+                              </div>
+                              <div className="text-[11px] text-[#8A8178] flex items-center gap-1 mt-0.5">
+                                <Scissors className="w-3 h-3 text-[#F1E194]/70" />
+                                <span>{apt.barberName || 'Salon Stylist'}</span>
+                              </div>
+                            </td>
+
+                            {/* Service & Price */}
+                            <td className="py-4 px-4 font-mono-num">
+                              <div className="font-semibold text-[#FFF9E8] truncate max-w-[150px]">
+                                {apt.serviceName}
+                              </div>
+                              <div className="text-[11px] text-[#F1E194] font-bold mt-0.5">
+                                {formatINR(apt.price)}
+                              </div>
+                              <div className="text-[10px] text-[#8A8178]">
+                                {tr('Barber:', 'बार्बर:')} {formatINR(apt.servicePrice ?? (apt.price - (apt.platformFee ?? 10)))} + {tr('Fee:', 'शुल्क:')} {formatINR(apt.platformFee ?? 10)}
+                              </div>
+                            </td>
+
+                            {/* Payment Status */}
+                            <td className="py-4 px-4 text-center">
+                              {isPaid ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-950/70 text-emerald-300 border border-emerald-500/30">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>{tr('PAID', 'सत्यापित')}</span>
+                                </span>
+                              ) : String(apt.paymentStatus).toLowerCase() === 'refunded' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-rose-950/70 text-rose-300 border border-rose-500/30">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  <span>{tr('REFUNDED', 'रिफ़ंड')}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-amber-950/70 text-amber-300 border border-amber-500/30">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{tr('PENDING', 'लंबित')}</span>
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Completion OTP */}
+                            <td className="py-4 px-4 text-center font-mono-num">
+                              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[10px] bg-[#111113] border border-[#F1E194]/25">
+                                <span className="font-bold text-[#F1E194] tracking-widest text-xs">
+                                  {otpCode}
+                                </span>
+                                {otpCode !== '----' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyText(`otp-${apt.id}`, otpCode)}
+                                    className="text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer ml-0.5"
+                                    title={tr('Copy OTP', 'OTP कॉपी करें')}
+                                  >
+                                    {copiedKey === `otp-${apt.id}` ? (
+                                      <Check className="w-3 h-3 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Status */}
+                            <td className="py-4 px-4 text-center">
+                              {isCompleted ? (
+                                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-950/60 text-emerald-300 border border-emerald-500/30">
+                                  {tr('Completed', 'पूर्ण')}
+                                </span>
+                              ) : isCancelled ? (
+                                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-semibold bg-rose-950/60 text-rose-300 border border-rose-500/30">
+                                  {tr('Cancelled', 'रद्द')}
+                                </span>
+                              ) : st === 'in_progress' ? (
+                                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-950/60 text-blue-300 border border-blue-500/30 animate-pulse">
+                                  {tr('In Progress', 'प्रगति पर')}
+                                </span>
+                              ) : (
+                                <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-semibold bg-[#F1E194]/15 text-[#F1E194] border border-[#F1E194]/30">
+                                  {tr('Confirmed', 'सत्यापित')}
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Actions */}
+                            <td className="py-4 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedAppointmentDetails(apt)}
+                                  className="px-2.5 py-1 rounded-[10px] bg-[#111113] border border-[#F1E194]/20 text-[#FFF9E8] hover:bg-[#F1E194] hover:text-[#111113] transition-colors cursor-pointer text-[11px] font-semibold"
+                                >
+                                  {tr('Details', 'विवरण')}
+                                </button>
+
+                                {!isCompleted && !isCancelled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAdminCompleteAppointment(apt)}
+                                    disabled={isProcessingAppointmentAction}
+                                    className="px-2.5 py-1 rounded-[10px] bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer text-[11px] font-semibold disabled:opacity-50"
+                                    title={tr('Admin Override: Mark Completed', 'एडमिन: पूर्ण चिह्नित करें')}
+                                  >
+                                    <Check className="w-3 h-3 inline mr-0.5" />
+                                    <span>{tr('Complete', 'पूर्ण')}</span>
+                                  </button>
+                                )}
+
+                                {!isCancelled && !isCompleted && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAdminCancelAppointment(apt)}
+                                    disabled={isProcessingAppointmentAction}
+                                    className="px-2 py-1 rounded-[10px] bg-rose-600/20 text-rose-300 border border-rose-500/30 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer text-[11px] font-semibold disabled:opacity-50"
+                                    title={tr('Cancel Booking', 'बुकिंग रद्द करें')}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                )}
+
+                                {isPaid && isCancelled && String(apt.paymentStatus).toLowerCase() !== 'refunded' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setAdminRefundModalApt(apt)}
+                                    className="px-2.5 py-1 rounded-[10px] bg-amber-600/20 text-amber-300 border border-amber-500/30 hover:bg-amber-600 hover:text-white transition-colors cursor-pointer text-[11px] font-semibold"
+                                    title={tr('Process Full Refund via Razorpay', 'Razorpay द्वारा रिफ़ंड करें')}
+                                  >
+                                    {tr('Refund', 'रिफ़ंड')}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Responsive Cards */}
+                <div className="lg:hidden divide-y divide-[#F1E194]/10">
+                  {filteredAppointments.map((apt: any) => {
+                    const st = String(apt.status || apt.rawStatus || '').toLowerCase();
+                    const isPaid = String(apt.paymentStatus || '').toLowerCase() === 'paid' || apt.paidOnline;
+                    const isCompleted = st === 'completed';
+                    const isCancelled = st === 'cancelled';
+                    const otpCode = apt.completionOtp || apt.otp || '----';
+
+                    return (
+                      <div key={apt.id} className="p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-1.5 font-mono-num font-bold text-xs text-[#F1E194]">
+                              <span>#{String(apt.id || '').slice(0, 8).toUpperCase()}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyText(`mob-apt-${apt.id}`, apt.id)}
+                                className="text-[#8A8178] hover:text-[#FFF9E8]"
+                              >
+                                {copiedKey === `mob-apt-${apt.id}` ? (
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                            </div>
+                            <h4 className="font-semibold text-sm text-[#FFF9E8] mt-0.5">
+                              {apt.clientName || tr('Guest Client', 'अतिथि ग्राहक')}
+                            </h4>
+                            <p className="text-xs text-[#8A8178] font-mono-num flex items-center gap-1 mt-0.5">
+                              <Phone className="w-3 h-3 text-[#F1E194]" />
+                              <span>{apt.clientPhone || '—'}</span>
+                            </p>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="font-mono-num font-bold text-sm text-[#F1E194] block">
+                              {formatINR(apt.price)}
+                            </span>
+                            {isPaid ? (
+                              <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-950/70 text-emerald-300 border border-emerald-500/30">
+                                {tr('PAID', 'सत्यापित')}
+                              </span>
+                            ) : (
+                              <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold bg-amber-950/70 text-amber-300 border border-amber-500/30">
+                                {tr('PENDING', 'लंबित')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="p-3 rounded-[14px] bg-[#111113] border border-[#F1E194]/10 text-xs space-y-1.5">
+                          <div className="flex justify-between text-[#FFF9E8]">
+                            <span className="text-[#8A8178]">{tr('Service & Salon:', 'सेवा व सैलून:')}</span>
+                            <span className="font-semibold truncate max-w-[180px]">
+                              {apt.serviceName} · {apt.shopName}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-[#8A8178]">
+                            <span>{tr('Schedule:', 'समय:')}</span>
+                            <span className="text-[#FFF9E8] font-mono-num">
+                              {formatISTDateString(apt.date, lang)} at {apt.time} IST
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-[#8A8178] pt-1 border-t border-[#F1E194]/10">
+                            <span>{tr('Completion OTP:', 'सत्यापन OTP:')}</span>
+                            <span className="font-mono-num font-bold text-xs text-[#F1E194] tracking-widest bg-[#241719] px-2 py-0.5 rounded border border-[#F1E194]/20">
+                              {otpCode}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <div>
+                            {isCompleted ? (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-950/60 text-emerald-300 border border-emerald-500/30">
+                                {tr('Completed', 'पूर्ण')}
+                              </span>
+                            ) : isCancelled ? (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-rose-950/60 text-rose-300 border border-rose-500/30">
+                                {tr('Cancelled', 'रद्द')}
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-[#F1E194]/15 text-[#F1E194] border border-[#F1E194]/30">
+                                {tr('Confirmed', 'सत्यापित')}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAppointmentDetails(apt)}
+                              className="px-3 py-1.5 rounded-[10px] bg-[#111113] border border-[#F1E194]/20 text-[#FFF9E8] text-xs font-semibold"
+                            >
+                              {tr('Details', 'विवरण')}
+                            </button>
+
+                            {!isCompleted && !isCancelled && (
+                              <button
+                                type="button"
+                                onClick={() => handleAdminCompleteAppointment(apt)}
+                                className="px-3 py-1.5 rounded-[10px] bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold"
+                              >
+                                {tr('Complete', 'पूर्ण')}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* FULL APPOINTMENT DETAILS MODAL */}
+        {selectedAppointmentDetails && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fadeIn">
+            <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-[24px] bg-[#241719] border border-[#F1E194]/30 p-6 sm:p-8 space-y-6 shadow-2xl">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-4 pb-4 border-b border-[#F1E194]/15">
+                <div>
+                  <div className="inline-flex items-center gap-2 text-xs font-mono-num font-semibold text-[#F1E194]">
+                    <span>{tr('BOOKING DOSSIER', 'बुकिंग विवरण')}</span>
+                    <span>·</span>
+                    <span>#{String(selectedAppointmentDetails.id || '').toUpperCase()}</span>
+                  </div>
+                  <h3 className="font-display text-2xl font-bold text-[#FFF9E8] mt-1">
+                    {selectedAppointmentDetails.serviceName}
+                  </h3>
+                  <p className="text-xs text-[#8A8178] mt-0.5">
+                    {selectedAppointmentDetails.shopName} · {selectedAppointmentDetails.barberName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedAppointmentDetails(null)}
+                  className="w-8 h-8 rounded-full bg-[#111113] border border-[#F1E194]/20 flex items-center justify-center text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Completion OTP Spotlight */}
+              <div className="p-4 rounded-[18px] bg-[#111113] border border-[#F1E194]/30 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-semibold text-[#8A8178] uppercase tracking-wider block">
+                    {tr('Security Completion OTP', 'सुरक्षा पूर्णता OTP')}
+                  </span>
+                  <p className="text-[10px] text-[#8A8178] mt-0.5">
+                    {tr(
+                      'Customer provides this 4-digit code to the barber upon service completion.',
+                      'ग्राहक सेवा पूर्ण होने पर यह 4 अंकों का कोड बार्बर को प्रदान करता है।'
+                    )}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 font-mono-num">
+                  <span className="text-2xl font-bold text-[#F1E194] tracking-widest px-3 py-1 rounded-[10px] bg-[#241719] border border-[#F1E194]/30">
+                    {selectedAppointmentDetails.completionOtp || (selectedAppointmentDetails as any).otp || '----'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyText(
+                        'modal-otp',
+                        selectedAppointmentDetails.completionOtp || (selectedAppointmentDetails as any).otp || ''
+                      )
+                    }
+                    className="p-2 rounded-[10px] bg-[#241719] text-[#F1E194] border border-[#F1E194]/20 hover:text-[#FFF9E8] cursor-pointer"
+                    title={tr('Copy OTP', 'OTP कॉपी करें')}
+                  >
+                    {copiedKey === 'modal-otp' ? (
+                      <Check className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Metadata Grid */}
+              <div className="grid grid-cols-2 gap-3.5 text-xs">
+                <div className="p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/12">
+                  <span className="text-[10px] text-[#8A8178] uppercase tracking-wider block">
+                    {tr('Customer Name', 'ग्राहक नाम')}
+                  </span>
+                  <span className="font-semibold text-sm text-[#FFF9E8] mt-0.5 block">
+                    {selectedAppointmentDetails.clientName || 'Guest'}
+                  </span>
+                  <span className="text-[11px] text-[#8A8178] font-mono-num block mt-1">
+                    {selectedAppointmentDetails.clientPhone || 'No phone recorded'}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/12">
+                  <span className="text-[10px] text-[#8A8178] uppercase tracking-wider block">
+                    {tr('Appointment Slot (IST)', 'अपॉइंटमेंट समय')}
+                  </span>
+                  <span className="font-semibold text-sm text-[#FFF9E8] mt-0.5 block font-mono-num">
+                    {formatISTDateString(selectedAppointmentDetails.date, lang)}
+                  </span>
+                  <span className="text-[11px] text-[#F1E194] font-mono-num block mt-1">
+                    {selectedAppointmentDetails.time} IST ({selectedAppointmentDetails.durationMins || (selectedAppointmentDetails as any).durationMinutes || 30} {tr('min', 'मिनट')})
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/12">
+                  <span className="text-[10px] text-[#8A8178] uppercase tracking-wider block">
+                    {tr('Partner Salon', 'पार्टनर सैलून')}
+                  </span>
+                  <span className="font-semibold text-sm text-[#FFF9E8] mt-0.5 block">
+                    {selectedAppointmentDetails.shopName}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] block mt-1 truncate">
+                    {(selectedAppointmentDetails as any).shopAddress || selectedAppointmentDetails.shopName || 'Authorized Salon Partner'}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/12">
+                  <span className="text-[10px] text-[#8A8178] uppercase tracking-wider block">
+                    {tr('Assigned Barber', 'नियुक्त बार्बर')}
+                  </span>
+                  <span className="font-semibold text-sm text-[#FFF9E8] mt-0.5 block">
+                    {selectedAppointmentDetails.barberName}
+                  </span>
+                  <span className="text-[10px] text-[#8A8178] block mt-1">
+                    Stylist & Grooming Specialist
+                  </span>
+                </div>
+              </div>
+
+              {/* Price Flow Ledger */}
+              <div className="p-4 rounded-[18px] bg-[#111113] border border-[#F1E194]/15 space-y-2 text-xs">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#8A8178] pb-1 border-b border-[#F1E194]/10">
+                  {tr('Payment & Price Breakdown', 'भुगतान व मूल्य विवरण')}
+                </div>
+                <div className="flex justify-between text-[#8A8178]">
+                  <span>{tr('Barber Service Price:', 'बार्बर सेवा मूल्य:')}</span>
+                  <span className="text-[#FFF9E8] font-mono-num">
+                    {formatINR(
+                      selectedAppointmentDetails.servicePrice ??
+                        (selectedAppointmentDetails.price - (selectedAppointmentDetails.platformFee ?? 10))
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between text-[#8A8178]">
+                  <span>{tr('BarberLoo Platform Fee:', 'BarberLoo प्लेटफ़ॉर्म शुल्क:')}</span>
+                  <span className="text-[#F1E194] font-mono-num">
+                    {formatINR(selectedAppointmentDetails.platformFee ?? 10)}
+                  </span>
+                </div>
+                <div className="flex justify-between font-bold text-sm text-[#FFF9E8] pt-2 border-t border-[#F1E194]/10 font-mono-num">
+                  <span>{tr('Total Customer Paid (Online):', 'कुल ऑनलाइन भुगतान:')}</span>
+                  <span className="text-[#F1E194]">
+                    {formatINR(selectedAppointmentDetails.price)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[11px] pt-1 text-[#8A8178]">
+                  <span>{tr('Payment Gateway Status:', 'गेटवे स्थिति:')}</span>
+                  <span
+                    className={`font-semibold ${
+                      String(selectedAppointmentDetails.paymentStatus).toLowerCase() === 'paid' ||
+                      (selectedAppointmentDetails as any).paidOnline
+                        ? 'text-emerald-400'
+                        : 'text-amber-400'
+                    }`}
+                  >
+                    {String(selectedAppointmentDetails.paymentStatus || 'Pending').toUpperCase()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedAppointmentDetails(null)}
+                  className="px-4 py-2.5 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs font-semibold text-[#FFF9E8] hover:border-[#F1E194] cursor-pointer"
+                >
+                  {tr('Close Dossier', 'बंद करें')}
+                </button>
+
+                <div className="flex items-center gap-2">
+                  {String(selectedAppointmentDetails.status).toLowerCase() !== 'completed' &&
+                    String(selectedAppointmentDetails.status).toLowerCase() !== 'cancelled' && (
+                      <button
+                        type="button"
+                        onClick={() => handleAdminCompleteAppointment(selectedAppointmentDetails)}
+                        disabled={isProcessingAppointmentAction}
+                        className="px-4 py-2.5 rounded-[12px] bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-500 transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>{tr('Mark Completed', 'पूर्ण चिह्नित करें')}</span>
+                      </button>
+                    )}
+
+                  {String(selectedAppointmentDetails.status).toLowerCase() !== 'cancelled' &&
+                    String(selectedAppointmentDetails.status).toLowerCase() !== 'completed' && (
+                      <button
+                        type="button"
+                        onClick={() => handleAdminCancelAppointment(selectedAppointmentDetails)}
+                        disabled={isProcessingAppointmentAction}
+                        className="px-4 py-2.5 rounded-[12px] bg-rose-950/80 text-rose-300 border border-rose-500/40 text-xs font-semibold hover:bg-rose-900 transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>{tr('Cancel Booking', 'बुकिंग रद्द करें')}</span>
+                      </button>
+                    )}
+
+                  {(String(selectedAppointmentDetails.paymentStatus).toLowerCase() === 'paid' ||
+                    (selectedAppointmentDetails as any).paidOnline) &&
+                    String(selectedAppointmentDetails.paymentStatus).toLowerCase() !== 'refunded' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const apt = selectedAppointmentDetails;
+                          setSelectedAppointmentDetails(null);
+                          setAdminRefundModalApt(apt);
+                        }}
+                        className="px-4 py-2.5 rounded-[12px] bg-amber-500 text-[#111113] text-xs font-semibold hover:bg-[#FFF9E8] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <span>{tr('Process Refund', 'रिफ़ंड करें')}</span>
+                      </button>
+                    )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ADMIN REFUND PROCESSING MODAL */}
+        {adminRefundModalApt && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fadeIn">
+            <form
+              onSubmit={handleAdminProcessRefundSubmit}
+              className="relative w-full max-w-md rounded-[24px] bg-[#241719] border border-amber-500/40 p-6 sm:p-7 space-y-5 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2 text-amber-400">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="font-display text-xl font-bold text-[#FFF9E8]">
+                    {tr('Process Customer Refund', 'ग्राहक रिफ़ंड प्रक्रिया')}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAdminRefundModalApt(null)}
+                  className="text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-[#8A8178]">
+                {tr(
+                  'Initiating a refund will return the full online booking amount directly to the customer via Razorpay.',
+                  'रिफ़ंड शुरू करने से पूरी ऑनलाइन बुकिंग राशि Razorpay द्वारा सीधे ग्राहक को वापस कर दी जाएगी।'
+                )}
+              </p>
+
+              <div className="p-3.5 rounded-[14px] bg-[#111113] border border-[#F1E194]/15 space-y-1 text-xs font-mono-num">
+                <div className="flex justify-between text-[#8A8178]">
+                  <span>{tr('Booking ID:', 'बुकिंग ID:')}</span>
+                  <span className="text-[#FFF9E8] font-bold">#{adminRefundModalApt.id.slice(0, 8)}</span>
+                </div>
+                <div className="flex justify-between text-[#8A8178]">
+                  <span>{tr('Customer:', 'ग्राहक:')}</span>
+                  <span className="text-[#FFF9E8]">{adminRefundModalApt.clientName}</span>
+                </div>
+                <div className="flex justify-between text-[#8A8178]">
+                  <span>{tr('Refund Amount:', 'रिफ़ंड राशि:')}</span>
+                  <span className="text-amber-400 font-bold text-sm">
+                    {formatINR(adminRefundModalApt.price)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[#FFF9E8]">
+                  {tr('Refund Reason / Audit Note', 'रिफ़ंड का कारण / ऑडिट टिप्पणी')}
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={adminRefundReason}
+                  onChange={(e) => setAdminRefundReason(e.target.value)}
+                  className="w-full bg-[#111113] border border-[#F1E194]/20 rounded-[14px] p-3 text-xs text-[#FFF9E8] focus:outline-none focus:border-[#F1E194]"
+                  placeholder={tr('State the reason for this refund...', 'रिफ़ंड का कारण लिखें...')}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAdminRefundModalApt(null)}
+                  className="px-4 py-2 rounded-[12px] bg-[#111113] border border-[#F1E194]/20 text-xs font-semibold text-[#8A8178] hover:text-[#FFF9E8] cursor-pointer"
+                >
+                  {tr('Cancel', 'रद्द करें')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessingAppointmentAction}
+                  className="px-5 py-2 rounded-[12px] bg-amber-500 text-[#111113] text-xs font-bold hover:bg-[#FFF9E8] transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
+                >
+                  {isProcessingAppointmentAction ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>{tr('Confirm & Initiate Refund', 'रिफ़ंड की पुष्टि करें')}</span>
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
