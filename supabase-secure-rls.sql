@@ -344,8 +344,153 @@ CREATE POLICY "Admin all working hours"
   USING (public.is_admin())
   WITH CHECK (public.is_admin());
 
+-- ============================================================================
+-- 8. BARBER EARNINGS LEDGER & WITHDRAWALS RLS POLICIES
+-- ============================================================================
+
+-- 8a. barber_earnings_ledger
+ALTER TABLE public.barber_earnings_ledger ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Barber view own earnings ledger" ON public.barber_earnings_ledger;
+DROP POLICY IF EXISTS "Admin all earnings ledger" ON public.barber_earnings_ledger;
+
+CREATE POLICY "Barber view own earnings ledger"
+  ON public.barber_earnings_ledger
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.barbers
+      WHERE id = barber_earnings_ledger.barber_id
+      AND user_uid = auth.uid()::text
+    )
+    OR public.is_admin()
+  );
+
+CREATE POLICY "Admin all earnings ledger"
+  ON public.barber_earnings_ledger
+  FOR ALL
+  TO authenticated
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
+-- 8b. barber_withdrawal_requests
+ALTER TABLE public.barber_withdrawal_requests ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Barber view own withdrawal requests" ON public.barber_withdrawal_requests;
+DROP POLICY IF EXISTS "Barber insert withdrawal requests" ON public.barber_withdrawal_requests;
+DROP POLICY IF EXISTS "Admin all withdrawal requests" ON public.barber_withdrawal_requests;
+
+CREATE POLICY "Barber view own withdrawal requests"
+  ON public.barber_withdrawal_requests
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.barbers
+      WHERE id = barber_withdrawal_requests.barber_id
+      AND user_uid = auth.uid()::text
+    )
+    OR public.is_admin()
+  );
+
+CREATE POLICY "Barber insert withdrawal requests"
+  ON public.barber_withdrawal_requests
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    requested_amount >= 100
+    AND (
+      EXISTS (
+        SELECT 1 FROM public.barbers
+        WHERE id = barber_withdrawal_requests.barber_id
+        AND user_uid = auth.uid()::text
+      )
+      OR public.is_admin()
+    )
+  );
+
+CREATE POLICY "Admin all withdrawal requests"
+  ON public.barber_withdrawal_requests
+  FOR ALL
+  TO authenticated
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
+-- 8c. barber_payout_beneficiaries
+ALTER TABLE public.barber_payout_beneficiaries ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Barber view own beneficiary" ON public.barber_payout_beneficiaries;
+DROP POLICY IF EXISTS "Barber manage own beneficiary" ON public.barber_payout_beneficiaries;
+DROP POLICY IF EXISTS "Admin all beneficiaries" ON public.barber_payout_beneficiaries;
+
+CREATE POLICY "Barber view own beneficiary"
+  ON public.barber_payout_beneficiaries
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.barbers
+      WHERE id = barber_payout_beneficiaries.barber_id
+      AND user_uid = auth.uid()::text
+    )
+    OR public.is_admin()
+  );
+
+CREATE POLICY "Barber manage own beneficiary"
+  ON public.barber_payout_beneficiaries
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.barbers
+      WHERE id = barber_payout_beneficiaries.barber_id
+      AND user_uid = auth.uid()::text
+    )
+    OR public.is_admin()
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.barbers
+      WHERE id = barber_payout_beneficiaries.barber_id
+      AND user_uid = auth.uid()::text
+    )
+    OR public.is_admin()
+  );
+
+CREATE POLICY "Admin all beneficiaries"
+  ON public.barber_payout_beneficiaries
+  FOR ALL
+  TO authenticated
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
+-- 8d. financial_audit_logs
+ALTER TABLE public.financial_audit_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admin all financial audit logs" ON public.financial_audit_logs;
+
+CREATE POLICY "Admin all financial audit logs"
+  ON public.financial_audit_logs
+  FOR ALL
+  TO authenticated
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
 -- Verification Query: Inspect resulting policies
 SELECT tablename, policyname, cmd, permissive, roles
 FROM pg_policies
-WHERE tablename IN ('appointments', 'payments', 'profiles', 'shops', 'services', 'barbers', 'working_hours')
+WHERE tablename IN (
+  'appointments',
+  'payments',
+  'profiles',
+  'shops',
+  'services',
+  'barbers',
+  'working_hours',
+  'barber_earnings_ledger',
+  'barber_withdrawal_requests',
+  'barber_payout_beneficiaries',
+  'financial_audit_logs'
+)
 ORDER BY tablename, policyname;

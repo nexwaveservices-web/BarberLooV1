@@ -20,6 +20,7 @@ import {
   supabaseSignOut,
 } from '../lib/supabase';
 import { useLanguage } from '../lib/i18n';
+import { useDevice } from '../lib/deviceDetection';
 import {
   DEFAULT_STATES,
   DEFAULT_CITIES,
@@ -45,6 +46,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSetAuthModalOpenExternal,
 }) => {
   const { tr } = useLanguage();
+  const device = useDevice();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [internalAuthOpen, setInternalAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'reset'>('login');
@@ -302,10 +304,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={() => handleSelectPage('home')}
-            className="font-display text-2xl sm:text-[28px] font-bold tracking-[0.14em] whitespace-nowrap shrink-0 text-left cursor-pointer transition-transform hover:scale-102"
+            aria-label="BarberLoo - Luxury Salon Booking (Barber-low)"
+            className="group font-display text-2xl sm:text-[28px] font-bold tracking-[0.14em] whitespace-nowrap shrink-0 text-left cursor-pointer transition-all duration-200 hover:-translate-y-0.5"
           >
             <span className={isDarkTheme ? 'text-[#FFF9E8]' : 'text-[#111113]'}>BARBER</span>
-            <span className="text-[#5B0E14]">LOO</span>
+            <span className="text-[#5B0E14] transition-colors group-hover:text-[#8A1A22]">LOO</span>
           </button>
 
           {/* Zone 2: Clean primary navigation links */}
@@ -438,24 +441,24 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Mobile Navigation Drawer */}
         {mobileMenuOpen && (
           <div
-            className={`lg:hidden border-t px-5 py-5 space-y-4 ${
+            className={`lg:hidden border-t px-5 py-5 space-y-4 animate-slide-up ${
               isDarkTheme
                 ? 'bg-[#111113] border-[#F1E194]/15 text-[#FFF9E8]'
                 : 'bg-[#FAF6EA] border-[#5B0E14]/15 text-[#111113]'
             }`}
           >
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
               {navItems.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => handleSelectPage(item.id)}
-                  className={`px-3.5 py-2.5 text-left text-xs font-semibold rounded-[14px] whitespace-nowrap truncate ${
+                  className={`min-h-[44px] px-3.5 py-2.5 text-left text-xs font-semibold rounded-[14px] whitespace-nowrap truncate transition-all duration-150 cursor-pointer ${
                     currentPage === item.id
-                      ? 'bg-[#5B0E14] text-[#FFF9E8]'
+                      ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-sm'
                       : isDarkTheme
-                      ? 'bg-[#241719] text-[#FFF9E8]/80'
-                      : 'bg-[#E9D9B8]/60 text-[#111113]'
+                      ? 'bg-[#241719] text-[#FFF9E8]/80 hover:text-[#FFF9E8]'
+                      : 'bg-[#E9D9B8]/60 text-[#111113] hover:bg-[#E9D9B8]'
                   }`}
                 >
                   {item.label}
@@ -475,7 +478,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="px-4 py-2 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold"
+                    className="min-h-[44px] px-4 py-2.5 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold cursor-pointer transition-colors hover:bg-[#7E151E]"
                   >
                     {tr('Sign Out', 'लॉग आउट')}
                   </button>
@@ -487,7 +490,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setMobileMenuOpen(false);
                     setAuthModalOpen(true);
                   }}
-                  className="w-full py-2.5 rounded-[14px] bg-[#241719] text-[#F1E194] text-xs font-semibold"
+                  className="min-h-[44px] w-full py-2.5 rounded-[14px] bg-[#241719] text-[#F1E194] text-xs font-semibold cursor-pointer hover:bg-[#2e1d20] transition-colors"
                 >
                   {tr('Sign In / Create Account', 'साइन इन / नया खाता बनाएं')}
                 </button>
@@ -498,7 +501,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => handleSelectPage('refund-policy')}
-                className="hover:text-[#F1E194] transition-colors cursor-pointer"
+                className="hover:text-[#F1E194] transition-colors cursor-pointer py-1"
               >
                 {tr('Refund Policy', 'रिफंड नीति')}
               </button>
@@ -506,7 +509,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => handleSelectPage('disclaimer')}
-                className="hover:text-[#F1E194] transition-colors cursor-pointer"
+                className="hover:text-[#F1E194] transition-colors cursor-pointer py-1"
               >
                 {tr('Disclaimer', 'अस्वीकरण')}
               </button>
@@ -514,7 +517,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => handleSelectPage('privacy-policy')}
-                className="hover:text-[#F1E194] transition-colors cursor-pointer"
+                className="hover:text-[#F1E194] transition-colors cursor-pointer py-1"
               >
                 {tr('Privacy', 'गोपनीयता')}
               </button>
@@ -522,7 +525,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => handleSelectPage('terms-of-service')}
-                className="hover:text-[#F1E194] transition-colors cursor-pointer"
+                className="hover:text-[#F1E194] transition-colors cursor-pointer py-1"
               >
                 {tr('Terms', 'शर्तें')}
               </button>
@@ -533,8 +536,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Real Supabase Authentication Modal (Customer, Barber & Owner Admin) */}
       {authModalOpen && (
-        <div className="fixed inset-0 z-50 bg-[#111113]/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-[28px] neu-dark-flat p-7 space-y-5">
+        <div className="fixed inset-0 z-50 bg-[#111113]/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="w-full max-w-md rounded-[28px] neu-dark-flat p-7 space-y-5 animate-scale-in border border-[#F1E194]/20 shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#F1E194]/15 pb-4">
               <div>
                 <p className="text-xs font-semibold tracking-[0.2em] text-[#F1E194]">
@@ -768,116 +771,118 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       )}
 
-      {/* Mobile Persistent Bottom Navigation Bar in Neumorphic luxury bar */}
-      <nav
-        aria-label="Mobile Bottom Navigation"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 neu-dark-flat border-t border-[#F1E194]/20 py-2 px-2 flex justify-around items-center"
-      >
-        <button
-          type="button"
-          onClick={() => handleSelectPage('home')}
-          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-            currentPage === 'home' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
-          }`}
+      {/* Mobile Persistent Bottom Navigation Bar in Neumorphic luxury bar (Only on mobile viewports) */}
+      {device.isMobile && (
+        <nav
+          aria-label="Mobile Bottom Navigation"
+          className="fixed bottom-0 left-0 right-0 z-40 neu-dark-flat border-t border-[#F1E194]/20 py-1.5 px-2 flex justify-around items-center backdrop-blur-md animate-slide-up"
         >
-          <Home className="w-5 h-5 mb-0.5" />
-          <span>{tr('Home', 'होम')}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => handleSelectPage('shop')}
-          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-            currentPage === 'shop' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
-          }`}
-        >
-          <Store className="w-5 h-5 mb-0.5" />
-          <span>{tr('Shops', 'सैलून')}</span>
-        </button>
-
-        {isBarber ? (
           <button
             type="button"
-            onClick={() => handleSelectPage('barber-dashboard')}
-            className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-              currentPage === 'barber-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+            onClick={() => handleSelectPage('home')}
+            className={`flex flex-col items-center justify-center py-1.5 px-2 min-w-[56px] min-h-[48px] text-[11px] font-semibold transition-all duration-150 cursor-pointer active:scale-95 ${
+              currentPage === 'home' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
             }`}
           >
-            <div className="w-8 h-8 rounded-full bg-[#F1E194] text-[#111113] flex items-center justify-center -mt-3 mb-0.5 shadow-md">
-              <Scissors className="w-4 h-4" />
-            </div>
-            <span>{tr('Console', 'कंसोल')}</span>
+            <Home className="w-5 h-5 mb-0.5" />
+            <span>{tr('Home', 'होम')}</span>
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => handleSelectPage('booking')}
-            className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-              currentPage === 'booking' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
-            }`}
-          >
-            <div className="w-8 h-8 rounded-full bg-[#5B0E14] text-[#F1E194] flex items-center justify-center -mt-3 mb-0.5 shadow-md border border-[#F1E194]/40">
-              <Scissors className="w-4 h-4" />
-            </div>
-            <span>{tr('Book', 'बुक')}</span>
-          </button>
-        )}
 
-        {isBarber ? (
           <button
             type="button"
-            onClick={() => handleSelectPage('barber-dashboard')}
-            className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-              currentPage === 'barber-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+            onClick={() => handleSelectPage('shop')}
+            className={`flex flex-col items-center justify-center py-1.5 px-2 min-w-[56px] min-h-[48px] text-[11px] font-semibold transition-all duration-150 cursor-pointer active:scale-95 ${
+              currentPage === 'shop' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
             }`}
           >
-            <Calendar className="w-5 h-5 mb-0.5" />
-            <span>{tr('Salon', 'सैलून')}</span>
+            <Store className="w-5 h-5 mb-0.5" />
+            <span>{tr('Shops', 'सैलून')}</span>
           </button>
-        ) : (
+
+          {isBarber ? (
+            <button
+              type="button"
+              onClick={() => handleSelectPage('barber-dashboard')}
+              className={`flex flex-col items-center justify-center py-1.5 px-2 min-w-[56px] min-h-[48px] text-[11px] font-semibold transition-all duration-150 cursor-pointer active:scale-95 ${
+                currentPage === 'barber-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+              }`}
+            >
+              <div className="w-8 h-8 rounded-full bg-[#F1E194] text-[#111113] flex items-center justify-center -mt-3 mb-0.5 shadow-md">
+                <Scissors className="w-4 h-4" />
+              </div>
+              <span>{tr('Console', 'कंसोल')}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleSelectPage('booking')}
+              className={`flex flex-col items-center justify-center py-1.5 px-2 min-w-[56px] min-h-[48px] text-[11px] font-semibold transition-all duration-150 cursor-pointer active:scale-95 ${
+                currentPage === 'booking' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+              }`}
+            >
+              <div className="w-8 h-8 rounded-full bg-[#5B0E14] text-[#F1E194] flex items-center justify-center -mt-3 mb-0.5 shadow-md border border-[#F1E194]/40">
+                <Scissors className="w-4 h-4" />
+              </div>
+              <span>{tr('Book', 'बुक')}</span>
+            </button>
+          )}
+
+          {isBarber ? (
+            <button
+              type="button"
+              onClick={() => handleSelectPage('barber-dashboard')}
+              className={`flex flex-col items-center justify-center py-1.5 px-2 min-w-[56px] min-h-[48px] text-[11px] font-semibold transition-all duration-150 cursor-pointer active:scale-95 ${
+                currentPage === 'barber-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+              }`}
+            >
+              <Calendar className="w-5 h-5 mb-0.5" />
+              <span>{tr('Salon', 'सैलून')}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (!currentUserProfile) {
+                  setAuthMode('login');
+                  setAuthModalOpen(true);
+                } else {
+                  handleSelectPage('customer-dashboard');
+                }
+              }}
+              className={`flex flex-col items-center justify-center py-1.5 px-2 min-w-[56px] min-h-[48px] text-[11px] font-semibold transition-all duration-150 cursor-pointer active:scale-95 ${
+                currentPage === 'customer-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+              }`}
+            >
+              <Calendar className="w-5 h-5 mb-0.5" />
+              <span>{tr('Bookings', 'बुकिंग')}</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
               if (!currentUserProfile) {
                 setAuthMode('login');
                 setAuthModalOpen(true);
+              } else if (isOwnerAdmin) {
+                handleSelectPage('admin-dashboard');
+              } else if (userRole === 'barber' || userRole === 'shop_owner') {
+                handleSelectPage('barber-dashboard');
               } else {
-                handleSelectPage('customer-dashboard');
+                handleSelectPage('profile');
               }
             }}
-            className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-              currentPage === 'customer-dashboard' ? 'text-[#F1E194]' : 'text-[#8A8178] hover:text-[#FFF9E8]'
+            className={`flex flex-col items-center justify-center py-1.5 px-2 min-w-[56px] min-h-[48px] text-[11px] font-semibold transition-all duration-150 cursor-pointer active:scale-95 ${
+              currentPage === 'profile' || currentPage === 'admin-dashboard' || currentPage === 'barber-dashboard'
+                ? 'text-[#F1E194]'
+                : 'text-[#8A8178] hover:text-[#FFF9E8]'
             }`}
           >
-            <Calendar className="w-5 h-5 mb-0.5" />
-            <span>{tr('Bookings', 'बुकिंग')}</span>
+            <User className="w-5 h-5 mb-0.5" />
+            <span>{tr('Profile', 'प्रोफ़ाइल')}</span>
           </button>
-        )}
-
-        <button
-          type="button"
-          onClick={() => {
-            if (!currentUserProfile) {
-              setAuthMode('login');
-              setAuthModalOpen(true);
-            } else if (isOwnerAdmin) {
-              handleSelectPage('admin-dashboard');
-            } else if (userRole === 'barber' || userRole === 'shop_owner') {
-              handleSelectPage('barber-dashboard');
-            } else {
-              handleSelectPage('profile');
-            }
-          }}
-          className={`flex flex-col items-center justify-center py-1 px-2 min-w-[56px] text-[11px] font-semibold transition-colors cursor-pointer ${
-            currentPage === 'profile' || currentPage === 'admin-dashboard' || currentPage === 'barber-dashboard'
-              ? 'text-[#F1E194]'
-              : 'text-[#8A8178] hover:text-[#FFF9E8]'
-          }`}
-        >
-          <User className="w-5 h-5 mb-0.5" />
-          <span>{tr('Profile', 'प्रोफ़ाइल')}</span>
-        </button>
-      </nav>
+        </nav>
+      )}
     </>
   );
 };

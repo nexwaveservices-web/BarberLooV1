@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { db } from './index.ts';
 import {
   users,
@@ -20,6 +21,10 @@ import {
   platformSettings,
   barberPayouts,
   financialLedger,
+  barberEarningsLedger,
+  barberWithdrawalRequests,
+  barberPayoutBeneficiaries,
+  financialAuditLogs,
 } from './schema.ts';
 import { eq, asc, desc, and, sql } from 'drizzle-orm';
 import { ASSETS } from '../data/barberlooData.ts';
@@ -1488,6 +1493,29 @@ export async function verifyAndCompleteAppointmentInDb(
       metadata: { verifiedBy, completedAt: now.toISOString() },
     });
 
+    // Record verified earnings credit in barber_earnings_ledger
+    const belTxnId = `txn-bel-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    await tx.insert(barberEarningsLedger).values({
+      id: `bel-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+      barberId: appointment.barberId,
+      shopId: appointment.shopId || 'shop-1',
+      appointmentId,
+      transactionId: belTxnId,
+      transactionType: 'appointment_earnings',
+      entryType: 'CREDIT',
+      amount: barberShare,
+      balanceAfter: barberShare,
+      status: 'available',
+      description: `Appointment earnings: ${appointment.serviceName} (${appointment.clientName})`,
+      paymentReference: appointment.razorpayPaymentId || `pay-${appointmentId}`,
+      metadataJson: JSON.stringify({
+        servicePrice: appointment.servicePrice,
+        platformFee: appointment.platformFee,
+        totalPrice: appointment.price,
+        verifiedBy,
+      }),
+    });
+
     // Execute / Initiate Provider Payout Transfer (Razorpay Route)
     const payoutId = `payout-${appointmentId}`;
     const transferResult = await executeBarberPayoutTransfer(tx, payoutId);
@@ -1810,6 +1838,28 @@ export async function processAppointmentRefund(
           { account: 'customer_funds_escrow', entryType: 'CREDIT', amount: totalPrice },
         ],
         metadata: { reason, refundAfterPayout: true },
+      });
+
+      // Debit barber earnings ledger for refund adjustment
+      const refBelTxnId = `txn-bel-ref-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      await tx.insert(barberEarningsLedger).values({
+        id: `bel-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+        barberId: appointment.barberId,
+        shopId: appointment.shopId || 'shop-1',
+        appointmentId,
+        transactionId: refBelTxnId,
+        transactionType: 'refund_adjustment',
+        entryType: 'DEBIT',
+        amount: barberShare,
+        balanceAfter: 0,
+        status: 'completed',
+        description: `Refund adjustment for booking #${appointmentId} (${appointment.clientName}) - Reason: ${reason}`,
+        paymentReference: razorpayRefundId || `ref-${appointmentId}`,
+        metadataJson: JSON.stringify({
+          appointmentId,
+          reason,
+          refundedBy: adminContext.name || adminContext.uid,
+        }),
       });
     } else {
       // Standard refund before payout release

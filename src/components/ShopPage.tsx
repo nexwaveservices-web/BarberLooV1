@@ -1397,7 +1397,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                     {tr('Direct Phone Contact', 'सीधा संपर्क नंबर')}
                   </span>
                   <p className="font-mono-num font-medium text-[#F1E194]">
-                    {activeShop.phone || '+91 98765 43210'}
+                    {activeShop.phone || '+91 73555 42644'}
                   </p>
                   <p className="text-[#8A8178]">
                     {tr('Call for inquiries or directions', 'दिशा-निर्देश या पूछताछ के लिए कॉल करें')}

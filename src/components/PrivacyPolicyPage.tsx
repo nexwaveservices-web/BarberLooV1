@@ -242,8 +242,8 @@ export const PrivacyPolicyPage: React.FC<PrivacyPolicyPageProps> = ({ onNavigate
                   </p>
                   <p className="text-xs text-[#5B524A] leading-relaxed">
                     {tr(
-                      'Razorpay order IDs, payment transaction IDs, collected amounts in INR (₹), platform convenience fees, escrow ledger records, and refund logs. We never store credit/debit card PINs or CVV numbers.',
-                      'रेज़रपे ऑर्डर आईडी, भारतीय रुपये (₹) में लेनदेन आईडी, प्लेटफ़ॉर्म शुल्क और रिफ़ंड लॉग। हम कभी भी कार्ड पिन या सीवीवी संग्रहीत नहीं करते।'
+                      'Razorpay order IDs, payment transaction IDs, collected amounts in INR (₹), platform convenience fees, escrow ledger records, and refund logs. For salon partners: bank names, IFSC codes, and encrypted bank account numbers (AES-256-GCM) with masked presentation (•••• •••• •••• 1234) strictly for payout disbursement. We never store credit/debit card PINs or CVV numbers.',
+                      'रेज़रपे ऑर्डर आईडी, भारतीय रुपये (₹) में लेनदेन आईडी, प्लेटफ़ॉर्म शुल्क और रिफ़ंड लॉग। सैलून पार्टनर्स के लिए: बैंक नाम, आईएफएससी कोड, और एन्क्रिप्टेड बैंक खाता नंबर केवल भुगतान वितरण हेतु। हम कभी भी कार्ड पिन या सीवीवी संग्रहीत नहीं करते।'
                     )}
                   </p>
                 </div>

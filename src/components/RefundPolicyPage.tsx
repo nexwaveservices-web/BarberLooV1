@@ -364,22 +364,46 @@ export const RefundPolicyPage: React.FC<RefundPolicyPageProps> = ({ onNavigate }
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <a
-                      href="mailto:refunds@barberloo.in"
+                      href="mailto:nexwaveservices@gmail.com"
                       className="px-3.5 py-2 rounded-[12px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold flex items-center gap-1.5"
                     >
                       <Mail className="w-3.5 h-3.5" />
-                      <span>refunds@barberloo.in</span>
+                      <span>nexwaveservices@gmail.com</span>
                     </a>
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('contact-us')}
+                    <a
+                      href="tel:+917355542644"
                       className="px-3.5 py-2 rounded-[12px] bg-[#111113] text-[#F1E194] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                     >
                       <Phone className="w-3.5 h-3.5" />
-                      <span>{tr('Contact Support', 'सहायता केंद्र')}</span>
-                    </button>
+                      <span>+91 73555 42644</span>
+                    </a>
                   </div>
                 </div>
+              </div>
+            </section>
+
+            {/* Section 8: Barber Earnings & Payout Reconciliation */}
+            <section id="barber-reconciliation" className="space-y-4 pt-4 border-t border-[#5B0E14]/10">
+              <div className="flex items-center gap-2.5 text-[#5B0E14]">
+                <RotateCcw className="w-5 h-5 shrink-0" />
+                <h2 className="font-display text-xl sm:text-2xl font-bold text-[#111113]">
+                  {tr('8. Salon Partner & Barber Earnings Reconciliation', '8. सैलून पार्टनर और बार्बर कमाई समाधान')}
+                </h2>
+              </div>
+              <p className="text-sm text-neutral-700 leading-relaxed">
+                {tr(
+                  'When an appointment is cancelled or refunded under this policy, corresponding adjustments are posted to the BarberLo immutable financial ledger. Pending earnings for non-rendered appointments are cancelled. If a refund occurs after service verification, a corresponding debit adjustment is logged in the barber’s earnings ledger. Partner payouts require a minimum available balance of ₹100 and follow our dedicated Barber Earnings & Withdrawal Policy.',
+                  'जब इस नीति के तहत कोई अपॉइंटमेंट रद्द या रिफंड किया जाता है, तो बारबरलू वित्तीय लेज़र में समायोजन दर्ज किया जाता है। अपूर्ण अपॉइंटमेंट्स की लंबित कमाई रद्द कर दी जाती है। बार्बर पेआउट के लिए न्यूनतम ₹100 उपलब्ध शेष राशि अनिवार्य है।'
+                )}
+              </p>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => onNavigate('barber-earnings-policy')}
+                  className="px-4 py-2 rounded-xl bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold hover:bg-[#380A12] transition-all cursor-pointer inline-flex items-center gap-2"
+                >
+                  <span>{tr('Read Barber Earnings & Withdrawal Policy →', 'बार्बर कमाई एवं भुगतान नीति पढ़ें →')}</span>
+                </button>
               </div>
             </section>
           </main>

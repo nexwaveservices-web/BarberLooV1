@@ -29,6 +29,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { GetDirectionsModal } from './GetDirectionsModal';
+import { useDevice } from '../lib/deviceDetection';
 import {
   useLanguage,
   getUpcomingISTDates,
@@ -110,6 +111,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   platformSettings,
 }) => {
   const { lang, tr, formatINR, translateService } = useLanguage();
+  const device = useDevice();
   const istDates = useMemo(() => getUpcomingISTDates(7, lang), [lang]);
 
   const [activeCustomerSection, setActiveCustomerSection] = useState<
@@ -450,7 +452,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
         {/* Real Customer Overview KPI Grid (Section 3 Requirement) */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm hover-lift hover-glow-gold animate-card-enter delay-50">
             <Calendar className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {totalCustomerBookingsCount}
@@ -460,7 +462,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm hover-lift hover-glow-gold animate-card-enter delay-100">
             <Clock className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-mono-num text-2xl sm:text-3xl font-bold text-[#F1E194]">
               {upcomingCustomerBookingsCount}
@@ -470,7 +472,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm hover-lift hover-glow-gold animate-card-enter delay-150">
             <ShieldCheck className="w-4 h-4 text-emerald-400 mb-2" />
             <div className="font-mono-num text-2xl sm:text-3xl font-bold text-emerald-300">
               {completedCustomerBookingsCount}
@@ -480,7 +482,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm hover-lift hover-glow-gold animate-card-enter delay-200">
             <XCircle className="w-4 h-4 text-rose-400 mb-2" />
             <div className="font-mono-num text-2xl sm:text-3xl font-bold text-rose-300">
               {cancelledCustomerBookingsCount}
@@ -490,7 +492,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             </div>
           </div>
 
-          <div className="col-span-2 sm:col-span-1 rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm">
+          <div className="col-span-2 sm:col-span-1 rounded-[20px] bg-[#241719] border border-[#F1E194]/25 p-4 sm:p-5 shadow-sm hover-lift hover-glow-gold animate-card-enter delay-250">
             <CreditCard className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-mono-num text-2xl sm:text-3xl font-bold text-[#F1E194]">
               {formatINR(verifiedCustomerPaidSumINR)}
@@ -506,9 +508,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           <button
             type="button"
             onClick={() => setActiveCustomerSection('bookings')}
-            className={`px-6 py-3 rounded-[18px] text-xs font-semibold cursor-pointer transition-colors inline-flex items-center gap-2 ${
+            className={`min-h-[44px] px-5 sm:px-6 py-2.5 rounded-[18px] text-xs font-semibold cursor-pointer transition-all duration-150 active-press inline-flex items-center gap-2 ${
               activeCustomerSection === 'bookings'
-                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md'
+                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md hover:bg-[#7E151E]'
                 : 'bg-[#E9D9B8]/70 text-[#111113] hover:bg-[#E9D9B8]'
             }`}
           >
@@ -528,9 +530,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           <button
             type="button"
             onClick={() => setActiveCustomerSection('payments')}
-            className={`px-6 py-3 rounded-[18px] text-xs font-semibold cursor-pointer transition-colors inline-flex items-center gap-2 ${
+            className={`min-h-[44px] px-5 sm:px-6 py-2.5 rounded-[18px] text-xs font-semibold cursor-pointer transition-all duration-150 active-press inline-flex items-center gap-2 ${
               activeCustomerSection === 'payments'
-                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md'
+                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md hover:bg-[#7E151E]'
                 : 'bg-[#E9D9B8]/70 text-[#111113] hover:bg-[#E9D9B8]'
             }`}
           >
@@ -550,9 +552,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           <button
             type="button"
             onClick={() => setActiveCustomerSection('profile')}
-            className={`px-6 py-3 rounded-[18px] text-xs font-semibold cursor-pointer transition-colors inline-flex items-center gap-2 ${
+            className={`min-h-[44px] px-5 sm:px-6 py-2.5 rounded-[18px] text-xs font-semibold cursor-pointer transition-all duration-150 active-press inline-flex items-center gap-2 ${
               activeCustomerSection === 'profile'
-                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md'
+                ? 'bg-[#5B0E14] text-[#FFF9E8] shadow-md hover:bg-[#7E151E]'
                 : 'bg-[#E9D9B8]/70 text-[#111113] hover:bg-[#E9D9B8]'
             }`}
           >
@@ -1635,9 +1637,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#8A8178] block">
                   {tr('Customer Support & Refunds', 'सहायता व रिफ़ंड')}
                 </span>
-                <span className="text-xs font-semibold text-[#F1E194] mt-2 block">
-                  support@barberloo.in
-                </span>
+                <a
+                  href="mailto:nexwaveservices@gmail.com"
+                  className="text-xs font-semibold text-[#F1E194] hover:underline mt-2 block"
+                >
+                  nexwaveservices@gmail.com
+                </a>
+                <a
+                  href="tel:+917355542644"
+                  className="text-xs text-[#FFF9E8]/90 hover:text-[#F1E194] mt-1 block font-mono-num"
+                >
+                  +91 73555 42644
+                </a>
                 <span className="text-[11px] text-[#8A8178] mt-1 block">
                   {tr('24x7 Booking & Payment Assistance', '24x7 बुकिंग सहायता')}
                 </span>

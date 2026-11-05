@@ -47,6 +47,20 @@ async function runQaSuite() {
         ilike(appointments.clientName, '%QA Test%')
       )
     );
+    await db.delete(payments).where(
+      or(
+        like(payments.customerUid, 'test-%'),
+        like(payments.customerUid, '%qa%'),
+        like(payments.id, '%qa%')
+      )
+    );
+    await db.delete(barberPayouts).where(
+      or(
+        like(barberPayouts.customerUid, 'test-%'),
+        like(barberPayouts.barberId, 'test-%')
+      )
+    );
+    await db.delete(financialLedger).where(like(financialLedger.referenceId, '%test%'));
     await db.delete(services).where(eq(services.name, 'QA Test Service'));
     await db.delete(coupons).where(eq(coupons.code, 'QAWELCOME20'));
     await db.delete(profiles).where(
@@ -896,6 +910,26 @@ async function runQaSuite() {
             like(appointments.customerUid, 'test-%')
           )
         );
+      await db
+        .delete(payments)
+        .where(
+          or(
+            eq(payments.customerUid, testCustomerUid),
+            like(payments.customerUid, 'test-%'),
+            like(payments.customerUid, '%qa%'),
+            like(payments.id, '%qa%')
+          )
+        );
+      await db
+        .delete(barberPayouts)
+        .where(
+          or(
+            eq(barberPayouts.customerUid, testCustomerUid),
+            like(barberPayouts.customerUid, 'test-%'),
+            like(barberPayouts.barberId, 'test-%')
+          )
+        );
+      await db.delete(financialLedger).where(like(financialLedger.referenceId, '%test%'));
       await db
         .delete(services)
         .where(eq(services.name, 'QA Test Service'));

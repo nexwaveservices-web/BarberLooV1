@@ -11,28 +11,44 @@ import { DEFAULT_STATES, DEFAULT_CITIES } from './locations';
 import { getShopQrDestinationUrl } from './domain';
 import { getRazorpayKey } from './razorpay';
 
+export function getBackendBaseUrl(): string {
+  return (
+    (import.meta as any).env?.VITE_BACKEND_URL ||
+    (typeof window !== 'undefined' && (window as any).BARBERLOO_BACKEND_URL) ||
+    ''
+  ).replace(/\/$/, '');
+}
+
+export async function backendFetch(
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const token = await getAuthToken();
+  const headers: Record<string, string> = {
+    ...((options.headers as Record<string, string>) || {}),
+  };
+  if (token && !headers.Authorization && !headers.authorization) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const base = getBackendBaseUrl();
+  const targetUrl = base ? `${base}${path}` : path;
+  return fetch(targetUrl, {
+    credentials: base ? 'include' : 'same-origin',
+    ...options,
+    headers,
+  });
+}
+
 async function safeBackendRequest<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T | null> {
   try {
-    const token = await getAuthToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...((options.headers as Record<string, string>) || {}),
     };
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    const backendBase =
-      (import.meta as any).env?.VITE_BACKEND_URL ||
-      (typeof window !== 'undefined' && (window as any).BARBERLOO_BACKEND_URL) ||
-      '';
-    const targetUrl = backendBase ? `${backendBase.replace(/\/$/, '')}${path}` : path;
-
-    const response = await fetch(targetUrl, {
-      credentials: backendBase ? 'include' : 'same-origin',
+    const response = await backendFetch(path, {
       ...options,
       headers,
     });
@@ -1952,28 +1968,39 @@ export async function apiVerifyRazorpayPayment(payload: {
   razorpay_signature?: string;
 }): Promise<{ verified: boolean; paymentId: string; error?: string }> {
   try {
-    // 1. Try Node.js backend
-    let res = await safeBackendRequest<any>('/api/payments/razorpay/verify', {
+    // 1. Primary path: Dedicated Node.js backend
+    const res = await backendFetch('/api/payments/razorpay/verify', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-
-    // 2. Try WordPress REST API bridge (for WP Pusher on InfinityFree)
-    if (!res?.verified) {
-      res = await safeBackendRequest<any>('/wp-json/barberloo/v1/verify-razorpay-payment', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.verified) {
+      return data;
     }
 
-    if (res?.verified) {
-      return res;
+    // 2. Secondary path: WordPress REST API bridge (only if backendBase is unset)
+    if (!getBackendBaseUrl()) {
+      const wpRes = await fetch('/wp-json/barberloo/v1/verify-razorpay-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const wpData = await wpRes.json().catch(() => null);
+      if (wpRes.ok && wpData?.verified) {
+        return wpData;
+      }
+      return {
+        verified: false,
+        paymentId: payload.razorpay_payment_id,
+        error: wpData?.error || data?.error || 'Payment signature verification failed on server.',
+      };
     }
 
     return {
       verified: false,
       paymentId: payload.razorpay_payment_id,
-      error: res?.error || 'Payment signature verification failed on server.',
+      error: data?.error || 'Payment signature verification failed on server.',
     };
   } catch (err: any) {
     return {
@@ -1992,24 +2019,26 @@ export async function apiVerifyCompletionOtp(appointmentId: string, otp: string)
   const cleanOtp = String(otp || '').trim();
   // 1. Primary path: Node.js backend
   try {
-    const token = await getAuthToken();
-    const res = await fetch(`/api/appointments/${appointmentId}/verify-completion-otp`, {
+    const res = await backendFetch(`/api/appointments/${appointmentId}/verify-completion-otp`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ otp: cleanOtp }),
     });
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
       return data;
     }
-  } catch {
-    // fall through to Supabase direct verification
+    const errData = await res.json().catch(() => ({}));
+    if (errData?.error) {
+      throw new Error(errData.error);
+    }
+  } catch (backendErr: any) {
+    if (getBackendBaseUrl()) {
+      throw backendErr;
+    }
   }
 
-  // 2. Resilient Fallback: Supabase direct verification (for InfinityFree / static hosting)
+  // 2. Supabase direct verification fallback (only when backend is unconfigured)
   try {
     const { data: apt } = await supabase
       .from('appointments')
@@ -2023,7 +2052,7 @@ export async function apiVerifyCompletionOtp(appointmentId: string, otp: string)
         (apt.notes && apt.notes.includes(`[OTP:${cleanOtp}]`)) ||
         (apt.completion_otp && String(apt.completion_otp).trim() === cleanOtp);
 
-      if (matchInNotes || cleanOtp.length >= 4) {
+      if (matchInNotes) {
         await supabase
           .from('appointments')
           .update({
@@ -2045,17 +2074,13 @@ export async function apiVerifyCompletionOtp(appointmentId: string, otp: string)
     // ignore
   }
 
-  throw new Error('Invalid Customer Completion OTP. Please verify the code with your client.');
+  throw new Error('Invalid Customer Completion OTP. Please verify the 6-digit code with your client.');
 }
 
 export async function apiRegenerateCompletionOtp(appointmentId: string) {
-  const token = await getAuthToken();
-  const res = await fetch(`/api/appointments/${appointmentId}/regenerate-completion-otp`, {
+  const res = await backendFetch(`/api/appointments/${appointmentId}/regenerate-completion-otp`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json' },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -2065,12 +2090,7 @@ export async function apiRegenerateCompletionOtp(appointmentId: string) {
 }
 
 export async function apiGetCompletionOtp(appointmentId: string) {
-  const token = await getAuthToken();
-  const res = await fetch(`/api/appointments/${appointmentId}/completion-otp`, {
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  const res = await backendFetch(`/api/appointments/${appointmentId}/completion-otp`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || 'Failed to fetch OTP.');
@@ -2079,49 +2099,30 @@ export async function apiGetCompletionOtp(appointmentId: string) {
 }
 
 export async function apiGetAdminFinancialOverview() {
-  const token = await getAuthToken();
-  const res = await fetch('/api/admin/financial-overview', {
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  const res = await backendFetch('/api/admin/financial-overview');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Failed to fetch financial overview.');
   return data;
 }
 
 export async function apiGetAdminFinancialLedger() {
-  const token = await getAuthToken();
-  const res = await fetch('/api/admin/financial-ledger', {
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  const res = await backendFetch('/api/admin/financial-ledger');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Failed to fetch financial ledger.');
   return data;
 }
 
 export async function apiGetAdminPayouts() {
-  const token = await getAuthToken();
-  const res = await fetch('/api/admin/payouts', {
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  const res = await backendFetch('/api/admin/payouts');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Failed to fetch payouts.');
   return data;
 }
 
 export async function apiTogglePayoutHold(payoutId: string, hold: boolean, reason?: string) {
-  const token = await getAuthToken();
-  const res = await fetch(`/api/payouts/${payoutId}/hold`, {
+  const res = await backendFetch(`/api/payouts/${payoutId}/hold`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ hold, reason }),
   });
   const data = await res.json().catch(() => ({}));
@@ -2130,13 +2131,9 @@ export async function apiTogglePayoutHold(payoutId: string, hold: boolean, reaso
 }
 
 export async function apiRetryPayout(payoutId: string) {
-  const token = await getAuthToken();
-  const res = await fetch(`/api/payouts/${payoutId}/retry`, {
+  const res = await backendFetch(`/api/payouts/${payoutId}/retry`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json' },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Failed to retry payout.');
@@ -2144,17 +2141,99 @@ export async function apiRetryPayout(payoutId: string) {
 }
 
 export async function apiProcessRefund(appointmentId: string, reason: string) {
-  const token = await getAuthToken();
-  const res = await fetch(`/api/appointments/${appointmentId}/refund`, {
+  const res = await backendFetch(`/api/appointments/${appointmentId}/refund`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Failed to process refund.');
+  return data;
+}
+
+// -------------------------------------------------------------
+// Barber Earnings Ledger & Withdrawal Management API Helpers
+// -------------------------------------------------------------
+
+export async function apiGetBarberEarnings(barberId?: string) {
+  const query = barberId ? `?barberId=${encodeURIComponent(barberId)}` : '';
+  const res = await backendFetch(`/api/barber/earnings${query}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch barber earnings summary.');
+  return data;
+}
+
+export async function apiGetBarberBankAccount(barberId?: string) {
+  const query = barberId ? `?barberId=${encodeURIComponent(barberId)}` : '';
+  const res = await backendFetch(`/api/barber/bank-account${query}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch bank account details.');
+  return data;
+}
+
+export async function apiSaveBarberBankAccount(payload: {
+  accountHolderName: string;
+  bankName: string;
+  accountNumber: string;
+  confirmAccountNumber?: string;
+  ifsc: string;
+}) {
+  const res = await backendFetch('/api/barber/bank-account', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to save bank account details.');
+  return data;
+}
+
+export async function apiSubmitBarberWithdrawal(payload: {
+  amount: number;
+  notes?: string;
+  idempotencyKey?: string;
+}) {
+  const res = await backendFetch('/api/barber/withdrawals', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to submit withdrawal request.');
+  return data;
+}
+
+export async function apiGetBarberWithdrawals(barberId?: string) {
+  const query = barberId ? `?barberId=${encodeURIComponent(barberId)}` : '';
+  const res = await backendFetch(`/api/barber/withdrawals${query}`);
+  const data = await res.json().catch(() => ([]));
+  if (!res.ok) throw new Error((data as any).error || 'Failed to fetch withdrawals.');
+  return data;
+}
+
+export async function apiGetAdminPayoutsManagement() {
+  const res = await backendFetch('/api/admin/payouts-management');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to load payout management.');
+  return data;
+}
+
+export async function apiUpdateAdminPayoutStatus(
+  id: string,
+  payload: {
+    status: 'under_review' | 'approved' | 'processing' | 'paid' | 'rejected' | 'failed';
+    rejectionReason?: string;
+    utrReference?: string;
+    notes?: string;
+  }
+) {
+  const res = await backendFetch(`/api/admin/payouts/${id}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to update payout status.');
   return data;
 }
 

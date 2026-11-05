@@ -45,6 +45,8 @@ import {
 } from '../lib/sla';
 import { getShopQrDestinationUrl, getProductionDomain } from '../lib/domain';
 import { SalonQrModal } from './SalonQrModal';
+import { AdminPayoutManagement } from './AdminPayoutManagement';
+import { useDevice } from '../lib/deviceDetection';
 
 interface AdminDashboardProps {
   appointments: AppointmentItem[];
@@ -105,11 +107,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onCancelAppointment,
 }) => {
   const { lang, tr, formatINR } = useLanguage();
+  const device = useDevice();
   const istNow = getCurrentISTDisplay(lang);
 
   const [activeSection, setActiveSection] = useState<
     | 'overview'
     | 'appointments'
+    | 'barber_payouts'
     | 'fee_settings'
     | 'sla'
     | 'users'
@@ -657,7 +661,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Real Platform KPIs (Section 5 Requirement: 10 Comprehensive Platform Metrics) */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <Users className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {profiles.length}
@@ -669,7 +673,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <Store className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {shops.length}
@@ -681,7 +685,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <Calendar className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {appointments.length}
@@ -693,7 +697,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <ShieldCheck className="w-4 h-4 text-emerald-400 mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-emerald-300">
               {completedBookingsCount}
@@ -704,7 +708,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <CreditCard className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#F1E194]">
               {formatINR(totalPlatformFeesINR)}
@@ -714,7 +718,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <TrendingUp className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {formatINR(totalGmvINR)}
@@ -724,7 +728,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <CreditCard className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-emerald-400">
               {verifiedPaymentsCount}
@@ -735,7 +739,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <CreditCard className="w-4 h-4 text-amber-400 mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#F1E194]">
               {formatINR(pendingPayoutsINR)}
@@ -745,7 +749,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <Tag className="w-4 h-4 text-[#F1E194] mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-[#FFF9E8]">
               {coupons.length}
@@ -755,7 +759,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5">
+          <div className="rounded-[20px] bg-[#241719] border border-[#F1E194]/20 p-4 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F1E194]/40 hover:shadow-lg">
             <AlertTriangle className="w-4 h-4 text-rose-400 mb-2" />
             <div className="font-display font-mono-num text-2xl sm:text-3xl font-bold text-rose-300">
               {pendingRefundsCount}
@@ -771,6 +775,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {[
             { id: 'overview', label: tr('Executive Overview', 'कार्यकारी अवलोकन') },
             { id: 'appointments', label: tr(`Appointments (${appointments.length})`, `अपॉइंटमेंट्स (${appointments.length})`) },
+            { id: 'barber_payouts', label: tr('BARBER PAYOUT MANAGEMENT', 'बार्बर भुगतान प्रबंधन') },
             { id: 'fee_settings', label: tr('Platform Fee & Financials', 'प्लेटफ़ॉर्म शुल्क व राजस्व') },
             { id: 'sla', label: tr(`🛡️ SLA Governance (${platformSla.overallScorePercent}%)`, `🛡️ SLA प्रबंधन (${platformSla.overallScorePercent}%)`) },
             { id: 'users', label: tr('Users & Barber Verification', 'उपयोगकर्ता और बार्बर सत्यापन') },
@@ -786,10 +791,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setActiveSection(tab.id as any)}
-              className={`px-5 py-2.5 rounded-[14px] text-xs font-semibold cursor-pointer ${
+              className={`min-h-[44px] px-4 sm:px-5 py-2.5 rounded-[14px] text-xs font-semibold cursor-pointer transition-all duration-150 active:scale-98 ${
                 activeSection === tab.id
-                  ? 'bg-[#F1E194] text-[#111113]'
-                  : 'bg-[#241719] text-[#FFF9E8]/80 border border-[#F1E194]/15'
+                  ? 'bg-[#F1E194] text-[#111113] shadow-md font-bold'
+                  : 'bg-[#241719] text-[#FFF9E8]/80 border border-[#F1E194]/15 hover:text-[#FFF9E8] hover:border-[#F1E194]/30'
               }`}
             >
               {tab.label}
@@ -1824,6 +1829,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </form>
           </div>
+        )}
+
+        {/* BARBER PAYOUT MANAGEMENT */}
+        {activeSection === 'barber_payouts' && (
+          <AdminPayoutManagement />
         )}
 
         {/* PLATFORM FEE & FINANCIAL REVENUE GOVERNANCE */}

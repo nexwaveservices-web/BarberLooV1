@@ -118,6 +118,15 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <li>
                 <button
                   type="button"
+                  onClick={() => handleNav('barber-earnings-policy')}
+                  className="hover:text-[#F1E194] transition-colors cursor-pointer text-xs"
+                >
+                  {tr('Barber Earnings & Payout Policy', 'बार्बर कमाई एवं भुगतान नीति')}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
                   onClick={() => handleNav('terms-of-service')}
                   className="hover:text-[#F1E194] transition-colors cursor-pointer text-xs"
                 >
@@ -139,16 +148,16 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                 09:30 – 21:30 IST
               </span>
               <a
-                href="mailto:support@barberloo.in"
+                href="mailto:nexwaveservices@gmail.com"
                 className="text-[#F1E194] hover:underline block mt-1"
               >
-                support@barberloo.in
+                nexwaveservices@gmail.com
               </a>
               <a
-                href="tel:+919876543210"
+                href="tel:+917355542644"
                 className="text-[#FFF9E8]/80 hover:text-[#F1E194] block mt-0.5"
               >
-                +91 98765 43210
+                +91 73555 42644
               </a>
             </p>
           </div>

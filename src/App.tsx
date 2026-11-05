@@ -21,6 +21,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { TermsOfServicePage } from './components/TermsOfServicePage';
 import { RefundPolicyPage } from './components/RefundPolicyPage';
+import { BarberEarningsPolicyPage } from './components/BarberEarningsPolicyPage';
 import { DisclaimerPage } from './components/DisclaimerPage';
 import { AboutUsPage } from './components/AboutUsPage';
 import { ContactUsPage } from './components/ContactUsPage';
@@ -62,6 +63,7 @@ import {
   setPersistedSupabaseUser,
 } from './lib/supabase';
 import { LanguageProvider } from './lib/i18n';
+import { DeviceProvider } from './lib/deviceDetection';
 import { getShopSlug, findShopBySlugOrId } from './lib/domain';
 import {
   registerNotificationServiceWorker,
@@ -326,6 +328,19 @@ export default function App() {
         params.get('page') === 'return-policy'
       ) {
         setCurrentPage('refund-policy');
+        return;
+      }
+      if (
+        pathname === '/barber-earnings-policy' ||
+        pathname === '/barber-earnings-policy/' ||
+        pathname === '/payout-policy' ||
+        pathname === '/payout-policy/' ||
+        pathname === '/earnings-policy' ||
+        pathname === '/earnings-policy/' ||
+        params.get('page') === 'barber-earnings-policy' ||
+        params.get('page') === 'payout-policy'
+      ) {
+        setCurrentPage('barber-earnings-policy');
         return;
       }
       if (
@@ -920,8 +935,9 @@ export default function App() {
 
   return (
     <LanguageProvider>
-      <div className="min-h-screen flex flex-col bg-[#EFE9DD] text-[#111113] selection:bg-[#5B0E14] selection:text-[#FFF9E8]">
-        <Navbar
+      <DeviceProvider>
+        <div className="min-h-screen flex flex-col bg-[#EFE9DD] text-[#111113] selection:bg-[#5B0E14] selection:text-[#FFF9E8]">
+          <Navbar
           currentPage={currentPage}
           onNavigate={handleNavigate}
           currentUserProfile={currentUserProfile}
@@ -931,7 +947,8 @@ export default function App() {
         />
 
         <main className="flex-1 pb-20 lg:pb-0">
-          {currentPage === 'home' && (
+          <div key={currentPage} className="animate-fade-in flex-1">
+            {currentPage === 'home' && (
             <HomePage
               onNavigate={handleNavigate}
               onSelectServiceForBooking={(srv) => setBookingService(srv)}
@@ -1115,6 +1132,13 @@ export default function App() {
             <RefundPolicyPage onNavigate={handleNavigate} />
           )}
 
+          {currentPage === 'barber-earnings-policy' && (
+            <BarberEarningsPolicyPage
+              onNavigateHome={() => handleNavigate('home')}
+              onNavigateBarberDashboard={() => handleNavigate('barber-dashboard')}
+            />
+          )}
+
           {currentPage === 'disclaimer' && (
             <DisclaimerPage onNavigate={handleNavigate} />
           )}
@@ -1129,7 +1153,8 @@ export default function App() {
               currentUserProfile={currentUserProfile}
             />
           )}
-        </main>
+        </div>
+      </main>
 
         <EasyBar
           onNavigate={handleNavigate}
@@ -1142,8 +1167,9 @@ export default function App() {
           )}
         />
 
-        <Footer onNavigate={handleNavigate} />
-      </div>
+          <Footer onNavigate={handleNavigate} />
+        </div>
+      </DeviceProvider>
     </LanguageProvider>
   );
 }

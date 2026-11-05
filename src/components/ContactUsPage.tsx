@@ -94,7 +94,7 @@ export const ContactUsPage: React.FC<ContactUsPageProps> = ({
       setSubmitted(true);
       setMessage('');
     } catch {
-      setErrorMessage(tr('Could not send message. Please email support@barberloo.in directly.', 'संदेश नहीं भेजा जा सका। कृपया support@barberloo.in पर ईमेल करें।'));
+      setErrorMessage(tr('Could not send message. Please email nexwaveservices@gmail.com directly.', 'संदेश नहीं भेजा जा सका। कृपया nexwaveservices@gmail.com पर ईमेल करें।'));
     } finally {
       setSubmitting(false);
     }
@@ -158,10 +158,10 @@ export const ContactUsPage: React.FC<ContactUsPageProps> = ({
                       {tr('Customer Support & Inquiries', 'ग्राहक सहायता एवं पूछताछ')}
                     </p>
                     <a
-                      href="mailto:support@barberloo.in"
+                      href="mailto:nexwaveservices@gmail.com"
                       className="text-[#5B0E14] hover:underline font-semibold text-sm block mt-0.5"
                     >
-                      support@barberloo.in
+                      nexwaveservices@gmail.com
                     </a>
                     <p className="text-[#8A8178] mt-0.5">{tr('Average response within 2 hours', 'औसतन 2 घंटे में उत्तर')}</p>
                   </div>
@@ -177,10 +177,10 @@ export const ContactUsPage: React.FC<ContactUsPageProps> = ({
                       {tr('Salon & Barber Partnerships', 'सैलून एवं बार्बर पार्टनरशिप')}
                     </p>
                     <a
-                      href="mailto:partners@barberloo.in"
+                      href="mailto:nexwaveservices@gmail.com"
                       className="text-[#5B0E14] hover:underline font-semibold text-sm block mt-0.5"
                     >
-                      partners@barberloo.in
+                      nexwaveservices@gmail.com
                     </a>
                     <p className="text-[#8A8178] mt-0.5">{tr('Dedicated salon onboarding team', 'सैलून ऑनबोर्डिंग डेस्क')}</p>
                   </div>
@@ -196,10 +196,10 @@ export const ContactUsPage: React.FC<ContactUsPageProps> = ({
                       {tr('Customer Care & WhatsApp Desk', 'कस्टमर केयर एवं व्हाट्सएप')}
                     </p>
                     <a
-                      href="tel:+919876543210"
+                      href="tel:+917355542644"
                       className="text-[#5B0E14] hover:underline font-semibold text-sm block mt-0.5"
                     >
-                      +91 98765 43210
+                      +91 73555 42644
                     </a>
                     <p className="text-[#8A8178] mt-0.5">{tr('Standard Operating Hours: 09:30 – 21:30 IST', 'समय: सुबह 09:30 – रात 09:30 IST')}</p>
                   </div>

@@ -208,6 +208,7 @@ function barberloo_render_application($full_viewport = true) {
     <div id="root"></div>
     <script>
       window.BARBERLOO_RAZORPAY_KEY_ID = "<?php echo esc_js(defined('RAZORPAY_KEY_ID') ? RAZORPAY_KEY_ID : get_option('barberloo_razorpay_key_id', 'rzp_live_Tu5l5vmBvE6xHW')); ?>";
+      window.BARBERLOO_BACKEND_URL = "<?php echo esc_js(defined('BARBERLOO_BACKEND_URL') ? BARBERLOO_BACKEND_URL : get_option('barberloo_backend_url', '')); ?>";
     </script>
     <script type="module" crossorigin src="<?php echo esc_url($js_url); ?>"></script>
   </body>
@@ -302,6 +303,23 @@ function barberloo_plugin_get_razorpay_credentials() {
 }
 
 function barberloo_plugin_create_razorpay_order($request) {
+    // 1. If dedicated Node.js backend is configured, forward order creation to it
+    $backend_url = defined('BARBERLOO_BACKEND_URL') ? BARBERLOO_BACKEND_URL : get_option('barberloo_backend_url', '');
+    if (!empty($backend_url)) {
+        $backend_endpoint = rtrim($backend_url, '/') . '/api/payments/razorpay/create-order';
+        $response = wp_remote_post($backend_endpoint, [
+            'headers' => ['Content-Type' => 'application/json'],
+            'body'    => wp_json_encode($request->get_json_params() ?? []),
+            'timeout' => 20,
+        ]);
+        if (!is_wp_error($response)) {
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body, true);
+            $status_code = wp_remote_retrieve_response_code($response);
+            return new WP_REST_Response($data, $status_code ?: 200);
+        }
+    }
+
     $creds = barberloo_plugin_get_razorpay_credentials();
     $key_id = $creds['key_id'];
     $key_secret = $creds['key_secret'];
@@ -312,7 +330,7 @@ function barberloo_plugin_create_razorpay_order($request) {
     $receipt = sanitize_text_field($params['receipt'] ?? ('bl_' . time()));
     $notes = isset($params['notes']) && is_array($params['notes']) ? $params['notes'] : [];
 
-    // If key ID & secret configured, create authentic Razorpay order via Razorpay API
+    // If key ID & secret configured in WordPress, create authentic Razorpay order via Razorpay API
     if (!empty($key_id) && !empty($key_secret) && strpos($key_id, 'YOUR_KEY_ID') === false) {
         $auth = base64_encode($key_id . ':' . $key_secret);
         $response = wp_remote_post('https://api.razorpay.com/v1/orders', [
@@ -357,9 +375,6 @@ function barberloo_plugin_create_razorpay_order($request) {
 }
 
 function barberloo_plugin_verify_razorpay_payment($request) {
-    $creds = barberloo_plugin_get_razorpay_credentials();
-    $key_secret = $creds['key_secret'];
-
     $params = $request->get_json_params();
     $order_id = sanitize_text_field($params['razorpay_order_id'] ?? '');
     $payment_id = sanitize_text_field($params['razorpay_payment_id'] ?? '');
@@ -371,6 +386,31 @@ function barberloo_plugin_verify_razorpay_payment($request) {
             'error'    => 'Missing payment ID',
         ], 400);
     }
+
+    // 1. If dedicated Node.js backend is configured, forward verification request to it
+    $backend_url = defined('BARBERLOO_BACKEND_URL') ? BARBERLOO_BACKEND_URL : get_option('barberloo_backend_url', '');
+    if (!empty($backend_url)) {
+        $backend_endpoint = rtrim($backend_url, '/') . '/api/payments/razorpay/verify';
+        $response = wp_remote_post($backend_endpoint, [
+            'headers' => ['Content-Type' => 'application/json'],
+            'body'    => wp_json_encode([
+                'razorpay_order_id'   => $order_id,
+                'razorpay_payment_id' => $payment_id,
+                'razorpay_signature'  => $signature,
+            ]),
+            'timeout' => 15,
+        ]);
+        if (!is_wp_error($response)) {
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body, true);
+            $status_code = wp_remote_retrieve_response_code($response);
+            return new WP_REST_Response($data, $status_code ?: 200);
+        }
+    }
+
+    // 2. Local cryptographic verification if secret is present in WordPress config
+    $creds = barberloo_plugin_get_razorpay_credentials();
+    $key_secret = $creds['key_secret'];
 
     if (!empty($order_id) && !empty($signature) && !empty($key_secret)) {
         $expected_sig = hash_hmac('sha256', $order_id . '|' . $payment_id, $key_secret);
@@ -387,10 +427,11 @@ function barberloo_plugin_verify_razorpay_payment($request) {
         ], 400);
     }
 
+    // Strictly reject unverified requests - NEVER trust frontend success without cryptographic HMAC signature
     return new WP_REST_Response([
-        'verified'  => true,
-        'paymentId' => $payment_id,
-    ], 200);
+        'verified' => false,
+        'error'    => 'Payment verification failed: cryptographic signature and secret are required. Please configure RAZORPAY_KEY_SECRET or set BARBERLOO_BACKEND_URL.',
+    ], 400);
 }
 
 function barberloo_plugin_create_wc_order($request) {

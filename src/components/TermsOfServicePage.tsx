@@ -328,11 +328,11 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onNaviga
                 </div>
                 <div className="p-4 rounded-[16px] bg-[#241719] border border-[#F1E194]/15">
                   <strong className="text-[#F1E194] block mb-1">
-                    {tr('Immediate Escrow Payout Release:', 'तत्काल एस्क्रो भुगतान रिलीज:')}
+                    {tr('Immediate Escrow Payout Release to Ledger:', 'तत्काल एस्क्रो भुगतान लेज़र में रिलीज:')}
                   </strong>
                   {tr(
-                    'Upon the barber submitting the correct OTP into their console, our backend immediately transitions the appointment to Completed, balances the double-entry financial ledger, and releases the net earnings to the barber’s registered account.',
-                    'बार्बर द्वारा सही ओटीपी दर्ज करने पर, अपॉइंटमेंट पूर्ण हो जाता है और बार्बर के खाते में भुगतान जारी कर दिया जाता है।'
+                    'Upon the barber submitting the correct OTP into their console, our backend immediately transitions the appointment to Completed, balances the double-entry financial ledger, and credits the net service earnings to the barber’s available earnings ledger. Barbers can request withdrawal disbursements to their registered bank account whenever available earnings reach or exceed the minimum withdrawal threshold of ₹100.',
+                    'बार्बर द्वारा सही ओटीपी दर्ज करने पर, अपॉइंटमेंट पूर्ण हो जाता है और बार्बर के उपलब्ध कमाई लेज़र में राशि क्रेडिट कर दी जाती है। ₹100 के न्यूनतम निकासी सीमा पर बार्बर अपने बैंक खाते में निकासी का अनुरोध कर सकते हैं।'
                   )}
                 </div>
               </div>

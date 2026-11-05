@@ -10,6 +10,7 @@ export type PageView =
   | 'privacy-policy'
   | 'terms-of-service'
   | 'refund-policy'
+  | 'barber-earnings-policy'
   | 'disclaimer'
   | 'about-us'
   | 'contact-us'

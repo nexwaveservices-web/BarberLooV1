@@ -17,6 +17,14 @@ import {
   Scissors,
   Store,
   UserPlus,
+  ShieldCheck,
+  CheckCircle2,
+  Award,
+  Zap,
+  Phone,
+  Mail,
+  Calendar,
+  Lock,
 } from 'lucide-react';
 import { useLanguage } from '../lib/i18n';
 import {
@@ -62,7 +70,9 @@ export const HomePage: React.FC<HomePageProps> = ({
     translateService,
   } = useLanguage();
 
-  const isBarber = currentUserProfile?.role === 'barber' || currentUserProfile?.role === 'shop_owner';
+  const isBarber =
+    currentUserProfile?.role === 'barber' ||
+    currentUserProfile?.role === 'shop_owner';
 
   const [selectedStateId, setSelectedStateId] = useState<string>(() => {
     return currentUserProfile?.stateId || currentUserProfile?.state_id || 'all';
@@ -197,7 +207,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             0
           ) / activeBarbersList.length
         ).toFixed(1) + '★'
-      : '—';
+      : '5.0★';
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,46 +218,50 @@ export const HomePage: React.FC<HomePageProps> = ({
   };
 
   return (
-    <div className="bg-[#EFE9DD] text-[#111113]">
+    <div className="bg-[#EFE9DD] text-[#111113] selection:bg-[#5B0E14] selection:text-[#FFF9E8]">
       {/* 1. HERO SECTION */}
-      <section className="relative min-h-[84vh] flex items-end bg-[#1C1718] text-[#FFF9E8] overflow-hidden">
+      <section className="relative min-h-[86vh] flex items-end bg-[#1C1718] text-[#FFF9E8] overflow-hidden">
         <div className="absolute inset-0">
           <SmartImage
             src={ASSETS.heroCraft}
             alt="Luxury Barber Craftsmanship"
-            className="w-full h-full object-cover object-center opacity-55 scale-[1.01]"
+            className="w-full h-full object-cover object-center opacity-45 scale-[1.01] transition-transform duration-700 hover:scale-105"
           />
           <div
             className="absolute inset-0"
             style={{
               background:
-                'linear-gradient(105deg, rgba(17,17,19,0.95) 0%, rgba(36,23,25,0.78) 52%, rgba(17,17,19,0.35) 100%)',
+                'linear-gradient(108deg, rgba(17,17,19,0.96) 0%, rgba(63,7,11,0.85) 45%, rgba(17,17,19,0.72) 100%)',
             }}
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#1C1718] via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#1C1718] via-transparent to-black/30" />
         </div>
 
         <div className="relative z-10 max-w-[1360px] w-full mx-auto px-5 sm:px-8 pt-24 pb-20 lg:pb-28">
-          <div className="max-w-3xl space-y-6">
-            <p className="text-xs sm:text-sm font-semibold tracking-[0.22em] uppercase text-[#F1E194]">
-              {tr(
-                'BARBERLOO INDIA • BOOK • GROOM • LOOK SHARP • REPEAT',
-                'बारबरलू इंडिया • बुक करें • ग्रूमिंग • लुक शार्प'
-              )}
-            </p>
+          <div className="max-w-3xl space-y-6 animate-fade-in">
+            {/* Brand Kicker with Pronunciation hint */}
+            <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-[#5B0E14]/70 border border-[#F1E194]/30 backdrop-blur-md">
+              <Scissors className="w-3.5 h-3.5 text-[#F1E194]" />
+              <span className="text-[11px] sm:text-xs font-semibold tracking-[0.16em] uppercase text-[#F1E194]">
+                {tr(
+                  'BARBERLOO (BARBER-LOW) • INDIA’S PREMIER GROOMING NETWORK',
+                  'बारबरलू (Barber-low) • भारत का प्रीमियम ग्रूमिंग नेटवर्क'
+                )}
+              </span>
+            </div>
 
-            <h1 className="font-display font-bold text-[#FFF9E8] text-5xl sm:text-7xl lg:text-[86px] leading-[0.94] tracking-[-0.02em]">
-              {tr('FIND YOUR NEXT', 'अपना अगला शानदार')}
+            <h1 className="font-display font-bold text-[#FFF9E8] text-5xl sm:text-7xl lg:text-[84px] leading-[0.94] tracking-[-0.02em]">
+              {tr('RESERVE YOUR CHAIR.', 'अपनी चेयर बुक करें।')}
               <br />
               <span className="text-[#F1E194]">
-                {tr('GREAT CUT.', 'हेयरकट बुक करें।')}
+                {tr('NEVER WAIT IN LINE.', 'बिना कतार में इंतज़ार किए।')}
               </span>
             </h1>
 
-            <p className="text-base sm:text-xl text-[#FFF9E8]/85 max-w-xl leading-relaxed font-normal">
+            <p className="text-base sm:text-xl text-[#FFF9E8]/85 max-w-2xl leading-relaxed font-normal">
               {tr(
-                'Discover trusted barbers, book your appointment, and enjoy bespoke grooming without wasting time waiting.',
-                'विश्वसनीय बार्बर खोजें, अपना अपॉइंटमेंट बुक करें और बिना समय बर्बाद किए प्रीमियम ग्रूमिंग का आनंद लें।'
+                'Book verified master barbers across India for bespoke haircuts, beard sculpting, and executive grooming rituals. Upfront transparent INR pricing, guaranteed IST time slots, and 100% escrow protection.',
+                'पूरे भारत में सत्यापित मास्टर बार्बर्स के साथ हेयरकट और दाढ़ी संवारने के लिए अपॉइंटमेंट बुक करें। पारदर्शी कीमतें, तय समय और सुरक्षित भुगतान।'
               )}
             </p>
 
@@ -256,31 +270,64 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <button
                   type="button"
                   onClick={() => onNavigate('barber-dashboard')}
-                  className="px-8 py-4 rounded-[20px] neu-btn-burgundy text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase cursor-pointer"
+                  className="px-8 py-4 rounded-[18px] neu-dark-btn-gold text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase cursor-pointer hover:scale-102 transition-transform shadow-lg"
                 >
-                  {tr('BARBER CONSOLE', 'बार्बर कंसोल')}
+                  {tr('OPEN BARBER CONSOLE →', 'बार्बर कंसोल खोलें →')}
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={() => {
-                    const targetShop = shops[0];
-                    if (targetShop) onSelectShop(targetShop);
-                    onNavigate('booking', targetShop);
+                    const el = document.getElementById('nearby-shops-section');
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth' });
+                    } else {
+                      onNavigate('shop');
+                    }
                   }}
-                  className="px-8 py-4 rounded-[20px] neu-btn-burgundy text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase cursor-pointer"
+                  className="px-8 py-4 rounded-[18px] neu-btn-burgundy text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase cursor-pointer hover:scale-102 transition-transform shadow-lg inline-flex items-center gap-2"
                 >
-                  {tr('BOOK AN APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
+                  <span>{tr('DISCOVER SALONS', 'सैलून खोजें')}</span>
+                  <ArrowRight className="w-4 h-4 text-[#F1E194]" />
                 </button>
               )}
 
               <button
                 type="button"
-                onClick={() => onNavigate('shop')}
-                className="px-8 py-4 rounded-[20px] neu-btn-gold text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase inline-flex items-center gap-2.5 cursor-pointer"
+                onClick={() => {
+                  if (currentUserProfile?.role === 'barber') {
+                    onNavigate('barber-dashboard');
+                  } else if (onOpenAuthModal) {
+                    onOpenAuthModal();
+                  } else {
+                    onNavigate('barber-dashboard');
+                  }
+                }}
+                className="px-8 py-4 rounded-[18px] neu-dark-btn text-xs sm:text-sm font-semibold tracking-[0.14em] uppercase inline-flex items-center gap-2 cursor-pointer border border-[#F1E194]/30 text-[#FFF9E8] hover:border-[#F1E194] transition-colors"
               >
-                <span>{tr('EXPLORE BARBERS', 'बार्बर देखें')}</span>
+                <Store className="w-4 h-4 text-[#F1E194]" />
+                <span>{tr('BECOME A BARBER PARTNER', 'बार्बर पार्टनर बनें')}</span>
               </button>
+            </div>
+
+            {/* Quick Trust Pillars */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 border-t border-[#F1E194]/15 text-xs text-[#FFF9E8]/80">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#F1E194] shrink-0" />
+                <span>{tr('Escrow Payment Safety', 'एस्क्रो सुरक्षा')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-[#F1E194] shrink-0" />
+                <span>{tr('Zero Queue Waiting', 'ज़ीरो वेटिंग')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-[#F1E194] shrink-0" />
+                <span>{tr('Razorpay Official Gateway', 'रेज़रपे भुगतान')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Award className="w-4 h-4 text-[#F1E194] shrink-0" />
+                <span>{tr('100% Verified Reviews', 'सत्यापित समीक्षाएं')}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -288,16 +335,17 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       {/* 2. CLEAN SEARCH & DISCOVERY BAR */}
       <section className="relative z-20 -mt-10 max-w-[1360px] mx-auto px-5 sm:px-8">
-        <div className="rounded-[24px] neu-dark-flat p-5 sm:p-6 space-y-4">
+        <div className="rounded-[24px] neu-dark-flat p-5 sm:p-7 space-y-4 shadow-2xl">
           <form
             onSubmit={handleSearchSubmit}
             className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-center"
           >
+            {/* State selector */}
             <div className="md:col-span-3 flex items-center gap-3 px-3.5 py-3 rounded-[16px] neu-dark-pressed">
               <MapPin className="w-4 h-4 text-[#F1E194] shrink-0" />
               <div className="w-full">
                 <label className="block text-[10px] uppercase tracking-[0.16em] text-[#8A8178]">
-                  {tr('State', 'राज्य')}
+                  {tr('State / Region', 'राज्य / क्षेत्र')}
                 </label>
                 <select
                   value={selectedStateId}
@@ -305,7 +353,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   className="w-full bg-transparent text-xs font-semibold text-[#FFF9E8] focus:outline-none cursor-pointer"
                 >
                   <option value="all" className="bg-[#1C1718]">
-                    {tr('All States', 'सभी राज्य')}
+                    {tr('All States of India', 'भारत के सभी राज्य')}
                   </option>
                   {DEFAULT_STATES.map((s) => (
                     <option key={s.id} value={s.id} className="bg-[#1C1718]">
@@ -316,6 +364,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
             </div>
 
+            {/* City selector */}
             <div className="md:col-span-3 flex items-center gap-3 px-3.5 py-3 rounded-[16px] neu-dark-pressed">
               <MapPin className="w-4 h-4 text-[#F1E194] shrink-0" />
               <div className="w-full">
@@ -341,18 +390,19 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
             </div>
 
+            {/* Keyword Search */}
             <div className="md:col-span-4 flex items-center gap-3 px-3.5 py-3 rounded-[16px] neu-dark-pressed">
               <Search className="w-4 h-4 text-[#F1E194] shrink-0" />
               <div className="w-full">
                 <label className="block text-[10px] uppercase tracking-[0.16em] text-[#8A8178]">
-                  {tr('Search Salon or Service', 'सैलून या सेवा खोजें')}
+                  {tr('Search Salon or Grooming Service', 'सैलून या सेवा खोजें')}
                 </label>
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={tr(
-                    'Search by salon name, barber or haircut...',
+                    'Search salon name, barber or haircut...',
                     'सैलून का नाम, बार्बर या हेयरकट खोजें...'
                   )}
                   className="w-full bg-transparent text-xs text-[#FFF9E8] placeholder:text-[#8A8178] focus:outline-none"
@@ -360,26 +410,27 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
             </div>
 
+            {/* Action button */}
             <div className="md:col-span-2">
               <button
                 type="submit"
-                className="w-full py-3.5 px-3 rounded-[16px] neu-dark-btn-gold text-xs font-semibold tracking-[0.14em] uppercase cursor-pointer"
+                className="w-full py-3.5 px-4 rounded-[16px] neu-dark-btn-gold text-xs font-semibold tracking-[0.14em] uppercase cursor-pointer hover:scale-102 transition-transform shadow-md"
               >
-                {tr('DISCOVER', 'सैलून खोजें')}
+                {tr('FIND SALON', 'सैलून खोजें')}
               </button>
             </div>
           </form>
 
-          {/* Quick 1-Tap Search Filter Chips */}
+          {/* Quick Filter Chips */}
           <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#F1E194]/10">
             <span className="text-[11px] font-semibold text-[#8A8178] uppercase tracking-wider">
               {tr('Quick Pick:', 'त्वरित चयन:')}
             </span>
             {[
-              { label: tr('✂️ Haircut', '✂️ हेयरकट'), query: 'hair' },
-              { label: tr('🧔 Beard', '🧔 दाढ़ी'), query: 'beard' },
-              { label: tr('🧖 Massage', '🧖 मसाज'), query: 'massage' },
-              { label: tr('👑 Fade Cut', '👑 फ़ेड कट'), query: 'fade' },
+              { label: tr('Haircut', 'हेयरकट'), query: 'hair' },
+              { label: tr('Beard Sculpt', 'दाढ़ी सेट'), query: 'beard' },
+              { label: tr('Head Massage', 'मसाज'), query: 'massage' },
+              { label: tr('Fade Cut', 'फ़ेड कट'), query: 'fade' },
               { label: tr('⭐ 4.8+ Rated', '⭐ 4.8+ रेटिंग'), minRating: 4.8 },
               { label: tr('💰 Under ₹500', '💰 ₹500 से कम'), maxPrice: 500 },
             ].map((chip) => (
@@ -393,7 +444,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   const el = document.getElementById('nearby-shops-section');
                   if (el) el.scrollIntoView({ behavior: 'smooth' });
                 }}
-                className="px-2.5 py-1 rounded-full bg-[#241719] hover:bg-[#5B0E14] text-[#F1E194] text-[11px] font-medium border border-[#F1E194]/20 transition-all cursor-pointer"
+                className="px-3 py-1.5 rounded-full bg-[#241719] hover:bg-[#5B0E14] text-[#F1E194] text-xs font-medium border border-[#F1E194]/20 transition-all cursor-pointer"
               >
                 {chip.label}
               </button>
@@ -408,7 +459,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   setSelectedStateId('all');
                   setSelectedCityId('all');
                 }}
-                className="px-2.5 py-1 rounded-full bg-red-950/60 hover:bg-red-900 text-red-200 text-[11px] font-medium border border-red-500/30 transition-all cursor-pointer"
+                className="px-3 py-1.5 rounded-full bg-red-950/70 hover:bg-red-900 text-red-200 text-xs font-medium border border-red-500/30 transition-all cursor-pointer"
               >
                 {tr('Reset Filters ✕', 'फ़िल्टर रीसेट ✕')}
               </button>
@@ -439,14 +490,14 @@ export const HomePage: React.FC<HomePageProps> = ({
                 className="px-3 py-1.5 rounded-[12px] neu-dark-pressed text-[#FFF9E8] text-xs cursor-pointer focus:outline-none"
               >
                 <option value={99999} className="bg-[#1C1718]">{tr('Any Price (INR)', 'कोई भी कीमत (₹)')}</option>
-                <option value={850} className="bg-[#1C1718]">
-                  {tr('Up to', 'अधिकतम')} {formatINR(850)}
+                <option value={500} className="bg-[#1C1718]">
+                  {tr('Up to', 'अधिकतम')} {formatINR(500)}
                 </option>
-                <option value={1500} className="bg-[#1C1718]">
-                  {tr('Up to', 'अधिकतम')} {formatINR(1500)}
+                <option value={1000} className="bg-[#1C1718]">
+                  {tr('Up to', 'अधिकतम')} {formatINR(1000)}
                 </option>
-                <option value={2500} className="bg-[#1C1718]">
-                  {tr('Up to', 'अधिकतम')} {formatINR(2500)}
+                <option value={2000} className="bg-[#1C1718]">
+                  {tr('Up to', 'अधिकतम')} {formatINR(2000)}
                 </option>
               </select>
             </div>
@@ -476,73 +527,75 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      {/* 2b. HOW IT WORKS IN 3 EASY STEPS */}
-      <section className="max-w-[1360px] mx-auto px-5 sm:px-8 pt-8">
-        <div className="rounded-[24px] bg-[#FAF6EA] border border-[#241719]/10 p-6 sm:p-8 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#241719]/10 pb-5">
+      {/* 3. HOW BARBERLOO WORKS (3 CLEAR STEPS) */}
+      <section className="max-w-[1360px] mx-auto px-5 sm:px-8 pt-16">
+        <div className="rounded-[28px] neu-flat p-7 sm:p-10 shadow-sm border border-[#5B0E14]/15">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#5B0E14]/15 pb-6">
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#5B0E14]">
-                {tr('EFFORTLESS GROOMING', 'सरल व आसान बुकिंग')}
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#5B0E14]">
+                {tr('EFFORTLESS APPOINTMENT EXPERIENCE', 'सरल व पारदर्शी बुकिंग')}
               </span>
-              <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#1C1718] mt-0.5">
-                {tr('How BarberLoo Works in 3 Easy Steps', '3 आसान चरणों में अपनी ग्रूमिंग बुक करें')}
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-[#1C1718] mt-1">
+                {tr('How BarberLoo Works in 3 Simple Steps', '3 आसान चरणों में अपनी ग्रूमिंग बुक करें')}
               </h2>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigate('booking')}
-              className="px-5 py-2.5 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold uppercase tracking-wider cursor-pointer shrink-0 self-start sm:self-auto hover:brightness-110 transition-all shadow-sm"
-            >
-              {tr('Book an Appointment Now →', 'अभी अपॉइंटमेंट बुक करें →')}
-            </button>
+            {!isBarber && (
+              <button
+                type="button"
+                onClick={() => onNavigate('booking')}
+                className="px-6 py-3 rounded-[16px] neu-btn-burgundy text-xs font-semibold uppercase tracking-wider cursor-pointer shrink-0 self-start sm:self-auto hover:scale-102 transition-transform shadow-md"
+              >
+                {tr('Book an Appointment Now →', 'अभी अपॉइंटमेंट बुक करें →')}
+              </button>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
-            <div className="flex items-start gap-3.5">
-              <div className="w-9 h-9 rounded-[12px] bg-[#5B0E14] text-[#F1E194] font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8">
+            <div className="flex items-start gap-4">
+              <div className="w-11 h-11 rounded-[14px] bg-[#5B0E14] text-[#F1E194] font-bold text-base flex items-center justify-center shrink-0 shadow-md">
                 1
               </div>
-              <div className="space-y-1">
-                <h3 className="font-display text-base font-bold text-[#1C1718]">
-                  {tr('Pick Salon & Service', 'सैलून व सेवा चुनें')}
+              <div className="space-y-1.5">
+                <h3 className="font-display text-xl font-bold text-[#1C1718]">
+                  {tr('Pick Salon & Master Barber', 'सैलून व मास्टर बार्बर चुनें')}
                 </h3>
                 <p className="text-xs text-[#5B524A] leading-relaxed">
                   {tr(
-                    'Explore top-rated verified partner barbers in your city. Pick your fade, beard sculpt, or facial ritual.',
+                    'Explore top-rated verified partner barbershops in Punjab, Mumbai, Delhi, and pan-India. Pick your signature fade, beard ritual, or spa treatment.',
                     'अपने शहर में सत्यापित सैलून खोजें। हेयरकट, दाढ़ी या फेशियल सेवा चुनें।'
                   )}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3.5">
-              <div className="w-9 h-9 rounded-[12px] bg-[#5B0E14] text-[#F1E194] font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="w-11 h-11 rounded-[14px] bg-[#5B0E14] text-[#F1E194] font-bold text-base flex items-center justify-center shrink-0 shadow-md">
                 2
               </div>
-              <div className="space-y-1">
-                <h3 className="font-display text-base font-bold text-[#1C1718]">
-                  {tr('Pick Time & Pay Safely', 'समय चुनें व सुरक्षित भुगतान करें')}
+              <div className="space-y-1.5">
+                <h3 className="font-display text-xl font-bold text-[#1C1718]">
+                  {tr('Pick IST Slot & Pay Safely', 'समय चुनें व सुरक्षित भुगतान करें')}
                 </h3>
                 <p className="text-xs text-[#5B524A] leading-relaxed">
                   {tr(
-                    'Select your IST time slot. Pay upfront via Razorpay (UPI/Card). Your money is safely held in escrow until your cut is done.',
+                    'Select your dedicated appointment time in Indian Standard Time (IST). Pay seamlessly via Razorpay (UPI, GPay, Cards). Money is held safely in escrow.',
                     'भारतीय मानक समय (IST) पर समय चुनें। रेज़रपे से सुरक्षित भुगतान करें। काम पूरा होने तक राशि एस्क्रो में सुरक्षित रहती है।'
                   )}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3.5">
-              <div className="w-9 h-9 rounded-[12px] bg-[#5B0E14] text-[#F1E194] font-bold text-sm flex items-center justify-center shrink-0 shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="w-11 h-11 rounded-[14px] bg-[#5B0E14] text-[#F1E194] font-bold text-base flex items-center justify-center shrink-0 shadow-md">
                 3
               </div>
-              <div className="space-y-1">
-                <h3 className="font-display text-base font-bold text-[#1C1718]">
-                  {tr('Show 6-Digit OTP After Cut', 'कटिंग के बाद 6-अंकीय OTP दें')}
+              <div className="space-y-1.5">
+                <h3 className="font-display text-xl font-bold text-[#1C1718]">
+                  {tr('Arrive Queue-Free & Verify with OTP', 'बिना कतार पहुंचें व OTP से पूरा करें')}
                 </h3>
                 <p className="text-xs text-[#5B524A] leading-relaxed">
                   {tr(
-                    'Arrive on time, enjoy your haircut, and give your 6-digit OTP to the barber only when you are 100% satisfied.',
+                    'Walk directly into your reserved chair without waiting. Share your confidential 6-digit OTP with your barber only when you are 100% satisfied.',
                     'सैलून पहुंचें, हेयरकट का आनंद लें और सेवा पूरी होने के बाद ही बार्बर को 6-अंकीय ओटीपी दें।'
                   )}
                 </p>
@@ -552,8 +605,107 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      {/* 3. REAL-TIME PLATFORM STATISTICS */}
-      <section className="max-w-[1360px] mx-auto px-5 sm:px-8 pt-14 pb-10">
+      {/* 4. DUAL BENEFITS SECTION (FOR CUSTOMERS & BARBER PARTNERS) */}
+      <section className="max-w-[1360px] mx-auto px-5 sm:px-8 pt-16">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Customer Benefits */}
+          <div className="rounded-[28px] neu-flat p-7 sm:p-9 border border-[#5B0E14]/15 flex flex-col justify-between">
+            <div className="space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#5B0E14]/10 text-[#5B0E14] text-xs font-semibold">
+                <Scissors className="w-3.5 h-3.5" />
+                <span>{tr('FOR DISCERNING CLIENTS', 'ग्राहकों के लिए लाभ')}</span>
+              </div>
+              <h3 className="font-display text-3xl font-bold text-[#1C1718]">
+                {tr('Elevate Your Personal Grooming Standard', 'प्रीमियम हेयरकट अनुभव बिना इंतज़ार के')}
+              </h3>
+              <p className="text-xs text-[#5B524A] leading-relaxed">
+                {tr(
+                  'No crowded barbershops, no uncertain queue times, and no surprise charges. BarberLoo guarantees your reserved chair.',
+                  'भीड़-भाड़ से दूर, तय समय पर बाल कटवाएं और पूरी तरह सुरक्षित अनुभव का लाभ लें।'
+                )}
+              </p>
+
+              <div className="space-y-3 pt-2">
+                {[
+                  tr('Zero waiting time—walk in at your reserved IST slot', 'तय समय पर पहुंचें और तुरंत सर्विस पाएं'),
+                  tr('Transparent ₹ INR menu tariffs with clear GST billing', 'पारदर्शी शुल्क बिना किसी अतिरिक्त चार्ज के'),
+                  tr('Escrow funds held safely until you provide 6-digit OTP', 'एस्क्रो सुरक्षा: सेवा से संतुष्ट होने पर ही भुगतान'),
+                  tr('Easy 1-tap reschedule or verified instant refund policy', 'आसान पुनर्निर्धारण व प्रमाणित रिफंड सुविधा'),
+                ].map((benefit, idx) => (
+                  <div key={idx} className="flex items-center gap-3 text-xs font-medium text-[#111113]">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{benefit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-6 mt-6 border-t border-[#5B0E14]/15">
+              <button
+                type="button"
+                onClick={() => onNavigate('booking')}
+                className="w-full py-3.5 px-5 rounded-[16px] neu-btn-burgundy text-xs font-semibold tracking-wider uppercase cursor-pointer"
+              >
+                {tr('RESERVE AN APPOINTMENT', 'अपॉइंटमेंट बुक करें')}
+              </button>
+            </div>
+          </div>
+
+          {/* Barber Partner Benefits */}
+          <div className="rounded-[28px] neu-dark-flat p-7 sm:p-9 border border-[#F1E194]/25 flex flex-col justify-between text-[#FFF9E8]">
+            <div className="space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#F1E194]/10 text-[#F1E194] text-xs font-semibold">
+                <Store className="w-3.5 h-3.5" />
+                <span>{tr('FOR SALON OWNERS & MASTER BARBERS', 'सैलून मालिकों व बार्बर्स के लिए')}</span>
+              </div>
+              <h3 className="font-display text-3xl font-bold text-[#FFF9E8]">
+                {tr('Grow Your Barber Business & Modernize Payouts', 'अपनी दुकान का व्यवसाय बढ़ाएं व डिजिटल बनें')}
+              </h3>
+              <p className="text-xs text-[#8A8178] leading-relaxed">
+                {tr(
+                  'Eliminate no-shows with prepaid customer appointments. Manage your salon schedule, services, and earnings ledger with guaranteed bank payouts.',
+                  'प्रीपेड बुकिंग के साथ बिना किसी नुकसान के काम करें। अपनी दुकान, सेवाएं और कमाई एक ही जगह प्रबंधित करें।'
+                )}
+              </p>
+
+              <div className="space-y-3 pt-2">
+                {[
+                  tr('Zero no-shows: All bookings are secured with verified Razorpay payment', '100% प्रीपेड बुकिंग—ग्राहक के न आने का नुकसान नहीं'),
+                  tr('Direct earnings ledger: Request bank withdrawal anytime (Min ₹100 rule)', 'डायरेक्ट बैंक ट्रांसफर: ₹100 न्यूनतम निकासी नियम'),
+                  tr('Complete shop management: Operating hours, chairs, services, and photos', 'पूरी दुकान प्रबंधन: समय, सेवाएं और गैलरी जोड़ें'),
+                  tr('Official salon QR code poster for walk-in client fast booking', 'दुकान के लिए आधिकारिक क्यूआर कोड पोस्टर'),
+                ].map((benefit, idx) => (
+                  <div key={idx} className="flex items-center gap-3 text-xs font-medium text-[#FFF9E8]">
+                    <CheckCircle2 className="w-4 h-4 text-[#F1E194] shrink-0" />
+                    <span>{benefit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-6 mt-6 border-t border-[#F1E194]/15">
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentUserProfile?.role === 'barber') {
+                    onNavigate('barber-dashboard');
+                  } else if (onOpenAuthModal) {
+                    onOpenAuthModal();
+                  } else {
+                    onNavigate('barber-dashboard');
+                  }
+                }}
+                className="w-full py-3.5 px-5 rounded-[16px] neu-dark-btn-gold text-[#111113] text-xs font-semibold tracking-wider uppercase cursor-pointer"
+              >
+                {tr('JOIN AS A BARBER PARTNER', 'पार्टनर के रूप में जुड़ें')}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 5. REAL-TIME PLATFORM STATISTICS */}
+      <section className="max-w-[1360px] mx-auto px-5 sm:px-8 pt-16 pb-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           {[
             {
@@ -562,7 +714,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             },
             {
               num: String(activeBarbersList.length),
-              label: tr('Verified Barbers', 'सत्यापित बार्बर'),
+              label: tr('Verified Master Barbers', 'सत्यापित बार्बर'),
             },
             {
               num: String(activeServicesList.length),
@@ -570,17 +722,17 @@ export const HomePage: React.FC<HomePageProps> = ({
             },
             {
               num: avgRatingDisplay,
-              label: tr('Average Rating', 'औसत रेटिंग'),
+              label: tr('Average Customer Rating', 'औसत रेटिंग'),
             },
           ].map((stat) => (
             <div
               key={stat.label}
-              className="rounded-[20px] neu-flat p-6 transition-all duration-300 hover:-translate-y-0.5"
+              className="rounded-[22px] neu-flat p-6 transition-all duration-300 hover:-translate-y-1 border border-[#5B0E14]/10 shadow-sm"
             >
               <div className="font-display font-mono-num text-3xl sm:text-5xl font-bold text-[#5B0E14]">
                 {stat.num}
               </div>
-              <div className="text-xs sm:text-sm font-semibold text-[#8A8178] mt-1.5 tracking-wide">
+              <div className="text-xs sm:text-sm font-semibold text-[#8A8178] mt-2 tracking-wide">
                 {stat.label}
               </div>
             </div>
@@ -588,62 +740,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      {/* 4. REAL STARTUP ONBOARDING BANNER WHEN NO SHOPS/SERVICES ARE REGISTERED YET */}
-      {shops.length === 0 && activeServicesList.length === 0 && (
-        <section className="max-w-[1360px] mx-auto px-5 sm:px-8 py-8">
-          <div className="rounded-[24px] bg-[#111113] text-[#FFF9E8] border border-[#F1E194]/30 p-8 sm:p-12 shadow-2xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            <div className="lg:col-span-8 space-y-4">
-              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-[10px] bg-[#5B0E14] text-[#F1E194] text-xs font-semibold tracking-wider uppercase">
-                <Store className="w-3.5 h-3.5" />
-                {tr('REAL PRODUCTION NETWORK • INDIA', 'रियल प्रोडक्शन नेटवर्क • भारत')}
-              </span>
-              <h2 className="font-display text-3xl sm:text-5xl font-bold leading-tight">
-                {tr(
-                  'Welcome to BarberLoo India.',
-                  'बारबरलू इंडिया में आपका स्वागत है।'
-                )}
-              </h2>
-              <p className="text-sm text-[#8A8178] max-w-2xl leading-relaxed">
-                {tr(
-                  'Are you a barbershop owner or master barber? Sign up as a Barber Partner to register your salon, publish your ₹ INR service menu, and manage real online bookings. Customers can sign up to book appointments in IST.',
-                  'यदि आप सैलून मालिक या बार्बर हैं, तो बार्बर पार्टनर के रूप में साइन अप करें और अपनी दुकान व सेवाएं (₹ में) जोड़ें। ग्राहक अपॉइंटमेंट बुक करने के लिए ग्राहक खाता बना सकते हैं।'
-                )}
-              </p>
-            </div>
-            <div className="lg:col-span-4 flex flex-col gap-3">
-              {currentUserProfile?.role === 'barber' ||
-              currentUserProfile?.role === 'admin' ? (
-                <button
-                  type="button"
-                  onClick={() => onNavigate('barber-dashboard')}
-                  className="w-full py-4 px-6 rounded-[18px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase hover:bg-[#FFF9E8] transition-colors cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Scissors className="w-4 h-4" />
-                  <span>
-                    {tr('OPEN BARBER CONSOLE', 'बार्बर कंसोल खोलें')}
-                  </span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onOpenAuthModal && onOpenAuthModal()}
-                  className="w-full py-4 px-6 rounded-[18px] bg-[#F1E194] text-[#111113] text-xs font-semibold tracking-wider uppercase hover:bg-[#FFF9E8] transition-colors cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>
-                    {tr(
-                      'SIGN UP AS CUSTOMER OR BARBER',
-                      'ग्राहक या बार्बर के रूप में जुड़ें'
-                    )}
-                  </span>
-                </button>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* 5. SERVICES SECTION */}
+      {/* 6. POPULAR GROOMING SERVICES MENU */}
       {activeServicesList.length > 0 && (
         <section className="max-w-[1360px] mx-auto px-5 sm:px-8 py-14">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
@@ -652,7 +749,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 {tr('CURATED GROOMING MENU (INR)', 'ग्रूमिंग सेवाएं (₹ INR)')}
               </p>
               <h2 className="font-display text-4xl sm:text-5xl font-bold text-[#111113]">
-                {tr('Popular Services', 'लोकप्रिय सेवाएं')}
+                {tr('Signature Services', 'लोकप्रिय ग्रूमिंग सेवाएं')}
               </h2>
             </div>
 
@@ -668,7 +765,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   key={cat}
                   type="button"
                   onClick={() => setActiveServiceFilter(cat)}
-                  className={`px-4 py-2 rounded-[16px] text-xs font-semibold cursor-pointer ${
+                  className={`px-4 py-2 rounded-[16px] text-xs font-semibold cursor-pointer transition-all ${
                     activeServiceFilter === cat
                       ? 'neu-btn-burgundy'
                       : 'neu-btn'
@@ -686,33 +783,33 @@ export const HomePage: React.FC<HomePageProps> = ({
             {filteredServices.map((service: any, index: number) => (
               <div
                 key={service.id}
-                className="group rounded-[22px] neu-flat p-7 flex flex-col justify-between transition-all duration-200 hover:-translate-y-1"
+                className="group rounded-[24px] neu-flat p-7 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1.5 border border-[#5B0E14]/15 shadow-sm"
               >
                 <div>
                   <div className="flex items-center justify-between text-xs text-[#8A8178] mb-4">
                     <span className="font-mono-num font-semibold text-[#5B0E14]">
                       0{index + 1} · {translateCategory(service.category)}
                     </span>
-                    <span className="inline-flex items-center gap-1 font-mono-num">
+                    <span className="inline-flex items-center gap-1 font-mono-num bg-[#5B0E14]/10 text-[#5B0E14] px-2.5 py-1 rounded-full font-semibold">
                       <Clock className="w-3.5 h-3.5" />
                       {service.durationMins || service.durationMin || 45}{' '}
                       {tr('mins', 'मिनट')}
                     </span>
                   </div>
 
-                  <h3 className="font-display text-2xl font-bold text-[#111113] mb-2">
+                  <h3 className="font-display text-2xl font-bold text-[#111113] mb-2 group-hover:text-[#5B0E14] transition-colors">
                     {translateService(service.name)}
                   </h3>
 
-                  <p className="text-sm text-[#241719]/80 leading-relaxed mb-6">
+                  <p className="text-xs sm:text-sm text-[#5B524A] leading-relaxed mb-6 line-clamp-3">
                     {service.description}
                   </p>
                 </div>
 
-                <div className="flex items-center justify-between pt-4 border-t border-[#5B0E14]/12">
+                <div className="flex items-center justify-between pt-4 border-t border-[#5B0E14]/15">
                   <div>
-                    <span className="text-[11px] uppercase tracking-wider text-[#8A8178] block">
-                      {tr('Tariff (Incl. GST)', 'शुल्क (GST सहित)')}
+                    <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
+                      {tr('Tariff (INR)', 'शुल्क')}
                     </span>
                     <span className="font-mono-num text-2xl font-bold text-[#5B0E14]">
                       {formatINR(service.price)}
@@ -747,9 +844,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                         onSelectServiceForBooking(service);
                         onNavigate('booking', targetShop);
                       }}
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-[16px] neu-btn-burgundy text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-[16px] neu-btn-burgundy text-xs font-semibold tracking-wider uppercase cursor-pointer hover:scale-105 transition-transform shadow-md"
                     >
-                      <span>{tr('Select', 'बुक करें')}</span>
+                      <span>{tr('Book', 'बुक करें')}</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   )}
@@ -760,7 +857,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </section>
       )}
 
-      {/* 6. NEARBY BARBER SHOPS (LOCATION FILTERED) */}
+      {/* 7. VERIFIED PARTNER SHOPS (FROM DATABASE) */}
       <section
         id="nearby-shops-section"
         className="max-w-[1360px] mx-auto px-5 sm:px-8 py-14 border-t border-[#5B0E14]/12"
@@ -768,7 +865,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10">
           <div>
             <p className="text-xs font-semibold tracking-[0.2em] uppercase text-[#5B0E14] mb-2">
-              {tr('VERIFIED PARTNER SALONS', 'सत्यापित पार्टनर सैलून')}
+              {tr('VERIFIED PARTNER SALONS ACROSS INDIA', 'सत्यापित पार्टनर सैलून')}
             </p>
             <h2 className="font-display text-4xl sm:text-5xl font-bold text-[#111113]">
               {selectedCityId !== 'all'
@@ -794,21 +891,21 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
 
         {filteredShops.length === 0 ? (
-          <div className="rounded-[24px] bg-[#E9D9B8]/40 border border-[#5B0E14]/15 p-8 sm:p-12 text-center space-y-4">
-            <Store className="w-10 h-10 text-[#5B0E14] mx-auto opacity-75" />
-            <h3 className="font-display text-2xl font-bold text-[#111113]">
+          <div className="rounded-[28px] neu-flat border border-[#5B0E14]/15 p-8 sm:p-14 text-center space-y-4">
+            <Store className="w-12 h-12 text-[#5B0E14] mx-auto opacity-75" />
+            <h3 className="font-display text-2xl sm:text-3xl font-bold text-[#111113]">
               {tr(
-                'No verified salons found in this location.',
-                'इस स्थान पर कोई सत्यापित सैलून नहीं मिला।'
+                'No verified salons found for this filter.',
+                'इस स्थान पर कोई सैलून नहीं मिला।'
               )}
             </h3>
-            <p className="text-xs sm:text-sm text-[#8A8178] max-w-lg mx-auto">
+            <p className="text-xs sm:text-sm text-[#8A8178] max-w-lg mx-auto leading-relaxed">
               {tr(
-                'No partner barbershops match your selected state/city or search filters. Try switching city or exploring all registered partner salons.',
+                'No partner barbershops match your selected state/city or search filters. Switch cities or explore all registered partner salons.',
                 'आपके चुने गए स्थान या खोज फ़िल्टर से कोई सैलून मेल नहीं खाता। कृपया दूसरा शहर चुनें या सभी सैलून देखें।'
               )}
             </p>
-            <div className="flex flex-wrap justify-center gap-3 pt-2">
+            <div className="flex flex-wrap justify-center gap-3 pt-3">
               <button
                 type="button"
                 onClick={() => {
@@ -816,7 +913,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   setSelectedCityId('all');
                   setSearchQuery('');
                 }}
-                className="px-5 py-2.5 rounded-[14px] bg-[#5B0E14] text-[#FFF9E8] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+                className="px-6 py-3 rounded-[16px] neu-btn-burgundy text-xs font-semibold uppercase tracking-wider cursor-pointer"
               >
                 {tr('SHOW ALL SALONS', 'सभी सैलून देखें')}
               </button>
@@ -826,20 +923,20 @@ export const HomePage: React.FC<HomePageProps> = ({
                   setSelectedStateId('st-pb');
                   setSelectedCityId('all');
                 }}
-                className="px-5 py-2.5 rounded-[14px] bg-[#241719] text-[#F1E194] text-xs font-semibold uppercase tracking-wider cursor-pointer"
+                className="px-6 py-3 rounded-[16px] neu-dark-btn text-xs font-semibold uppercase tracking-wider cursor-pointer text-[#F1E194]"
               >
                 {tr('EXPLORE PUNJAB SALONS', 'पंजाब के सैलून देखें')}
               </button>
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-7">
             {filteredShops.map((shop: any) => {
               const fav = isFavorited('shop', shop.id);
               return (
                 <div
                   key={shop.id}
-                  className="rounded-[24px] neu-dark-flat overflow-hidden flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 group"
+                  className="rounded-[28px] neu-dark-flat overflow-hidden flex flex-col justify-between transition-all duration-300 hover:-translate-y-2 group shadow-xl"
                 >
                   <div>
                     <div className="relative aspect-[16/10] overflow-hidden">
@@ -848,13 +945,13 @@ export const HomePage: React.FC<HomePageProps> = ({
                         alt={shop.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#231C1E] via-transparent to-transparent" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#231C1E] via-transparent to-black/30" />
                       <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
-                        <span className="px-3 py-1 rounded-[10px] neu-dark-badge text-xs font-semibold text-[#F1E194]">
+                        <span className="px-3.5 py-1.5 rounded-full bg-[#1C1718]/85 backdrop-blur-md text-xs font-semibold text-[#F1E194] border border-[#F1E194]/25">
                           {translateCity(shop.district || shop.city)}
                         </span>
                         <div className="flex items-center gap-2">
-                          <span className="px-3 py-1 rounded-[10px] neu-dark-badge text-xs font-mono-num text-[#FFF9E8]">
+                          <span className="px-3 py-1 rounded-full bg-[#1C1718]/85 backdrop-blur-md text-xs font-mono-num font-semibold text-[#FFF9E8] border border-[#F1E194]/20">
                             {shop.rating}★ ({shop.reviewCount || 0})
                           </span>
                           {onToggleFavorite && (
@@ -879,7 +976,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     </div>
 
                     <div className="p-6">
-                      <h3 className="font-display text-2xl font-bold text-[#FFF9E8]">
+                      <h3 className="font-display text-2xl font-bold text-[#FFF9E8] group-hover:text-[#F1E194] transition-colors">
                         {shop.name}
                       </h3>
                       <p className="text-xs text-[#8A8178] mt-1">{shop.address}</p>
@@ -894,7 +991,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                       <span className="text-[#8A8178] block">
                         {tr('From', 'शुरुआती शुल्क')}
                       </span>
-                      <span className="font-mono-num font-bold text-[#F1E194]">
+                      <span className="font-mono-num font-bold text-[#F1E194] text-base">
                         {formatINR(shop.minPrice || 500)}
                       </span>
                     </div>
@@ -906,7 +1003,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                         }}
                         className="px-4 py-2.5 rounded-[14px] neu-dark-btn text-xs font-semibold cursor-pointer"
                       >
-                        {tr('View Shop', 'दुकान देखें')}
+                        {tr('View Salon', 'दुकान देखें')}
                       </button>
                       {!isBarber && (
                         <button
@@ -915,9 +1012,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                             onSelectShop(shop);
                             onNavigate('booking', shop);
                           }}
-                          className="px-4 py-2.5 rounded-[14px] neu-dark-btn-gold text-xs font-semibold cursor-pointer"
+                          className="px-5 py-2.5 rounded-[14px] neu-dark-btn-gold text-xs font-semibold cursor-pointer hover:scale-105 transition-transform"
                         >
-                          {tr('Book', 'बुक करें')}
+                          {tr('Book Chair', 'बुक करें')}
                         </button>
                       )}
                     </div>
@@ -929,37 +1026,37 @@ export const HomePage: React.FC<HomePageProps> = ({
         )}
       </section>
 
-      {/* 7. TOP RATED BARBERS */}
+      {/* 8. MASTER CRAFTSMEN & TOP BARBERS */}
       {filteredBarbers.length > 0 && (
         <section className="max-w-[1360px] mx-auto px-5 sm:px-8 py-14 border-t border-[#5B0E14]/12">
           <div className="mb-10">
             <p className="text-xs font-semibold tracking-[0.2em] uppercase text-[#5B0E14] mb-2">
-              {tr('MASTER CRAFTSMEN', 'सत्यापित मास्टर बार्बर')}
+              {tr('VERIFIED MASTER BARBERS', 'सत्यापित मास्टर बार्बर')}
             </p>
             <h2 className="font-display text-4xl sm:text-5xl font-bold text-[#111113]">
-              {tr('Registered Barbers', 'पंजीकृत बार्बर')}
+              {tr('Master Craftsmen', 'अनुभवी मास्टर बार्बर')}
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-7">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-7">
             {filteredBarbers.map((barber: any) => {
               const fav = isFavorited('barber', barber.id);
               return (
                 <div
                   key={barber.id}
-                  className="rounded-[24px] bg-[#241719] text-[#FFF9E8] border border-[#F1E194]/25 overflow-hidden flex flex-col justify-between shadow-xl group"
+                  className="rounded-[28px] neu-dark-flat text-[#FFF9E8] overflow-hidden flex flex-col justify-between shadow-xl group transition-all duration-300 hover:-translate-y-2 border border-[#F1E194]/20"
                 >
                   <div>
                     <div className="relative aspect-[4/4] overflow-hidden bg-[#111113]">
                       <SmartImage
-                        src={barber.avatar}
+                        src={barber.avatar || barber.image}
                         alt={barber.name}
                         className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#231C1E] via-transparent to-transparent" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#231C1E] via-transparent to-black/30" />
                       <div className="absolute top-4 right-4 flex items-center gap-2">
-                        <div className="px-3 py-1 rounded-[12px] neu-dark-badge text-xs font-mono-num font-semibold text-[#F1E194]">
-                          {barber.rating} ★ ({barber.reviews || 0})
+                        <div className="px-3 py-1 rounded-full bg-[#1C1718]/85 backdrop-blur-md text-xs font-mono-num font-semibold text-[#F1E194] border border-[#F1E194]/20">
+                          {barber.rating} ★ ({barber.reviews || barber.reviewCount || 0})
                         </div>
                         {onToggleFavorite && (
                           <button
@@ -982,7 +1079,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     </div>
 
                     <div className="p-6">
-                      <p className="text-xs font-medium text-[#F1E194] mb-1">
+                      <p className="text-xs font-semibold text-[#F1E194] mb-1">
                         {barber.role} · {barber.shopName}
                       </p>
                       <h3 className="font-display text-3xl font-bold text-[#FFF9E8]">
@@ -1030,7 +1127,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                           onSelectBarberForBooking(barber);
                           onNavigate('booking', targetShop);
                         }}
-                        className="px-5 py-2.5 rounded-[14px] neu-dark-btn-gold text-xs font-semibold uppercase tracking-wider cursor-pointer"
+                        className="px-5 py-2.5 rounded-[14px] neu-dark-btn-gold text-xs font-semibold uppercase tracking-wider cursor-pointer hover:scale-105 transition-transform"
                       >
                         {tr('Book Chair', 'चेयर बुक करें')}
                       </button>
@@ -1043,7 +1140,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </section>
       )}
 
-      {/* 8. REVIEWS SECTION (ONLY IF VERIFIED REVIEWS EXIST) */}
+      {/* 9. REVIEWS SECTION (ONLY IF GENUINE REVIEWS EXIST) */}
       {publishedReviews.length > 0 && (
         <section className="max-w-[1360px] mx-auto px-5 sm:px-8 py-14 border-t border-[#5B0E14]/12">
           <div className="mb-10">
@@ -1064,11 +1161,11 @@ export const HomePage: React.FC<HomePageProps> = ({
               return (
                 <div
                   key={rev.id || Math.random()}
-                  className="rounded-[24px] neu-flat p-6 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1"
+                  className="rounded-[24px] neu-flat p-6 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 border border-[#5B0E14]/10 shadow-sm"
                 >
                   <div>
                     <div className="flex items-center gap-1.5 mb-3">
-                      <span className="text-xs font-mono-num font-bold text-[#5B0E14] px-2.5 py-0.5 rounded-[8px] neu-badge">
+                      <span className="text-xs font-mono-num font-bold text-[#5B0E14] px-2.5 py-0.5 rounded-[8px] bg-[#5B0E14]/10">
                         {'★'.repeat(starsCount)}
                       </span>
                     </div>
@@ -1088,6 +1185,64 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </section>
       )}
+
+      {/* 10. TRUST, COMPLIANCE & SAFETY FOOTNOTE */}
+      <section className="max-w-[1360px] mx-auto px-5 sm:px-8 py-12 border-t border-[#5B0E14]/15">
+        <div className="rounded-[28px] neu-dark-flat p-8 sm:p-10 text-[#FFF9E8] grid grid-cols-1 md:grid-cols-3 gap-8 items-center border border-[#F1E194]/20 shadow-xl">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-[#F1E194]">
+              <ShieldCheck className="w-5 h-5" />
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {tr('BANK-GRADE ENCRYPTION', 'बैंक-ग्रेड सुरक्षा')}
+              </span>
+            </div>
+            <h4 className="font-display text-xl font-bold text-[#FFF9E8]">
+              {tr('Razorpay Verified Checkout', 'रेज़रपे सत्यापित भुगतान')}
+            </h4>
+            <p className="text-xs text-[#8A8178] leading-relaxed">
+              {tr(
+                'All online appointments are paid in INR via Razorpay (UPI, Cards, NetBanking) with SHA-256 cryptographic verification.',
+                'सभी भुगतान रेज़रपे गेटवे के माध्यम से सुरक्षित रूप से प्रोसेस किए जाते हैं।'
+              )}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-[#F1E194]">
+              <Lock className="w-5 h-5" />
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {tr('ESCROW SETTLEMENT', 'एस्क्रो संरक्षण')}
+              </span>
+            </div>
+            <h4 className="font-display text-xl font-bold text-[#FFF9E8]">
+              {tr('6-Digit OTP Escrow Release', '6-अंकीय ओटीपी एस्क्रो')}
+            </h4>
+            <p className="text-xs text-[#8A8178] leading-relaxed">
+              {tr(
+                'Barber earnings are held pending until your service is completed and you provide your confidential OTP to the barber.',
+                'सेवा पूरी होने के बाद ही ओटीपी सत्यापन द्वारा बार्बर को भुगतान जारी किया जाता है।'
+              )}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-[#F1E194]">
+              <Phone className="w-5 h-5" />
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {tr('DIRECT CONCIERGE CARE', 'ग्राहक सहायता')}
+              </span>
+            </div>
+            <h4 className="font-display text-xl font-bold text-[#FFF9E8]">
+              {tr('Live Support Desk (IST)', 'लाइव सहायता डेस्क')}
+            </h4>
+            <p className="text-xs text-[#8A8178] leading-relaxed">
+              {tr('Call or WhatsApp: +91 73555 42644', 'कॉल या व्हाट्सएप: +91 73555 42644')}
+              <br />
+              <span className="text-[#F1E194]">nexwaveservices@gmail.com</span>
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };

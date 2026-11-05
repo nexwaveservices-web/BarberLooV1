@@ -17,7 +17,9 @@ import {
   ShieldAlert,
   Send,
   X,
+  IndianRupee,
 } from 'lucide-react';
+import { BarberEarningsSection } from './BarberEarningsSection';
 import {
   useLanguage,
   getCurrentISTDisplay,
@@ -37,6 +39,7 @@ import { getShopQrDestinationUrl, getProductionDomain } from '../lib/domain';
 import { SalonQrModal } from './SalonQrModal';
 import { apiCreateReport, apiVerifyCompletionOtp } from '../lib/api';
 import { BarberLocationPicker } from './BarberLocationPicker';
+import { useDevice } from '../lib/deviceDetection';
 
 interface BarberDashboardProps {
   appointments: AppointmentItem[];
@@ -106,6 +109,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
   platformSettings,
 }) => {
   const { lang, tr, formatINR } = useLanguage();
+  const device = useDevice();
   const istNow = getCurrentISTDisplay(lang);
 
   const currentHour = new Date().getHours();
@@ -120,6 +124,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
 
   const [activeTab, setActiveTab] = useState<
     | 'appointments'
+    | 'earnings'
     | 'services'
     | 'team'
     | 'schedule'
@@ -664,7 +669,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
 
           {/* Real KPI Summary (Section 4 Requirement) */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 hover-lift hover-glow-gold animate-card-enter delay-50">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr("Today's Appts", 'आज की बुकिंग')}
               </span>
@@ -672,7 +677,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                 {todayAppointments.length}
               </span>
             </div>
-            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 hover-lift hover-glow-gold animate-card-enter delay-100">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr('Upcoming', 'आगामी')}
               </span>
@@ -680,7 +685,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                 {upcomingAppointments.length}
               </span>
             </div>
-            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 hover-lift hover-glow-gold animate-card-enter delay-150">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr('Completed Cuts', 'पूर्ण कट')}
               </span>
@@ -688,7 +693,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                 {completedApts.length}
               </span>
             </div>
-            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 hover-lift hover-glow-gold animate-card-enter delay-200">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr('Cancelled', 'रद्द')}
               </span>
@@ -696,7 +701,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                 {cancelledApts.length}
               </span>
             </div>
-            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 hover-lift hover-glow-gold animate-card-enter delay-100">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr("Today's Earnings", 'आज की कमाई')}
               </span>
@@ -704,7 +709,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                 {formatINR(dailyRevenueINR)}
               </span>
             </div>
-            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 hover-lift hover-glow-gold animate-card-enter delay-150">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr('Total Earnings', 'कुल कमाई')}
               </span>
@@ -712,7 +717,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                 {formatINR(totalServiceRevenueINR)}
               </span>
             </div>
-            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 hover-lift hover-glow-gold animate-card-enter delay-200">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr('Pending Payouts', 'लंबित भुगतान')}
               </span>
@@ -720,7 +725,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                 {formatINR(pendingPayoutsINR)}
               </span>
             </div>
-            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20">
+            <div className="px-3.5 py-2.5 rounded-[16px] bg-[#241719] border border-[#F1E194]/20 hover-lift hover-glow-gold animate-card-enter delay-250">
               <span className="text-[10px] uppercase tracking-wider text-[#8A8178] block">
                 {tr('Clients Served', 'कुल ग्राहक')}
               </span>
@@ -977,7 +982,7 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                   />
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <span className="text-[11px] text-[#8A8178]">
-                      {tr('Helpline: nexwaveservices@gmail.com', 'हेल्पलाइन: nexwaveservices@gmail.com')}
+                      {tr('Helpline: +91 73555 42644 · nexwaveservices@gmail.com', 'हेल्पलाइन: +91 73555 42644 · nexwaveservices@gmail.com')}
                     </span>
                     <button
                       type="submit"
@@ -1001,6 +1006,11 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
               id: 'appointments',
               label: tr('Appointments', 'अपॉइंटमेंट्स'),
               icon: Calendar,
+            },
+            {
+              id: 'earnings',
+              label: tr('MY EARNINGS', 'मेरी कमाई और निकासी'),
+              icon: IndianRupee,
             },
             {
               id: 'services',
@@ -1039,10 +1049,10 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-5 py-3 rounded-[16px] text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer ${
+                className={`min-h-[44px] px-4 sm:px-5 py-2.5 rounded-[16px] text-xs font-semibold inline-flex items-center gap-2 transition-all duration-150 active-press cursor-pointer ${
                   activeTab === tab.id
-                    ? 'bg-[#F1E194] text-[#111113]'
-                    : 'bg-[#241719] text-[#FFF9E8]/80 hover:text-[#FFF9E8] border border-[#F1E194]/15'
+                    ? 'bg-[#F1E194] text-[#111113] shadow-md font-bold'
+                    : 'bg-[#241719] text-[#FFF9E8]/80 hover:text-[#FFF9E8] hover:border-[#F1E194]/40 border border-[#F1E194]/15'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
@@ -1474,6 +1484,16 @@ export const BarberDashboard: React.FC<BarberDashboardProps> = ({
               </div>
             )}
           </div>
+        )}
+
+        {/* TAB: MY EARNINGS & WITHDRAWAL MANAGEMENT */}
+        {activeTab === 'earnings' && (
+          <BarberEarningsSection
+            currentUserProfile={currentUserProfile}
+            onNavigatePolicy={() => {
+              window.location.href = '/barber-earnings-policy';
+            }}
+          />
         )}
 
         {/* TAB 2: SERVICES CRUD (INR) */}

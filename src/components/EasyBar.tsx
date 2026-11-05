@@ -47,13 +47,13 @@ export const EasyBar: React.FC<EasyBarProps> = ({
         onNavigate={onNavigate}
       />
 
-      <div className="fixed bottom-4 right-4 z-40 print:hidden select-none">
+      <div className="fixed bottom-16 sm:bottom-5 right-3 sm:right-5 z-40 print:hidden select-none">
         {collapsed ? (
           <button
             type="button"
             onClick={() => setCollapsed(false)}
             aria-label="Expand quick actions"
-            className="flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-[#1C1718] text-[#F1E194] border border-[#F1E194]/30 shadow-2xl hover:scale-105 transition-all cursor-pointer text-xs font-semibold"
+            className="flex items-center gap-2 min-h-[44px] px-4 py-2.5 rounded-full bg-[#1C1718] text-[#F1E194] border border-[#F1E194]/30 shadow-2xl hover:scale-102 transition-all cursor-pointer text-xs font-semibold"
           >
             <Sparkles className="w-4 h-4 text-[#F1E194]" />
             <span className="hidden sm:inline">{tr('Quick Actions', 'त्वरित कार्य')}</span>
@@ -65,7 +65,7 @@ export const EasyBar: React.FC<EasyBarProps> = ({
             <button
               type="button"
               onClick={() => onNavigate('booking')}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#5B0E14] text-[#F1E194] text-xs font-bold uppercase tracking-wider hover:brightness-110 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 min-h-[40px] px-4 py-2 rounded-full bg-[#5B0E14] text-[#F1E194] text-xs font-bold uppercase tracking-wider hover:brightness-110 transition-all cursor-pointer"
             >
               <Scissors className="w-3.5 h-3.5" />
               <span>{tr('Book Now', 'बुक करें')}</span>
@@ -76,12 +76,14 @@ export const EasyBar: React.FC<EasyBarProps> = ({
               type="button"
               onClick={() => onNavigate('customer-dashboard')}
               title={tr('View My Appointments & OTP', 'मेरी बुकिंग और OTP देखें')}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-[#241719] hover:bg-[#2e1d20] text-[#FFF9E8] text-xs font-semibold border border-[#F1E194]/15 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-full bg-[#241719] hover:bg-[#2e1d20] text-[#FFF9E8] text-xs font-semibold border border-[#F1E194]/15 transition-all cursor-pointer"
             >
               <KeyRound className="w-3.5 h-3.5 text-[#F1E194]" />
               <span className="hidden md:inline">{tr('My OTP', 'मेरा OTP')}</span>
               {hasActiveAppointments && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-[10px] font-mono-num font-bold text-[#F1E194] bg-[#5B0E14] px-1.5 py-0.5 rounded-full border border-[#F1E194]/30">
+                  {tr('Ready', 'तैयार')}
+                </span>
               )}
             </button>
 

@@ -54,7 +54,7 @@ export const profiles = pgTable('profiles', {
 // 2. shops
 export const shops = pgTable('shops', {
   id: text('id').primaryKey(),
-  ownerUid: text('owner_uid').notNull().default('owner-royal'),
+  ownerUid: text('owner_uid').notNull().default(''),
   name: text('name').notNull(),
   stateId: text('state_id').notNull().default('st-pb'),
   cityId: text('city_id').notNull().default('ct-jal'),
@@ -62,22 +62,22 @@ export const shops = pgTable('shops', {
   district: text('district').notNull(),
   city: text('city').notNull().default('Jalandhar'),
   address: text('address').notNull(),
-  phone: text('phone').notNull().default('+44 (0) 20 7946 0192'),
-  distance: text('distance').notNull().default('0.4 miles away'),
-  distanceMilesTenths: integer('distance_miles_tenths').notNull().default(4),
-  rating: text('rating').notNull().default('4.9'),
-  reviewCount: integer('review_count').notNull().default(842),
+  phone: text('phone').notNull().default('+91 73555 42644'),
+  distance: text('distance').notNull().default('Nearby'),
+  distanceMilesTenths: integer('distance_miles_tenths').notNull().default(10),
+  rating: text('rating').notNull().default('5.0'),
+  reviewCount: integer('review_count').notNull().default(0),
   isOpen: boolean('is_open').notNull().default(true),
-  closesAt: text('closes_at').notNull().default('21:00'),
-  priceTier: text('price_tier').notNull().default('£58 – £135'),
-  minPrice: integer('min_price').notNull().default(58),
+  closesAt: text('closes_at').notNull().default('21:30'),
+  priceTier: text('price_tier').notNull().default('₹500 – ₹1,500'),
+  minPrice: integer('min_price').notNull().default(500),
   verified: boolean('verified').notNull().default(true),
   approvalStatus: text('approval_status').notNull().default('approved'), // pending | approved | rejected | suspended
   logoUrl: text('logo_url').notNull().default(''),
   image: text('image').notNull(),
   tagline: text('tagline').notNull(),
   about: text('about').notNull(),
-  qrCodeSlug: text('qr_code_slug').notNull().default('the-royal-barber-mayfair'),
+  qrCodeSlug: text('qr_code_slug').notNull().default('barberloo-india'),
   latitude: text('latitude').default(''),
   longitude: text('longitude').default(''),
   pinCode: text('pin_code').default(''),
@@ -93,12 +93,12 @@ export const barbers = pgTable('barbers', {
   shopName: text('shop_name').notNull(),
   name: text('name').notNull(),
   role: text('role').notNull(),
-  rating: text('rating').notNull().default('4.95'),
-  reviewCount: integer('review_count').notNull().default(418),
-  experienceYears: integer('experience_years').notNull().default(12),
+  rating: text('rating').notNull().default('5.0'),
+  reviewCount: integer('review_count').notNull().default(0),
+  experienceYears: integer('experience_years').notNull().default(5),
   specialty: text('specialty').notNull(),
-  nextAvailable: text('next_available').notNull().default('Today, 15:30'),
-  priceFrom: integer('price_from').notNull().default(68),
+  nextAvailable: text('next_available').notNull().default('Today · IST'),
+  priceFrom: integer('price_from').notNull().default(500),
   image: text('image').notNull(),
   bio: text('bio').notNull(),
   featured: boolean('featured').notNull().default(true),
@@ -108,7 +108,7 @@ export const barbers = pgTable('barbers', {
   chairBreakActive: boolean('chair_break_active').notNull().default(false),
   assignedServiceIds: text('assigned_service_ids')
     .notNull()
-    .default('srv-1,srv-2,srv-3,srv-4,srv-5,srv-6'),
+    .default(''),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -120,7 +120,7 @@ export const services = pgTable('services', {
   name: text('name').notNull(),
   category: text('category').notNull().default('Hair'),
   durationMin: integer('duration_min').notNull().default(45),
-  price: integer('price').notNull().default(68),
+  price: integer('price').notNull().default(500),
   description: text('description').notNull(),
   popular: boolean('popular').notNull().default(true),
   active: boolean('active').notNull().default(true),
@@ -133,7 +133,7 @@ export const appointments = pgTable('appointments', {
   id: text('id').primaryKey(),
   customerUid: text('customer_uid').notNull(),
   clientName: text('client_name').notNull(),
-  clientPhone: text('client_phone').notNull().default('+91 98765 43210'),
+  clientPhone: text('client_phone').notNull().default('+91 73555 42644'),
   shopId: text('shop_id').notNull().default('shop-1'),
   shopName: text('shop_name').notNull(),
   barberId: text('barber_id').notNull(),
@@ -181,8 +181,8 @@ export const reviews = pgTable('reviews', {
   appointmentId: text('appointment_id').default(''),
   customerUid: text('customer_uid').notNull(),
   author: text('author').notNull(),
-  role: text('role').notNull().default('Private Client'),
-  organization: text('organization').notNull().default('Sovereign Member'),
+  role: text('role').notNull().default('Verified Client'),
+  organization: text('organization').notNull().default('Member'),
   shopId: text('shop_id').notNull().default('shop-1'),
   barberId: text('barber_id').notNull().default('brb-1'),
   barberName: text('barber_name').notNull(),
@@ -190,7 +190,7 @@ export const reviews = pgTable('reviews', {
   rating: integer('rating').notNull().default(5),
   date: text('date').notNull(),
   comment: text('comment').notNull(),
-  outcome: text('outcome').notNull().default('Verified Flagship Visit'),
+  outcome: text('outcome').notNull().default('Verified Salon Visit'),
   status: text('status').notNull().default('published'), // published | hidden | flagged
   moderationNote: text('moderation_note').notNull().default(''),
   createdAt: timestamp('created_at').defaultNow(),
@@ -386,3 +386,110 @@ export const webhookEvents = pgTable('webhook_events', {
   errorMessage: text('error_message').default(''),
   processedAt: timestamp('processed_at').defaultNow(),
 });
+
+// 19. barber_earnings_ledger (Reconciled accounting ledger for barber earnings and deductions)
+export const barberEarningsLedger = pgTable(
+  'barber_earnings_ledger',
+  {
+    id: text('id').primaryKey(),
+    barberId: text('barber_id').notNull(),
+    shopId: text('shop_id').notNull().default('shop-1'),
+    appointmentId: text('appointment_id').default(''),
+    transactionId: text('transaction_id').notNull(),
+    transactionType: text('transaction_type').notNull(), // appointment_earnings | platform_fee | refund_adjustment | withdrawal_request | withdrawal_paid | withdrawal_reversal | manual_adjustment
+    entryType: text('entry_type').notNull(), // CREDIT | DEBIT
+    amount: integer('amount').notNull(), // in integer INR
+    balanceAfter: integer('balance_after').notNull().default(0),
+    status: text('status').notNull().default('available'), // pending | available | reserved | completed | cancelled | reversed
+    description: text('description').notNull(),
+    paymentReference: text('payment_reference').notNull().default(''),
+    metadataJson: text('metadata_json').default('{}'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => [
+    index('barber_earnings_barber_id_idx').on(table.barberId),
+    index('barber_earnings_status_idx').on(table.status),
+    index('barber_earnings_created_at_idx').on(table.createdAt),
+  ]
+);
+
+// 20. barber_withdrawal_requests (Lifecycle of barber payout withdrawal requests with strict ₹100 minimum)
+export const barberWithdrawalRequests = pgTable(
+  'barber_withdrawal_requests',
+  {
+    id: text('id').primaryKey(),
+    barberId: text('barber_id').notNull(),
+    shopId: text('shop_id').notNull().default('shop-1'),
+    requestedAmount: integer('requested_amount').notNull(), // Min ₹100
+    currency: text('currency').notNull().default('INR'),
+    status: text('status').notNull().default('requested'), // requested | under_review | approved | processing | paid | rejected | failed | reversed
+    beneficiaryId: text('beneficiary_id').default(''),
+    bankName: text('bank_name').notNull(),
+    accountHolderName: text('account_holder_name').notNull(),
+    maskedAccountNumber: text('masked_account_number').notNull(),
+    ifsc: text('ifsc').notNull(),
+    payoutMode: text('payout_mode').notNull().default('manual_bank_transfer'), // razorpayx | manual_bank_transfer
+    rejectionReason: text('rejection_reason').default(''),
+    providerPayoutId: text('provider_payout_id').default(''),
+    providerStatus: text('provider_status').default(''),
+    utrReference: text('utr_reference').default(''),
+    processedBy: text('processed_by').default(''),
+    processedAt: timestamp('processed_at'),
+    notes: text('notes').default(''),
+    idempotencyKey: text('idempotency_key').notNull().unique(),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => [
+    index('barber_withdrawals_barber_id_idx').on(table.barberId),
+    index('barber_withdrawals_status_idx').on(table.status),
+    index('barber_withdrawals_created_at_idx').on(table.createdAt),
+  ]
+);
+
+// 21. barber_payout_beneficiaries (Secured bank accounts for payout disbursement)
+export const barberPayoutBeneficiaries = pgTable(
+  'barber_payout_beneficiaries',
+  {
+    id: text('id').primaryKey(),
+    barberId: text('barber_id').notNull(),
+    shopId: text('shop_id').notNull().default('shop-1'),
+    accountHolderName: text('account_holder_name').notNull(),
+    bankName: text('bank_name').notNull(),
+    ifsc: text('ifsc').notNull(),
+    accountNumberHash: text('account_number_hash').notNull(),
+    maskedAccountNumber: text('masked_account_number').notNull(),
+    encryptedAccountNumber: text('encrypted_account_number').default(''),
+    isVerified: boolean('is_verified').notNull().default(false),
+    isPrimary: boolean('is_primary').notNull().default(true),
+    razorpayFundAccountId: text('razorpay_fund_account_id').default(''),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => [
+    index('barber_beneficiaries_barber_id_idx').on(table.barberId),
+  ]
+);
+
+// 22. financial_audit_logs (Immutable audit logs for all financial operations)
+export const financialAuditLogs = pgTable(
+  'financial_audit_logs',
+  {
+    id: text('id').primaryKey(),
+    actorUid: text('actor_uid').notNull(),
+    actorRole: text('actor_role').notNull(),
+    action: text('action').notNull(),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    previousState: text('previous_state').default('{}'),
+    newState: text('new_state').default('{}'),
+    amount: integer('amount').default(0),
+    notes: text('notes').default(''),
+    ipAddress: text('ip_address').default(''),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => [
+    index('financial_audit_entity_idx').on(table.entityType, table.entityId),
+    index('financial_audit_created_at_idx').on(table.createdAt),
+  ]
+);
