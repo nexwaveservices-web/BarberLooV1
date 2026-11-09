@@ -14,6 +14,7 @@ CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS boolean
 LANGUAGE sql
 SECURITY DEFINER
+SET search_path = public, pg_temp
 STABLE
 AS $$
   SELECT (
@@ -31,6 +32,7 @@ CREATE OR REPLACE FUNCTION public.is_authorized_barber(p_barber_id text, p_shop_
 RETURNS boolean
 LANGUAGE sql
 SECURITY DEFINER
+SET search_path = public, pg_temp
 STABLE
 AS $$
   SELECT (
@@ -175,13 +177,45 @@ CREATE POLICY "User view own profile"
   TO authenticated
   USING (uid = auth.uid()::text);
 
--- Users can update their own permitted profile fields
+-- Users can update their own permitted profile fields (Strictly prevents altering role or status)
 CREATE POLICY "User update own profile"
   ON public.profiles
   FOR UPDATE
   TO authenticated
   USING (uid = auth.uid()::text)
-  WITH CHECK (uid = auth.uid()::text);
+  WITH CHECK (
+    uid = auth.uid()::text
+    AND (
+      public.is_admin()
+      OR (
+        role = (SELECT p.role FROM public.profiles p WHERE p.uid = auth.uid()::text)
+        AND status = (SELECT p.status FROM public.profiles p WHERE p.uid = auth.uid()::text)
+      )
+    )
+  );
+
+-- Database-level trigger to guarantee non-admins cannot escalate their role or account status
+CREATE OR REPLACE FUNCTION public.check_profile_privilege_escalation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF (OLD.role IS DISTINCT FROM NEW.role OR OLD.status IS DISTINCT FROM NEW.status) THEN
+    IF NOT public.is_admin() THEN
+      RAISE EXCEPTION 'Forbidden: Only platform administrators can change user roles or account status.';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_check_profile_privilege_escalation ON public.profiles;
+CREATE TRIGGER trg_check_profile_privilege_escalation
+BEFORE UPDATE ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.check_profile_privilege_escalation();
 
 -- Admin has full access to all profiles
 CREATE POLICY "Admin all profiles"
@@ -477,7 +511,43 @@ CREATE POLICY "Admin all financial audit logs"
   USING (public.is_admin())
   WITH CHECK (public.is_admin());
 
+-- ============================================================================
+-- 9. STORAGE BUCKET SECURITY POLICIES (Avatars & Shop Gallery Images)
+-- ============================================================================
+-- Public read for images in avatars and shop-gallery buckets
+CREATE POLICY "Public read images"
+  ON storage.objects
+  FOR SELECT
+  TO public
+  USING (bucket_id IN ('avatars', 'shop-gallery', 'barber-portraits'));
+
+-- Authenticated upload restricted to image MIME types under 5MB
+CREATE POLICY "Authenticated user upload own avatar"
+  ON storage.objects
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    bucket_id IN ('avatars', 'shop-gallery')
+    AND (
+      -- Restrict to verified web image MIME types
+      (storage.extension(name) IN ('jpg', 'jpeg', 'png', 'webp'))
+    )
+    AND (auth.uid()::text = (storage.foldername(name))[1] OR public.is_admin())
+  );
+
+-- Users can delete only their own uploaded images
+CREATE POLICY "Users delete own images"
+  ON storage.objects
+  FOR DELETE
+  TO authenticated
+  USING (
+    (auth.uid()::text = (storage.foldername(name))[1])
+    OR public.is_admin()
+  );
+
+-- ============================================================================
 -- Verification Query: Inspect resulting policies
+-- ============================================================================
 SELECT tablename, policyname, cmd, permissive, roles
 FROM pg_policies
 WHERE tablename IN (

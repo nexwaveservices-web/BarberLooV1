@@ -74,12 +74,8 @@ export const HomePage: React.FC<HomePageProps> = ({
     currentUserProfile?.role === 'barber' ||
     currentUserProfile?.role === 'shop_owner';
 
-  const [selectedStateId, setSelectedStateId] = useState<string>(() => {
-    return currentUserProfile?.stateId || currentUserProfile?.state_id || 'all';
-  });
-  const [selectedCityId, setSelectedCityId] = useState<string>(() => {
-    return currentUserProfile?.cityId || currentUserProfile?.city_id || 'all';
-  });
+  const [selectedStateId, setSelectedStateId] = useState<string>('all');
+  const [selectedCityId, setSelectedCityId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeServiceFilter, setActiveServiceFilter] = useState<string>('All');
   const [minRatingFilter, setMinRatingFilter] = useState<number>(0);

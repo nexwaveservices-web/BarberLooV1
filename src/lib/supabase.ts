@@ -199,20 +199,32 @@ function ensureRealtimeChannel() {
     sharedRealtimeChannel = supabase
       .channel('barberloo-realtime-india')
       .on('broadcast', { event: 'state:updated' }, (msg) => {
-        realtimeListeners.forEach((fn) =>
-          fn({ type: 'state:updated', payload: msg.payload })
-        );
+        realtimeListeners.forEach((fn) => {
+          try {
+            fn({ type: 'state:updated', payload: msg.payload });
+          } catch {
+            // ignore listener error
+          }
+        });
       })
       .on(
         'postgres_changes',
         { event: '*', schema: 'public' },
         (changePayload) => {
-          realtimeListeners.forEach((fn) =>
-            fn({ type: 'state:updated', payload: changePayload })
-          );
+          realtimeListeners.forEach((fn) => {
+            try {
+              fn({ type: 'state:updated', payload: changePayload });
+            } catch {
+              // ignore listener error
+            }
+          });
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (err) {
+          // Channel warning handled silently
+        }
+      });
   } catch {
     // ignore channel init error
   }
@@ -220,13 +232,23 @@ function ensureRealtimeChannel() {
 
 export function broadcastSupabaseEvent(type: string, payload: any = {}) {
   try {
-    realtimeListeners.forEach((fn) => fn({ type, payload }));
+    realtimeListeners.forEach((fn) => {
+      try {
+        fn({ type, payload });
+      } catch {
+        // ignore listener error
+      }
+    });
     if (sharedRealtimeChannel) {
-      sharedRealtimeChannel.send({
-        type: 'broadcast',
-        event: type,
-        payload,
-      });
+      sharedRealtimeChannel
+        .send({
+          type: 'broadcast',
+          event: type,
+          payload,
+        })
+        .catch(() => {
+          // Silently ignore broadcast failure when channel is connecting/offline
+        });
     }
   } catch {
     // ignore broadcast errors

@@ -78,16 +78,16 @@ declare global {
   }
 }
 
-export const BARBERLOO_DEFAULT_LIVE_KEY_ID = 'rzp_live_Tu5l5vmBvE6xHW';
+export const BARBERLOO_DEFAULT_LIVE_KEY_ID = 'rzp_live_TxxTT810pVluT8';
 
 export function getRazorpayKey(): string {
-  // 1. Check local storage override, but purge any stale test keys (which cause Razorpay to crash in live mode)
+  // 1. Check local storage override, but purge any stale test keys or previous keys
   try {
     const stored = localStorage.getItem('barberloo_razorpay_key_id');
     if (stored) {
       const cleanStored = stored.trim();
-      // If an old test key or placeholder was stored in the user's browser, clear it immediately
-      if (cleanStored.startsWith('rzp_test_') || cleanStored.includes('YOUR_KEY_ID')) {
+      // If an old test key, placeholder, or previous live key was stored, update/clear it
+      if (cleanStored.startsWith('rzp_test_') || cleanStored.includes('YOUR_KEY_ID') || cleanStored === 'rzp_live_Tu5l5vmBvE6xHW') {
         localStorage.removeItem('barberloo_razorpay_key_id');
       } else if (cleanStored.startsWith('rzp_live_')) {
         return cleanStored;

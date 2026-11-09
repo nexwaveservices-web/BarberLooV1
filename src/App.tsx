@@ -512,6 +512,8 @@ export default function App() {
         setActiveUserUid('');
         setCurrentUserProfile(null);
       }
+    }).catch((err) => {
+      console.warn('[Supabase Auth] Session check notice:', err?.message || err);
     });
 
     // 3. Listen to all Supabase Auth lifecycle events (Login, Refresh, Logout, Token Rotation)
@@ -832,10 +834,11 @@ export default function App() {
   };
 
   const userRole = currentUserProfile?.role || null;
-  const isOwnerAdmin = userRole === 'admin';
+  const isSuspended = currentUserProfile?.status === 'suspended';
+  const isOwnerAdmin = userRole === 'admin' && !isSuspended;
   const canAccessBarberConsole =
-    isOwnerAdmin || userRole === 'barber' || userRole === 'shop_owner';
-  const canAccessCustomerPortal = Boolean(currentUserProfile);
+    !isSuspended && (isOwnerAdmin || userRole === 'barber' || userRole === 'shop_owner');
+  const canAccessCustomerPortal = Boolean(currentUserProfile) && !isSuspended;
 
   const renderRoleGuard = (title: string, message: string) => (
     <div className="min-h-[75vh] bg-[#FAF6EA] flex items-center justify-center px-5 py-16">

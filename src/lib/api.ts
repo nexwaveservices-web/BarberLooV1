@@ -749,7 +749,7 @@ export const apiCreateRazorpayOrder = async (payload: {
 
   let activeKey = res?.keyId || getRazorpayKey();
   if (activeKey.startsWith('rzp_test_') || activeKey.includes('YOUR_KEY_ID') || !activeKey.startsWith('rzp_live_')) {
-    activeKey = 'rzp_live_Tu5l5vmBvE6xHW';
+    activeKey = 'rzp_live_TxxTT810pVluT8';
   }
 
   const isValidOrder =

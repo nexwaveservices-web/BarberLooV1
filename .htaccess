@@ -31,8 +31,24 @@ AddType font/woff2 woff2
 AddType font/woff woff
 </IfModule>
 
-# Security: Block sensitive file inspection
-<FilesMatch "^\.">
-    Order allow,deny
-    Deny from all
+# Security: Disable directory browsing
+Options -Indexes
+
+# Security: Production Defense Headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set Permissions-Policy "camera=(), microphone=(), geolocation=(self)"
+</IfModule>
+
+# Security: Block sensitive file inspection (.env, .git, .sql, .ts, package.json, server.ts, Dockerfile)
+<FilesMatch "(\.env.*|\.git.*|\.lock$|\.sql$|\.ts$|\.tsx$|package(-lock)?\.json$|tsconfig.*\.json$|Dockerfile.*|docker-compose.*|server\.ts|wp-config\.php|readme\.html)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
 </FilesMatch>
