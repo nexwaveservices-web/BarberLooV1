@@ -5,3 +5,11 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Credentials & Key Exports
+*.csv
+*.pem
+*.key
+rzp-*
+secret*
+

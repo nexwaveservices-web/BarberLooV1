@@ -8,17 +8,32 @@ declare global {
 
 export const createPool = () => {
   if (!global._postgresPool) {
-    global._postgresPool = new Pool({
-      host: process.env.SQL_HOST,
-      user: process.env.SQL_USER,
-      password: process.env.SQL_PASSWORD,
-      database: process.env.SQL_DB_NAME,
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 15000,
-      keepAlive: true,
-      keepAliveInitialDelayMillis: 10000,
-    });
+    const poolConfig = process.env.DATABASE_URL
+      ? {
+          connectionString: process.env.DATABASE_URL,
+          ssl:
+            process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1')
+              ? false
+              : { rejectUnauthorized: false },
+          max: 10,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 15000,
+          keepAlive: true,
+          keepAliveInitialDelayMillis: 10000,
+        }
+      : {
+          host: process.env.SQL_HOST,
+          user: process.env.SQL_USER,
+          password: process.env.SQL_PASSWORD,
+          database: process.env.SQL_DB_NAME,
+          max: 10,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 15000,
+          keepAlive: true,
+          keepAliveInitialDelayMillis: 10000,
+        };
+
+    global._postgresPool = new Pool(poolConfig);
 
     global._postgresPool.on('error', (err: any) => {
       // Gracefully handle expected idle socket reclamation by Postgres server

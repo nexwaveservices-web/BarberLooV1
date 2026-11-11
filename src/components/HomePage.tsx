@@ -92,6 +92,25 @@ export const HomePage: React.FC<HomePageProps> = ({
 
   const activeServicesList = services.filter((s: any) => s.active !== false);
 
+  const availableCategories = React.useMemo(() => {
+    const list = ['All'];
+    const seen = new Set<string>();
+    activeServicesList.forEach((s: any) => {
+      const cat = String(s.category || '').trim();
+      if (cat && !seen.has(cat)) {
+        seen.add(cat);
+        list.push(cat);
+      }
+    });
+    ['Precision Haircuts', 'Beard Architecture', 'Traditional Shaves', 'Complete Rituals'].forEach((c) => {
+      if (!seen.has(c)) {
+        seen.add(c);
+        list.push(c);
+      }
+    });
+    return list;
+  }, [activeServicesList]);
+
   const filteredServices = activeServicesList
     .filter((srv: any) => {
       const matchesTab =
@@ -750,13 +769,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {[
-                'All',
-                'Precision Haircuts',
-                'Beard Architecture',
-                'Traditional Shaves',
-                'Complete Rituals',
-              ].map((cat) => (
+              {availableCategories.map((cat) => (
                 <button
                   key={cat}
                   type="button"

@@ -216,11 +216,14 @@ export const ShopPage: React.FC<ShopPageProps> = ({
 
         // Category filter
         if (selectedCategory !== 'all') {
-          const hasCat = safeServices.some(
-            (srv: any) =>
-              (srv.shopId === s.id || srv.shop_id === s.id) &&
-              String(srv.category || '').toLowerCase() === selectedCategory.toLowerCase()
-          );
+          const catQuery = selectedCategory.toLowerCase();
+          const hasCat = safeServices.some((srv: any) => {
+            const matchesShop = srv.shopId === s.id || srv.shop_id === s.id;
+            if (!matchesShop) return false;
+            const cat = String(srv.category || '').toLowerCase();
+            const name = String(srv.name || '').toLowerCase();
+            return cat.includes(catQuery) || name.includes(catQuery);
+          });
           if (!hasCat) return false;
         }
 
@@ -1445,7 +1448,18 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 </span>
               </div>
               <div className="space-y-2">
-                {safeWorkingHours.map((wh: any) => (
+                {(safeWorkingHours.length > 0
+                  ? safeWorkingHours
+                  : [
+                      { day: 'Monday', hours: '09:30 – 21:30 IST' },
+                      { day: 'Tuesday', hours: '09:30 – 21:30 IST' },
+                      { day: 'Wednesday', hours: '09:30 – 21:30 IST' },
+                      { day: 'Thursday', hours: '09:30 – 21:30 IST' },
+                      { day: 'Friday', hours: '09:30 – 21:30 IST' },
+                      { day: 'Saturday', hours: '09:30 – 21:30 IST' },
+                      { day: 'Sunday', hours: '09:30 – 21:30 IST' },
+                    ]
+                ).map((wh: any) => (
                   <div
                     key={wh.id || wh.day || Math.random()}
                     className="flex items-center justify-between text-xs py-2 px-3 rounded-[12px] hover:bg-[#E8E1D2]/40 transition-colors"

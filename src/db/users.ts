@@ -1758,7 +1758,7 @@ export async function processAppointmentRefund(
 
   let razorpayRefundId = '';
   const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || 'rzp_live_TxxTT810pVluT8';
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || 'Gz81X88LKTT655ajxrAGTLFT';
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
   if (
     appointment.razorpayPaymentId &&

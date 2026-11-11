@@ -148,6 +148,7 @@ async function startServer() {
     /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
     /^https:\/\/[a-z0-9-]+\.run\.app$/,
     /^https:\/\/[a-z0-9-]+\.aistudio\.google\.com$/,
+    /^https:\/\/[a-z0-9-]+\.onrender\.com$/,
   ];
 
   app.use((req, res, next) => {
@@ -300,8 +301,8 @@ async function startServer() {
     next(err);
   });
 
-  // Health Check Endpoint
-  app.get('/api/health', (_req, res) => {
+  // Health Check Endpoint (supports /api/health and Render /healthz)
+  app.get(['/api/health', '/healthz'], (_req, res) => {
     res.json({
       status: 'ok',
       service: 'barberloo',
@@ -1534,7 +1535,7 @@ async function startServer() {
   // 5l. Razorpay Webhook Endpoint (Cryptographically Verified & Idempotent)
   app.post('/api/webhooks/razorpay', async (req: any, res) => {
     try {
-      const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET || 'Gz81X88LKTT655ajxrAGTLFT';
+      const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET;
       const signature = (req.headers['x-razorpay-signature'] as string) || '';
 
       // Verify webhook HMAC-SHA256 signature against raw request body
@@ -2809,7 +2810,7 @@ async function startServer() {
 
         const keyId =
           process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || 'rzp_live_TxxTT810pVluT8';
-        const keySecret = process.env.RAZORPAY_KEY_SECRET || 'Gz81X88LKTT655ajxrAGTLFT';
+        const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
         // Only attempt external Razorpay API order creation if a live key and matching non-test secret are provided
         const isEligibleLiveCredentials =
@@ -2900,15 +2901,13 @@ async function startServer() {
           razorpay_signature,
         } = req.body;
 
-        const keySecret = process.env.RAZORPAY_KEY_SECRET || 'Gz81X88LKTT655ajxrAGTLFT';
+        const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
         if (!keySecret || keySecret.includes('YOUR_RAZORPAY_SECRET')) {
-          if (process.env.NODE_ENV === 'production') {
-            return res.status(500).json({
-              verified: false,
-              error: 'Razorpay payment verification secret (RAZORPAY_KEY_SECRET) is not configured on the production backend server.',
-            });
-          }
+          return res.status(500).json({
+            verified: false,
+            error: 'Razorpay payment verification secret (RAZORPAY_KEY_SECRET) is not configured on the production backend server.',
+          });
         }
 
         if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
@@ -2922,7 +2921,7 @@ async function startServer() {
         const sigBuf = Buffer.from(String(razorpay_signature).trim(), 'hex');
         let isAuthentic = false;
 
-        const secretToUse = keySecret || 'Gz81X88LKTT655ajxrAGTLFT';
+        const secretToUse = keySecret;
         if (!secretToUse) {
           return res.status(500).json({
             verified: false,
@@ -2971,7 +2970,7 @@ async function startServer() {
     });
   }
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`BarberLoo Full-Stack Server listening on http://0.0.0.0:${PORT}`);
     syncSupabaseWithPostgres().catch((e) => console.warn('[Sync Error]', e));

@@ -436,14 +436,16 @@ add_action('rest_api_init', function () {
 });
 
 function barberloo_plugin_get_razorpay_credentials() {
-    $key_id = defined('RAZORPAY_KEY_ID') ? RAZORPAY_KEY_ID : get_option('barberloo_razorpay_key_id', 'rzp_live_TxxTT810pVluT8');
-    $key_secret = defined('RAZORPAY_KEY_SECRET') ? RAZORPAY_KEY_SECRET : get_option('barberloo_razorpay_key_secret', 'Gz81X88LKTT655ajxrAGTLFT');
+    // 1. Secret MUST come from server environment (wp-config.php or OS env), never hardcoded
+    $key_id = defined('RAZORPAY_KEY_ID') ? RAZORPAY_KEY_ID : getenv('RAZORPAY_KEY_ID');
+    $key_secret = defined('RAZORPAY_KEY_SECRET') ? RAZORPAY_KEY_SECRET : getenv('RAZORPAY_KEY_SECRET');
     
-    if (empty($key_id) && getenv('RAZORPAY_KEY_ID')) {
-        $key_id = getenv('RAZORPAY_KEY_ID');
+    // 2. Fall back to secure database wp_options if set via admin settings
+    if (empty($key_id)) {
+        $key_id = get_option('barberloo_razorpay_key_id', 'rzp_live_TxxTT810pVluT8');
     }
-    if (empty($key_secret) && getenv('RAZORPAY_KEY_SECRET')) {
-        $key_secret = getenv('RAZORPAY_KEY_SECRET');
+    if (empty($key_secret)) {
+        $key_secret = get_option('barberloo_razorpay_key_secret', '');
     }
 
     return [

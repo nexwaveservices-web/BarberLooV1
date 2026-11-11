@@ -115,7 +115,9 @@ export const BookingPage: React.FC<BookingPageProps> = ({
   const [shopServices, setShopServices] = useState<any[]>(() => {
     if (detectedShopId) {
       return services.filter(
-        (s: any) => s.shopId === detectedShopId && s.active !== false
+        (s: any) =>
+          (s.shopId === detectedShopId || s.shop_id === detectedShopId) &&
+          s.active !== false
       );
     }
     return [];
@@ -124,7 +126,7 @@ export const BookingPage: React.FC<BookingPageProps> = ({
     if (detectedShopId) {
       return barbers.filter(
         (b: any) =>
-          b.shopId === detectedShopId &&
+          (b.shopId === detectedShopId || b.shop_id === detectedShopId) &&
           b.active !== false &&
           b.verificationStatus !== 'suspended'
       );

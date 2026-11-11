@@ -430,14 +430,16 @@ add_action('rest_api_init', function () {
 });
 
 function barberloo_get_razorpay_credentials() {
-    $key_id = defined('RAZORPAY_KEY_ID') ? RAZORPAY_KEY_ID : get_option('barberloo_razorpay_key_id', 'rzp_live_TxxTT810pVluT8');
-    $key_secret = defined('RAZORPAY_KEY_SECRET') ? RAZORPAY_KEY_SECRET : get_option('barberloo_razorpay_key_secret', 'Gz81X88LKTT655ajxrAGTLFT');
+    // 1. Secret MUST come from server environment (wp-config.php or OS env), never hardcoded
+    $key_id = defined('RAZORPAY_KEY_ID') ? RAZORPAY_KEY_ID : getenv('RAZORPAY_KEY_ID');
+    $key_secret = defined('RAZORPAY_KEY_SECRET') ? RAZORPAY_KEY_SECRET : getenv('RAZORPAY_KEY_SECRET');
     
-    if (empty($key_id) && getenv('RAZORPAY_KEY_ID')) {
-        $key_id = getenv('RAZORPAY_KEY_ID');
+    // 2. Fall back to secure database wp_options if set via admin settings
+    if (empty($key_id)) {
+        $key_id = get_option('barberloo_razorpay_key_id', 'rzp_live_TxxTT810pVluT8');
     }
-    if (empty($key_secret) && getenv('RAZORPAY_KEY_SECRET')) {
-        $key_secret = getenv('RAZORPAY_KEY_SECRET');
+    if (empty($key_secret)) {
+        $key_secret = get_option('barberloo_razorpay_key_secret', '');
     }
 
     return [
@@ -510,32 +512,33 @@ function barberloo_rest_verify_razorpay_payment($request) {
     $payment_id = sanitize_text_field($params['razorpay_payment_id'] ?? '');
     $signature = sanitize_text_field($params['razorpay_signature'] ?? '');
 
-    if (empty($payment_id)) {
+    if (empty($payment_id) || empty($order_id) || empty($signature)) {
         return new WP_REST_Response([
             'verified' => false,
-            'error'    => 'Missing payment ID',
+            'error'    => 'Missing payment verification parameters: razorpay_order_id, razorpay_payment_id, and razorpay_signature are all required.',
         ], 400);
     }
 
-    if (!empty($order_id) && !empty($signature) && !empty($key_secret)) {
-        $expected_sig = hash_hmac('sha256', $order_id . '|' . $payment_id, $key_secret);
-        if (hash_equals($expected_sig, $signature)) {
-            return new WP_REST_Response([
-                'verified'  => true,
-                'paymentId' => $payment_id,
-                'orderId'   => $order_id,
-            ], 200);
-        }
+    if (empty($key_secret)) {
         return new WP_REST_Response([
             'verified' => false,
-            'error'    => 'Invalid cryptographic signature.',
-        ], 400);
+            'error'    => 'Razorpay key secret is not configured on the WordPress server (define RAZORPAY_KEY_SECRET in wp-config.php).',
+        ], 500);
+    }
+
+    $expected_sig = hash_hmac('sha256', $order_id . '|' . $payment_id, $key_secret);
+    if (hash_equals($expected_sig, $signature)) {
+        return new WP_REST_Response([
+            'verified'  => true,
+            'paymentId' => $payment_id,
+            'orderId'   => $order_id,
+        ], 200);
     }
 
     return new WP_REST_Response([
-        'verified'  => true,
-        'paymentId' => $payment_id,
-    ], 200);
+        'verified' => false,
+        'error'    => 'Invalid cryptographic signature.',
+    ], 400);
 }
 
 function barberloo_rest_create_wc_order($request) {

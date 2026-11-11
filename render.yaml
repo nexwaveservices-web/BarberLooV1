@@ -1,36 +1,26 @@
 services:
   - type: web
-    name: barberloo-backend
-    env: node
-    plan: starter
+    name: barberloo
+    runtime: node
+    plan: free
     region: singapore
     buildCommand: npm install && npm run build
     startCommand: npm start
-    healthCheckPath: /api/health
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3000
+      - key: VITE_SUPABASE_URL
+        value: https://ddusvfylhifoniobzmcq.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        value: sb_publishable_bUpxVfRsVPz_d0qg1QrrNA_m7zM66t6
       - key: RAZORPAY_KEY_ID
-        sync: false
+        value: rzp_live_TxxTT810pVluT8
+      - key: VITE_RAZORPAY_KEY_ID
+        value: rzp_live_TxxTT810pVluT8
       - key: RAZORPAY_KEY_SECRET
         sync: false
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: AUTH_SECRET
-        generateValue: true
-      - key: PAYOUT_OTP_SECRET
-        generateValue: true
-      - key: SQL_HOST
-        sync: false
-      - key: SQL_DB_NAME
-        sync: false
-      - key: SQL_USER
-        sync: false
-      - key: SQL_PASSWORD
+      - key: DATABASE_URL
         sync: false
